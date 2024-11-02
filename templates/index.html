@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+<div id="userId">3bcd7f1a-c086-494e-b91d-f073801b5852</div>
+<div class="container">
+    <form action="" id="form">
+        <div class="container">
+            <label for="ticker">Ticker</label><br>
+            <input type="text" name="ticker" id="ticker">
+        </div>
+        <div class="container">
+            <label for="quantity">Quantity</label><br>
+            <input type="number" name="quantity" id="quantity">
+        </div>
+        <input type="submit" value="Submit">
+    </form>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const user_id = document.getElementById('userId').textContent;
+
+        const socket = new WebSocket(`ws://${window.location.host}/stream/trade`);
+
+        socket.onopen = function(e) {
+            console.log('connected');
+            socket.send(JSON.stringify({user_id: user_id}));
+        }
+
+        socket.onmessage = function(e) {
+            const message = JSON.parse(e.data);
+            console.log(message);
+        }
+
+        // -----------------------------------
+        // Form submission
+        // -----------------------------------
+        document.getElementById('form').addEventListener('submit', function(e){
+            e.preventDefault();
+            const formData = new FormData(this);
+
+            const data = {};
+            data['type'] = 'market_order';
+            data['market_order'] = Object.fromEntries(formData.entries());
+
+            console.log(data);
+
+            socket.send(JSON.stringify(data));
+        });
+    });
+</script>
+</body>
+</html>
