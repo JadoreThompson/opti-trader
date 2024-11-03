@@ -2,7 +2,6 @@
 # from jinja2 import Jin
 
 # FA
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -10,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 # Local
 import config
+from tests.test_config import *
 from exceptions import DoesNotExist, InvalidError, DuplicateError
 from middleware import RateLimitMiddleware
 from routes.accounts import accounts
@@ -51,4 +51,5 @@ async def index(request: Request):
 
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run("app:app")

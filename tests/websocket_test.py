@@ -12,11 +12,11 @@ from enums import OrderType
 from models import OrderRequest, MarketOrder
 
 
-async def main():
+async def main(user_id):
     BASE_URL = "ws://127.0.0.1:8000"
 
     async with websockets.connect(BASE_URL + '/stream/trade') as socket:
-        await socket.send(json.dumps({'user_id': "a7e1d03f-ee09-40e6-9cbc-7ba78ff1bdcb"}))
+        await socket.send(json.dumps({'user_id': user_id}))
         m = await socket.recv()
         # while True:
             # message = {
@@ -55,8 +55,8 @@ async def main():
 
 
 
-def run():
-    asyncio.run(main())
+def run(user_id):
+    asyncio.run(main(user_id))
 
 
 def run2():
@@ -74,8 +74,9 @@ def run2():
 
 
 def start():
+    user_id = input("User id: ")
     threads = [
-        threading.Thread(target=run, daemon=True),
+        threading.Thread(target=run, daemon=True, args=(user_id,)),
         # threading.Thread(target=run2, daemon=True),
     ]
 

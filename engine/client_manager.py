@@ -84,10 +84,11 @@ class ClientManager:
 
     async def handle_incoming_requests(self):
         """
-        Filters and cleans incoming request
-        before sending off to the orderbook & matching engine
-        for facilitation
-        :return:
+            Filters and cleans incoming request
+            before sending off to the orderbook & matching engine
+            for facilitation
+        
+            :return:
         """
         while True:
             message = await self.socket.receive_text()
@@ -155,10 +156,10 @@ class ClientManager:
             if message.market_order:
                 data = message.market_order
 
-            price = None
-            while not price:
-                price = self.ticker_quotes.get(data.ticker, None)
-                await asyncio.sleep(0.1)
+            # price = None
+            # while not price:
+            #     price = self.ticker_quotes.get(data.ticker, None)
+            #     await asyncio.sleep(0.1)
 
             data = data.dict()
             if data.get('stop_loss', None):

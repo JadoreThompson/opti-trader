@@ -14,3 +14,10 @@ class DuplicateError(Exception):
     def __init__(self, message):
         self.message = message
         super().__init__(self.message)
+
+
+class InvalidAction(Exception):
+    def __init__(self, message):
+        self.message = message
+        super().__init__(self.message)
+                        
