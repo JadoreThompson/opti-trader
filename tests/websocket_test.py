@@ -31,10 +31,11 @@ async def main(user_id, order_id=None):
         order_ids = []
         for _ in range(2):
             message = {
-                'type': 'market_order',
-                'market_order': {
+                'type': 'limit_order',
+                'limit_order': {
                     'ticker': 'BTC/USDT',
                     'quantity': random.randint(100, 100000),
+                    'limit_price': 130,
                     'stop_loss': {
                         'price': 100
                     },

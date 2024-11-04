@@ -72,11 +72,12 @@ class MatchingEngine:
         action_type = data["type"]
         channel = f"trades_{data['user_id']}"
         
-        # Market Order
         if action_type == OrderType.MARKET:
-            await self.handle_buy_order(data, channel)
+            await self.handle_market_order(data, channel)
             
-        # Close Order
+        elif action_type == OrderType.LIMIT:
+            await self.handle_limit_order(channel, data)
+            
         elif action_type == OrderType.CLOSE:
             await self.handle_sell_order(data, channel)
             
@@ -114,7 +115,7 @@ class MatchingEngine:
             pass
     
     
-    async def place_tp_sl(self, data) -> None:
+    async def place_tp_sl(self, data: dict) -> None:
         try:
             # TP
             if data.get('take_profit', None):
@@ -150,7 +151,7 @@ class MatchingEngine:
             print('-' * 10)
             
     
-    async def handle_buy_order(self, data: dict, channel: str) -> None:
+    async def handle_market_order(self, data: dict, channel: str) -> None:
         """
         Handles the creation and submission to orderbook
         for a buy order
@@ -213,9 +214,12 @@ class MatchingEngine:
                 await self.order_manager.update_order_in_db(data)
 
             except InvalidAction as e:
-                print("Error in handling buy order\n", str(e))
-                print('-' * 10)
-                await self.publish_update_to_client(channel=channel, message=str(e))
+                await self.publish_update_to_client(channel=channel, message=json.dumps({
+                    'status': 'error',
+                    'message': str(e),
+                    'order_id': data['order_id']
+                }))
+                
             finally:
                 return
         
@@ -347,6 +351,50 @@ class MatchingEngine:
         await self.order_manager.update_touched_orders(touched_orders)
         return (1, )
     
+    
+    async def handle_limit_order(self, channel: str, order: dict) -> None:
+        """
+        Places a bid order on the desired price
+        for the limit order along with placing the TP and SL of the order
+
+        Args:
+            order (dict)
+        """        
+        
+        try:
+            order_list = [order['created_at'], order['quantity'], order]
+            self.bids[order['limit_price']].append(order_list)
+            
+            await self.place_tp_sl(order)
+            await self.order_manager.add_entry(
+                order['order_id'],
+                order_list,
+                order
+            )
+            
+            await self.publish_update_to_client(
+                channel=channel,
+                message=json.dumps({
+                    'status': 'success',
+                    'message': 'Limit order created successfully',
+                    'order_id': order['order_id']
+                })
+            )
+        
+        except InvalidAction as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                    'status': 'error',
+                    'message': str(e),
+                    'order_id': order['order_id']
+                }))
+        
+        except DoesNotExist:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                    'status': 'error',
+                    'message': str(e),
+                    'order_id': order['order_id']
+                }))
+        
     
     async def handle_sell_order(self, data: dict, channel: str) -> None:
         """

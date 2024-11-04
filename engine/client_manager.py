@@ -145,7 +145,6 @@ class ClientManager:
                 message.type == OrderType.LIMIT:
                 order: dict = await self.create_order_in_db(message)
             
-            
             elif message.type == OrderType.CLOSE:
                 order_id = message.close_order.order_id
                 
@@ -156,7 +155,6 @@ class ClientManager:
                 market_price = round(random.uniform(100, 150), 2)
                 additional_fields['market_price'] = market_price
                 order: dict = await self.retrieve_order(order_id)
-                
             
             elif message.type == OrderType.TAKE_PROFIT_CHANGE:
                 order_id = message.take_profit_change.order_id
@@ -197,14 +195,15 @@ class ClientManager:
             dict: A dictionary representation of the order without the _sa_instance_state key
         """        
         try:
-            message_dict = message.limit_order or message.market_order
+            message_dict = message.limit_order if message.limit_order else message.market_order
             message_dict = message_dict.model_dump()
             
             message_dict['stop_loss'] = message_dict.get('stop_loss', {}).get('price', None)
             message_dict['take_profit'] = message_dict.get('take_profit', {}).get('price', None)
             message_dict['user_id'] = self.user_id
             message_dict['order_type'] = message.type
-            message_dict['price'] = round(random.uniform(100, 150), 2)
+            message_dict['price'] = message_dict.get('limit_price', None)\
+                if message_dict.get('limit_price', None) else round(random.uniform(100, 150), 2)
     
             # Inserting
             async with get_db_session() as session:
@@ -223,7 +222,7 @@ class ClientManager:
                 await session.commit()
                 return order
         except Exception as e:
-            print("[SAVE ORDER IN DB][ERROR] >> ", type(e), str(e))
+            print("[CREATE ORDER IN DB][ERROR] >> ", type(e), str(e))
             raise Exception
     
     
