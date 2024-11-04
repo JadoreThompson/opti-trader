@@ -1,6 +1,8 @@
 from sqlalchemy import update, select
 from datetime import datetime
 from uuid import UUID
+import json
+from collections import defaultdict
 
 # Local
 from utils.db import get_db_session
@@ -11,10 +13,10 @@ from enums import OrderStatus
 
 class OrderManager:
     def __init__(self) -> None:
-        self._orders = {}
+        self._orders = defaultdict(dict)
 
 
-    async def _validate_sl_tp_entry(
+    async def _validate_sl_tp_and_entry(
             self,
             order: dict = None,
             stop_loss_price: float = None,
@@ -59,14 +61,12 @@ class OrderManager:
         return True
 
 
-    async def add_order(
-            self,
-            order_id: str, 
-            entry_price: float,
-            order_list: list,
-            stop_loss_price: float = None,
-            take_profit_price: float = None,
-        ) -> None:
+    async def add_entry(
+        self,
+        order_id: str, 
+        entry_list: list,
+        order: dict
+    ) -> None:
         """Adds order to orders dictionary
 
         Args:
@@ -76,22 +76,80 @@ class OrderManager:
             stop_loss_price (float, optional): _description_. Defaults to None.
             take_profit_price (float, optional): _description_. Defaults to None.
         """        
-        
         try:
-            if await self._validate_sl_tp_entry(
-                stop_loss_price=stop_loss_price,
-                take_profit_price=take_profit_price,
-                entry_price=entry_price
+            if await self._validate_sl_tp_and_entry(
+                stop_loss_price=order['stop_loss'],
+                take_profit_price=order['take_profit'],
+                entry_price=order.get('filled_price', None) if order.get('filled_price', None) else order['price']
             ):
-                self._orders[order_id] = {
-                    "entry_price": entry_price,
-                    "stop_loss_price": stop_loss_price,
-                    "take_profit_price": take_profit_price,
-                    "order_list": order_list
-                }
+                self._orders[order_id]['entry_price'] = order.get('filled_price', None) if \
+                    order.get('filled_price', None) else order.get('price', None)                    
+                self._orders[order_id]['entry_list'] = entry_list
+                
+                print(json.dumps(self._orders[order_id], indent=4))
+                print('-' * 10)
         except InvalidAction:
-            raise    
+            raise
 
+
+    async def add_take_profit(
+        self,
+        order_id: str, 
+        take_profit_list: list,
+        order: dict
+    ) -> None:
+        """
+        Adds the take profit details to the orders
+        list of references
+
+        Args:
+            order_id (str)
+            take_profit_list (list)
+            order (dict)
+        """        
+        try:
+            if await self._validate_sl_tp_and_entry(
+                stop_loss_price=order['stop_loss'],
+                take_profit_price=order['take_profit'],
+                entry_price=order.get('filled_price', None) if order.get('filled_price', None) else order['price']
+            ):
+                self._orders[order_id]['take_profit_price'] = order.get('take_profit', None)
+                self._orders[order_id]['take_profit_list'] = take_profit_list
+                
+                print(json.dumps(self._orders, indent=4))
+                print('-' * 10)
+        except InvalidAction:
+            raise
+        
+    
+    async def add_stop_loss(
+        self,
+        order_id: str,
+        stop_loss_list: list,
+        order: dict
+    ) -> None:
+        """
+        Adds the stop loss details to the orders
+        list of references
+
+        Args:
+            order_id (str)
+            stop_loss_list (list)
+            order (dict)
+        """        
+        try:
+            if await self._validate_sl_tp_and_entry(
+                stop_loss_price=order['stop_loss'],
+                take_profit_price=order['take_profit'],
+                entry_price=order.get('filled_price', None) if order.get('filled_price', None) else order['price']
+            ):
+                self._orders[order_id]['stop_loss'] = order.get('stop_loss', None)
+                self._orders[order_id]['stop_loss_list'] = stop_loss_list
+                
+                print(json.dumps(self._orders, indent=4))
+                print('-' * 10)
+        except InvalidAction:
+            raise
 
     def check_exists(self, order_id: str) -> bool:
         """Checks if the order_id is in the orders record
@@ -174,27 +232,26 @@ class OrderManager:
         """        
         try:
             if self.check_exists(order_id):
-                if await self._validate_sl_tp_entry(
-                    order=self._orders[order_id]["order_list"][2],
+                if await self._validate_sl_tp_and_entry(
+                    order=self._orders[order_id]["entry_list"][2],
                     stop_loss_price=new_price if field == "stop_loss" else None,
                     take_profit_price=new_price if field == "take_profit" else None,
                     entry_price=new_price if field == "entry" else None
                 ):
                     original_price = self._orders[order_id][f"{field}_price"]
-                    order_list = self._orders[order_id]["order_list"]
+                    order_list = self._orders[order_id][f"{field}_list"]
                     
                     if bids:
                         if order_list in bids[original_price]:
                             bids[original_price].remove(order_list)
-                            bids[new_price].append(order_list)
-                            return True
+                        bids[new_price].append(order_list)
+                        return True
                     
                     elif asks:
                         if order_list in asks[original_price]:
                             asks[original_price].remove(order_list)
-                            asks[new_price].append(order_list)
-                            return True
-                        
+                        asks[new_price].append(order_list)
+                        return True
                     return False
         except DoesNotExist:
             raise
@@ -275,6 +332,18 @@ class OrderManager:
             print("-" * 10)
     
     
+    async def update_touched_orders(self, orders: list[dict]) -> None:
+        async with get_db_session() as session:
+            await session.execute(
+                update(Orders),
+                orders
+            )
+            await session.commit()
+        
+        for order in orders:
+            print(f'Order: {order['order_id']} updated')
+    
+    
     async def delete(
         self,
         order_id: str | UUID,
@@ -290,9 +359,14 @@ class OrderManager:
             return
 
         bid_price = self._orders[order_id]["entry_price"]
+        entry_list = self._orders[order_id]['entry_list']
+        
         stop_loss_price = self._orders[order_id]["stop_loss_price"]
+        stop_loss_list = self._orders[order_id]['stop_loss_list']
+        
         take_profit_price = self._orders[order_id]["take_profit_price"]
-        order_list = self._orders[order_id]["order_list"]
+        take_profit_list = self._orders[order_id]["take_profit_list"]
+        
         
         # Setting as closed
         order = await self._get_order_from_db(order_id)
@@ -301,14 +375,14 @@ class OrderManager:
         
         
         # Deleting from arrays and from _orders
-        if order_list in bids[bid_price]:
-            bids[bid_price].remove(order_list)
+        if entry_list in bids[bid_price]:
+            bids[bid_price].remove(entry_list)
         
-        if order_list in asks[stop_loss_price]:
-            asks[stop_loss_price].remove(order_list)
+        if stop_loss_list in asks[stop_loss_price]:
+            asks[stop_loss_price].remove(stop_loss_list)
         
-        if order_list in asks[take_profit_price]:
-            asks[take_profit_price].remvove(order_list)
+        if take_profit_list in asks[take_profit_price]:
+            asks[take_profit_price].remvove(take_profit_list)
             
         del self._orders[order_id]
         

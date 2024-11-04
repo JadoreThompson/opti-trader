@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 # Local
 from db_models import Base, Users, Orders
-from enums import OrderType
+from enums import OrderType, _InternalOrderType
 
 # DB_URL = "sqlite+aiosqlite:///:memory:"
 # DB_ENGINE = create_async_engine(DB_URL)
@@ -113,13 +113,17 @@ async def generate_db() -> tuple:
 
         result = await conn.execute(select(Orders))
         orders = result.fetchall()
+        i = 0
         for order in orders:
+            i += 1
             order = dict(order._mapping)
+            order['internal_order_type'] = random.choice([item.value for item in _InternalOrderType])
+            
             if order['created_at']:
-                if order['order_type'] != OrderType.CLOSE:
-                        return_bids[order['price']].append([order['created_at'].timestamp(), order['quantity'], order])
+                if i % 2 == 0:
+                    return_bids[order['price']].append([order['created_at'], order['quantity'], order])
                 else:
-                    return_asks[order['price']].append([order['created_at'].timestamp(), order['quantity'], order])
+                    return_asks[order['price']].append([order['created_at'], order['quantity'], order])
 
         return return_bids, return_asks
 

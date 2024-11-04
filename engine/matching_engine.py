@@ -12,7 +12,7 @@ from sqlalchemy import update, select
 # Local
 # from config import REDIS_CLIENT
 from db_models import Orders
-from enums import OrderType, OrderStatus
+from enums import OrderType, OrderStatus, _InternalOrderType
 from exceptions import DoesNotExist, InvalidAction
 from models import OrderRequest
 from tests.test_config import config
@@ -117,14 +117,34 @@ class MatchingEngine:
     async def place_tp_sl(self, data) -> None:
         try:
             # TP
-            self.asks[data["take_profit"]].append([
-                data["created_at"], data["quantity"], data
-            ])
+            if data.get('take_profit', None):
+                take_profit_data = data.copy()
+                take_profit_data['internal_order_type'] = _InternalOrderType.TAKE_PROFIT_ORDER
+                take_profit_list = [take_profit_data["created_at"], take_profit_data["quantity"], take_profit_data]
+                
+                self.asks[take_profit_data["take_profit"]].append(take_profit_list)
+                
+                await self.order_manager.add_take_profit(
+                    take_profit_data['order_id'],
+                    take_profit_list,
+                    take_profit_data
+                )
             
             # Stop Loss
-            self.asks[data["stop_loss"]].append([
-                data["created_at"], data["quantity"], data
-            ])
+            if data.get('stop_loss', None):
+                stop_loss_data = data.copy()
+                stop_loss_data['internal_order_type'] = _InternalOrderType.STOP_LOSS_ORDER
+                stop_loss_list = [stop_loss_data["created_at"], stop_loss_data["quantity"], stop_loss_data]
+                
+                self.asks[stop_loss_data["stop_loss"]].append(stop_loss_list)
+                
+                await self.order_manager.add_stop_loss(
+                    stop_loss_data['order_id'],
+                    stop_loss_list,
+                    stop_loss_data
+                )
+            
+            print(f"Placed TP and SL for Order: {data['order_id'][:5]}")
         except Exception as e:
             print("Error placing TP SL\n", type(e), str(e))            
             print('-' * 10)
@@ -184,12 +204,10 @@ class MatchingEngine:
                 data['order_status'] = OrderStatus.FILLED
                 
                 await self.place_tp_sl(data)
-                await self.order_manager.add_order( # Adding to reference list
+                await self.order_manager.add_entry( # Adding to reference list
                     data["order_id"],
-                    data["filled_price"],
                     [data["created_at"], data["quantity"], data],
-                    data["stop_loss"],
-                    data["take_profit"]
+                    data
                 )                
                 
                 await self.order_manager.update_order_in_db(data)
@@ -278,31 +296,55 @@ class MatchingEngine:
             return (0, )
         
         
+        touched_orders = []
+        
         # Fulfilling the order
         for order in self.asks[ask_price]:
-            if quantity <= 0: 
-                break
+            # Adding the order to the batch that needs to be updated
+            order_copy = order[2]
+            order_copy.pop('internal_order_type', None)
+            touched_orders.append(order_copy)            
+            
+            # Checking if the order can be filled
+            internal_order_type = order[2].get('internal_order_type', None)
             
             if quantity - order[1] >= 0:
                 quantity -= order[1]
-                self.asks[ask_price].remove(order) # Order is now satisfied
+                
+                if internal_order_type == _InternalOrderType.STOP_LOSS_ORDER or\
+                    internal_order_type == _InternalOrderType.TAKE_PROFIT_ORDER:
+                    order[2]['order_status'] = OrderStatus.CLOSED
+                    order[2]['closed_at'] = datetime.now()
+                    order[2]['close_price'] = ask_price
+                else:
+                    order[2]['filled_price'] = ask_price
+                    order[2]['order_status'] = OrderStatus.FILLED
+                
+                self.asks[ask_price].remove(order)
             
             elif quantity - order[1] < 0:
                 order[1] -= quantity
                 
-                print("-" * 10)
-                print(f"Order: {data["order_id"][:5]} filled at {ask_price}")
-                print("-" * 10)
+                if internal_order_type == _InternalOrderType.STOP_LOSS_ORDER or\
+                    internal_order_type == _InternalOrderType.TAKE_PROFIT_ORDER:
+                    order[2]['order_status'] = OrderStatus.PARTIALLY_CLOSED
+                else:
+                    order[2]['order_status'] = OrderStatus.PARTIALLY_FILLED
+                
+                # Updating all touched orders
+                await self.order_manager.update_touched_orders(touched_orders)
                 
                 return (2, ask_price)
         
         # Trying again 3 times
         if attempts < 2:
             attempts += 1
-            return self.match_buy_order(
+            return await self.match_buy_order(
                 bid_price=bid_price, quantity=quantity, attempts=attempts)
 
         # Order was partially filled
+        # Updating all touched orders
+        await self.order_manager.update_touched_orders(touched_orders)
         return (1, )
     
     

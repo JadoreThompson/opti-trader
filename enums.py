@@ -15,3 +15,9 @@ class OrderStatus(str, Enum):
     NOT_FILLED = 'not_filled'
     CLOSED = 'closed'
     PARTIALLY_CLOSED = 'partially_closed'
+
+
+class _InternalOrderType(str, Enum):
+    MARKET_ORDER = 'market_order'
+    STOP_LOSS_ORDER = 'stop_loss_order'
+    TAKE_PROFIT_ORDER = 'take_profit_order'
