@@ -5,8 +5,10 @@ class OrderType(str, Enum):
     MARKET = 'market_order'
     LIMIT = 'limit_order'
     CLOSE = 'close_order'
+    
     TAKE_PROFIT_CHANGE = 'take_profit_change'
     STOP_LOSS_CHANGE = 'stop_loss_change'
+    ENTRY_PRICE_CHANGE = 'entry_price_change'
 
 
 class OrderStatus(str, Enum):

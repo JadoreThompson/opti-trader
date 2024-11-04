@@ -86,6 +86,11 @@ class StopLossChange(StopLossOrder):
     order_id: UUID
 
 
+class EntryPriceChange(Base):
+    price: float
+    order_id: UUID
+
+
 class OrderRequest(Base):
     """Represents an order with type, market order, and limit order details.
 
@@ -98,5 +103,7 @@ class OrderRequest(Base):
     market_order: Optional[MarketOrder] = None
     limit_order: Optional[LimitOrder] = None
     close_order: Optional[CloseOrder] = None
+    
+    entry_price_change: Optional[EntryPriceChange] = None
     take_profit_change: Optional[TakeProfitChange] = None
     stop_loss_change: Optional[StopLossChange] = None

@@ -155,6 +155,20 @@ class ClientManager:
                 market_price = round(random.uniform(100, 150), 2)
                 additional_fields['market_price'] = market_price
                 order: dict = await self.retrieve_order(order_id)
+                
+            elif message.type == OrderType.ENTRY_PRICE_CHANGE:
+                order_id = message.entry_price_change.order_id
+                order: dict = await self.retrieve_order(order_id)
+                
+                if order['order_status'] != OrderStatus.NOT_FILLED:
+                    await self.socket.send_text(json.dumps({
+                        'status': 'error',
+                        'message': "Can't update entry price of partially or fully filled ordre"
+                        'order_id': order['order_id']
+                    }))
+                    return
+                
+                additional_fields['new_entry_price'] = message.entry_price_change.price
             
             elif message.type == OrderType.TAKE_PROFIT_CHANGE:
                 order_id = message.take_profit_change.order_id

@@ -81,6 +81,14 @@ class MatchingEngine:
         elif action_type == OrderType.CLOSE:
             await self.handle_sell_order(data, channel)
             
+        elif action_type == OrderType.ENTRY_PRICE_CHANGE:
+            await self.handle_entry_price_change(
+                data,
+                data['order_id'],
+                data['new_take_profit_price'],
+                channel
+            )
+            
         elif action_type == OrderType.TAKE_PROFIT_CHANGE:
             await self.handle_take_profit_change(
                 data,
@@ -569,6 +577,58 @@ class MatchingEngine:
 
         # Order was partially filled
         return (1, )
+    
+    
+    async def handle_entry_price_change(
+        self,
+        order: dict,
+        order_id: str,
+        new_entry_price: float,
+        channel: str
+    ) -> None:
+        """
+        Movess the bid order from the original price level to the new price level
+
+        Args:
+            order_id (str): _description_
+            new_take_profit_price (float): _description_
+        """
+        try:
+            if await self.order_manager.update_entry_price_in_orderbook(order_id, new_entry_price, self.asks):
+                order['limit_price'] = order['price'] = new_entry_price
+                order.pop('new_entry_profit_price', None)
+                
+                await self.order_manager.update_order_in_db(order)
+                
+                await self.publish_update_to_client(channel, message=json.dumps({
+                    'status': 'success',
+                    'message': 'Entry price changed successfully',
+                    'order_id': order_id
+                }))
+                return
+            
+            await self.publish_update_to_client(
+                channel=channel,
+                message=json.dumps({
+                    'status': 'error',
+                    'message': "Couldn't update entry price",
+                    'order_id': order_id
+                })
+            )
+            
+        except InvalidAction as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                'status': 'error',
+                'message': str(e),
+                'order_id': order_id
+            }))
+        
+        except DoesNotExist as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                'status': 'error',
+                'message': str(e),
+                'order_id': order_id
+            }))
     
     
     async def handle_take_profit_change(
