@@ -1,22 +1,28 @@
 import asyncio
 import json
-import sys
-import threading
 from collections import defaultdict
 from datetime import datetime
 import random
 from typing import Tuple
 from uuid import uuid4, UUID
+import redis
 
 from sqlalchemy import update, select
 
 # Local
-from config import REDIS_CLIENT
+# from config import REDIS_CLIENT
 from db_models import Orders
 from enums import OrderType, OrderStatus
+from exceptions import DoesNotExist, InvalidAction
 from models import OrderRequest
 from tests.test_config import config
 from utils.db import get_db_session
+from engine.order_manager import OrderManager
+
+
+# Redis
+REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(max_connections=20)
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL)
 
 
 class MatchingEngine:
@@ -27,468 +33,590 @@ class MatchingEngine:
             price[float]: [ [timestamp[float], quantity[float], order_data[dict] ] ]
         }
         """
-        self.pubsub = REDIS_CLIENT.pubsub()
+        self.redis = REDIS_CLIENT
+        self.order_manager = OrderManager()
 
         self.bids, self.asks = config()
-        self.bids_price_levels, self.asks_price_levels = self.bids.keys(), self.asks.keys()
+        
+        self.bids_price_levels = self.bids.keys()
+        self.asks_price_levels = self.asks.keys()
+        
         self.current_price: int
-
-    # -----------------------------------------
-    #                 Start of Class
-    # -----------------------------------------
-
-    async def listen_to_client_events(self) -> None:
+        
+    
+    async def listen_to_client_events(self):
         """
-        Listens for actions from the client
-        :return:
-        """
-        print("Matching Engine Running...")
-        async with self.pubsub as pubsub:
+            Listens to messages from the to_order_book channel
+            and relays to the handler
+        """        
+        print("Matching Engine Listening...")
+        async with self.redis.pubsub() as pubsub:
             await pubsub.subscribe("to_order_book")
-
             async for message in pubsub.listen():
-                if message.get('type', None) == 'message':
-                    asyncio.create_task(self.handle_incoming_order(message['data']))
+                await asyncio.sleep(0.1)
+                if message.get("type", None) == "message":
+                    asyncio.create_task(self.handle_incoming_message(message["data"]))
 
 
-    async def handle_incoming_order(self, request: dict) -> None:
+    async def handle_incoming_message(self, data: dict):
         """
-        - Funnels into the designated computation channel
-        - Once computation complete, either submitted to order book
-            if the engine couldn't match it. Or it's status is updated to filled
-            in the DB
+        Handles the routing of the request into the right
+        functions
 
-        :param request[dict] -> the order details as a dictionary
-        """
-        data = json.loads(request)
-
-        if data.get('order_type', '').strip():
-            order_type = data['order_type']
-        else:
-            order_type = data.get('type')
-
-        self.user_id = data['user_id']
-
-        # Bid
-        if order_type == OrderType.MARKET:
-            if not await self.validate_tp_sl(data, 'price'):
-                return
-
-            if await self.match_buy_order(data):
-                data['order_status'] = OrderStatus.FILLED
-
-                # Set the stop loss and take-profit bid and sell orders
-                await self.establish_sl_tp(data)
-                await self.update_in_db(data)
-                return
-
-        # Ask
-        elif order_type == OrderType.CLOSE:
-            # Checking if the user specified a quantity
-            data = await self.get_order_details(data)
-
-            # Order doesn't exist
-            if not data:
-                await REDIS_CLIENT.publish(
-                    channel=f'trades_{self.user_id}',
-                    message=json.dumps({'error': "order doesn't exist"})
-                )
-                return
-
-            quantity = data['close_order']['quantity'] \
-                if data.get('close_order', {}).get('quantity', None) else None
-
-            # Excessive quantity
-            if quantity:
-                if quantity > data['quantity']:
-                    await REDIS_CLIENT.publish(
-                        channel=f'trades_{self.user_id}',
-                        message={'warning': "close amount can't be higher than initial quantity"}
-                    )
-                    return
-
-            # Either filled or not filled
-            if await self.match_close_order(data, quantity=quantity):
-                data['order_status'] = OrderStatus.CLOSED
-                await self.update_in_db(data)
-                return
-
-        # To Order book
-        await self.add_to_order_book(data, order_type)
-
-    async def match_buy_order(
-            self,
-            data: dict,
-            quantity: float = None,
-            price: float = None,
-            count: int = 0) -> bool:
-        """
-        Matches the order to the stored orders
-        :return:
-        """
-        if not quantity:
-            quantity = data['quantity']
-        if not price:
-            price = data['price']
-
-        # Getting a price for asks
-        i = 5
-        while i >= 0 and len(self.asks[price]) == 0:
-            try:
-                price = self.find_next_ask_level(price)
-                if price:
-                    break
-                i += 1
-            except ValueError:
-                return False
-
-        need_updates = []
-        filled = False
-
-        for order in self.asks[price]:
-            if quantity - order[1] >= 0:
-                quantity -= order[1]
-                order[1], order[2]['order_status'] = 0, OrderStatus.FILLED
-                order[2]['quantity'] = order[1]
-                self.asks[price].remove(order)
-
-            elif quantity - order[1] < 0:
-                quantity = 0
-                order[1] -= quantity
-                order[2]['quantity'] = order[1]
-                order[2]['order_status'] = OrderStatus.PARTIALLY_FILLED
-
-            need_updates.append(order)
-
-            if not quantity:
-                filled = True
-                self.current_price = price
-                break
-
-        await self.update_touched_orders(need_updates)
-
-        count += 1
-        if count < 3 and not filled:
-            filled = await self.match_buy_order(data, quantity, price, count)
-
-        if filled:
-            print("Filled at: {} - {}".format(self.current_price, data['order_id']))
-        else:
-            print("Couldn't get filled: ", price)
-
-        return filled
-
-    def find_next_ask_level(self, price) -> float:
-        """
-        Returns the next price level containing asks
-        :param price:
-        :return:
-        """
-
-        try:
-            price_map = {
-                key: abs(price - key)
-                for key in self.asks_price_levels
-                if key <= price and key != price
-            }
-
-            lowest = min([val for _, val in price_map.items()])
-
-            for key in price_map:
-                q = price_map[key]
-                if q == lowest:
-                    return key
-        except ValueError:
-            # ValueError is thrown when the price_map is empty
-            raise
-
-    def find_next_bid_level(self, price) -> float:
-        """
-        Returns the next price level containing asks
-        :param price:
-        :return:
-        """
-
-        try:
-            price_map = {
-                key: abs(price - key)
-                for key in self.bids_price_levels
-                if key >= price and key != price
-            }
-
-            lowest = min([val for _, val in price_map.items()])
-
-            for key in price_map:
-                q = price_map[key]
-                if q == lowest:
-                    return key
-        except ValueError:
-            # ValueError is thrown when the price_map is empty
-            raise
-
-    async def get_order_details(self, request: dict) -> dict | None:
-        """
-        -   Intended use is to retrieve all attributes
-            for an order when the order_id is passed in the
-            message -> Specifically for Close Order Requests
-        :return:
-        """
-        async with get_db_session() as session:
-            r = await session.execute(
-                select(Orders)
-                .where(
-                    (Orders.order_id == request['close_order']['order_id'])
-                    & (Orders.user_id == request['user_id'])
-                )
+        Args:
+            data (dict): A dictionary representation of the request
+        """        
+        await asyncio.sleep(0.1)
+        data = json.loads(data)
+        
+        action_type = data["type"]
+        channel = f"trades_{data['user_id']}"
+        
+        # Market Order
+        if action_type == OrderType.MARKET:
+            await self.handle_buy_order(data, channel)
+            
+        # Close Order
+        elif action_type == OrderType.CLOSE:
+            await self.handle_sell_order(data, channel)
+            
+        elif action_type == OrderType.TAKE_PROFIT_CHANGE:
+            await self.handle_take_profit_change(
+                data,
+                data['order_id'],
+                data['new_take_profit_price'],
+                channel
             )
-            try:
-                return vars(r.scalar())
-            except TypeError:
-                return None
-
-    async def match_close_order(
-            self,
-            data: dict,
-            quantity: float = None,
-            price: float = None,
-            count: int = 0) -> bool:
-        """
-        Matches the order to the stored orders
-        :return:
-        """
-        if not quantity:
-            quantity = data['quantity']
-        if not price:
-            price = data['price']
-
-        # Getting a price for bids
-        i = 5
-        while i >= 0 and len(self.bids[price]) == 0:
-            try:
-                price = self.find_next_bid_level(price)
-                if price:
-                    break
-                i += 1
-            except ValueError:
-                return False
-
-        need_updates = []
-        filled = False
-
-        for order in self.bids[price]:
-            if quantity - order[1] >= 0:
-                quantity -= order[1]
-                order[1], order[2]['order_status'] = 0, OrderStatus.FILLED
-                order[2]['quantity'] = order[1]
-                self.bids[price].remove(order)
-
-            elif quantity - order[1] < 0:
-                quantity = 0
-                order[1] -= quantity
-                order[2]['quantity'] = order[1]
-                order[2]['order_status'] = OrderStatus.PARTIALLY_FILLED
-
-            need_updates.append(order)
-
-            if not quantity:
-                filled = True
-                self.current_price = price
-                break
-
-        await self.update_touched_orders(need_updates)
-
-        count += 1
-        if count < 3 and not filled:
-            filled = await self.match_close_order(data, quantity, price, count)
-
-        if filled:
-            print("Filled at: ", price, end=f"{data['order_id']}\n")
-        else:
-            print("Couldn't get filled: ", price)
-
-        return filled
-
-
-    async def add_to_order_book(self, data: dict, order_type: str, created_at=None) -> None:
-        """
-        Adds the order into it's rightful channel either Bids or Ask
-        :param created_at:
-        :param data:
-        :param order_type:
-        :return:
-        """
-        if not created_at:
-            created_at = datetime.now().timestamp()
-
-        if order_type == OrderType.MARKET:
-            self.bids[data['price']].append([created_at, data['quantity'], data])
-            print("*" * 20)
-            print("{} >> Submitted to orderbook".format(data['order_id']))
-            print("*" * 20)
-
-        elif order_type == OrderType.CLOSE:
-            self.asks[data['price']].append([created_at, data['quantity'], data])
-            print("^" * 20)
-            print("{} >> Submitted to orderbook".format(data['order_id']))
-            print("^" * 20)
-
-
-    async def update_in_db(self, order: dict) -> None:
-        """
-        Persists changes to the order in database
-        :param order:
-        :return:
-        """
-        try:
-            order = {
-                k: (str(v) if isinstance(v, (UUID, datetime)) else v)
-                for k, v in order.items()
-                if k != '_sa_instance_state'
-            }
-            dt = order['created_at']
-            order['created_at'] = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S.%f")
-
-            async with get_db_session() as session:
-                await session.execute(
-                    update(Orders)
-                    .values(order)
-                )
-                await session.commit()
-
-            order['created_at'] = dt
-            await REDIS_CLIENT.publish(
-                channel="trades_{}".format(order['user_id']),
-                message=json.dumps(order)
+        
+        elif action_type == OrderType.STOP_LOSS_CHANGE:
+            await self.handle_stop_loss_change(
+                data,
+                data['order_id'],
+                data['new_stop_loss_price'],
+                channel
             )
-
-        except Exception as e:
-            print("Update DB Order Error: ", type(e), str(e))
-            pass
-
-    async def update_touched_orders(self, orders: list) -> None:
+        
+        print("Finished all")
+                
+                
+    async def publish_update_to_client(self, channel: str, message: str) -> None:
         """
-        Updates each order's record in the DB
-        and sends out a publishing message to the designated pubsub channel
-        for updates
-        :param orders[list]
-        :return:
-        """
+        Publishes message to channel using REDIS
+
+        Args:
+            channel (str):
+            message (str): 
+        """        
         try:
-            to_be_updated = []
-
-            for order in orders:
-                order[2].pop('quantity')
-                to_be_updated.append(order[2])
-
-            async with get_db_session() as session:
-                await session.execute(
-                    update(Orders),
-                    to_be_updated
-                )
-                await session.commit()
-
-            # Sending updates to clients
-            for i in range(0, len(to_be_updated), 10):
-                await asyncio.gather(*[
-                    REDIS_CLIENT.publish(
-                        channel="trades_{}".format(order['user_id']),
-                        message=json.dumps(
-                            {k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in order.items()})
-                    )
-                    for order in to_be_updated[i: i + 10]
-                ])
-
+            await self.redis.publish(channel=channel, message=message)
         except Exception as e:
-            print("Updating touched orders: ", type(e), str(e))
+            print("Publish update to client:", type(e), end=f"\n{str(e)}\n")
             pass
-
-
-    async def establish_sl_tp(self, data) -> None:
-        """
-        Places a bid / ask for the TP and SL of  the order
-        :param data:
-        :return:
-        """
+    
+    
+    async def place_tp_sl(self, data) -> None:
         try:
-            if not await self.validate_tp_sl(data, 'price'):
-                return
-
-            if not data.get('stop_loss', None) and not data.get('take_profit', None):
-                return
-
-            if data.get('stop_loss', None):
-                self.asks[data['stop_loss']].append([
-                    data['created_at'],
-                    data['quantity'],
-                    data
-                ])
-                print("Submitted SL order to the orderbook")
-                pass
-
-            if data.get('take_profit', None):
-                self.asks[data['stop_loss']].append([
-                    data['created_at'],
-                    data['quantity'],
-                    data
-                ])
-                print("Submitted TP order to the orderbook")
-
+            # TP
+            self.asks[data["take_profit"]].append([
+                data["created_at"], data["quantity"], data
+            ])
+            
+            # Stop Loss
+            self.asks[data["stop_loss"]].append([
+                data["created_at"], data["quantity"], data
+            ])
         except Exception as e:
-            print("ERROR: Establish Tp, Sl -> ", type(e), str(e))
+            print("Error placing TP SL\n", type(e), str(e))            
+            print('-' * 10)
+            
+    
+    async def handle_buy_order(self, data: dict, channel: str) -> None:
+        """
+        Handles the creation and submission to orderbook
+        for a buy order
+
+        Args:
+            data (dict)
+        """    
+        result: tuple = await self.match_buy_order(data)
+        print("Handle buy order result\n", result)
+        print('-' * 10)
+        
+        # Not filled
+        if result[0] == 0:
+            await self.redis.publish(
+                channel=channel,
+                message=json.dumps({
+                    "status": "error",
+                    "message": "Insufficient asks to fulfill bid order",
+                    "order_id": data["order_id"]
+                })    
+            )
             return
 
+        # Relaying message to user
+        status_message = {
+            1: {
+                "channel": channel,
+                "message": json.dumps({
+                    "status": "update", 
+                    "message": "Order partially filled",
+                    "order_id": data["order_id"]
+                })
+            },
+            
+            2: {
+                "channel": channel,
+                "message": json.dumps({
+                    "status": "success",
+                    "message": "Order successfully placed",
+                    "order_id": data["order_id"]
+                })
+            }
+        }.get(result[0])
+        
+        await self.publish_update_to_client(**status_message)
 
-    async def validate_tp_sl(self, data: dict, price_field: str) -> bool:
+        # Order was successfully filled
+        if result[0] == 2:
+            try:
+                data["filled_price"] = result[1]
+                data['order_status'] = OrderStatus.FILLED
+                
+                await self.place_tp_sl(data)
+                await self.order_manager.add_order( # Adding to reference list
+                    data["order_id"],
+                    data["filled_price"],
+                    [data["created_at"], data["quantity"], data],
+                    data["stop_loss"],
+                    data["take_profit"]
+                )                
+                
+                await self.order_manager.update_order_in_db(data)
+
+            except InvalidAction as e:
+                print("Error in handling buy order\n", str(e))
+                print('-' * 10)
+                await self.publish_update_to_client(channel=channel, message=str(e))
+            finally:
+                return
+        
+        
+        # Order was partially filled so we add to orderbook
+        data['order_status'] = OrderStatus.PARTIALLY_FILLED
+        await self.order_manager.update_order_in_db(data)
+        await self.add_order_to_orderbook(data, data["quantity"], bids=self.bids)
+    
+    
+    async def find_ask_price_level(
+        self,
+        bid_price: float,
+        max_attempts: int = 5,
+    ):
         """
-        Ensures TP and SL are priced above and below
-        the execution price
-        :param data:
-        :return:
+        Finds the closest ask price level with active orders
+        to the bid_price
+
+        Args:
+            bid_price (float): 
+            max_attempts (int, optional): Defaults to 5.
+
+        Returns:
+            Price: The ask price with the lowest distance
+            None: No asks to match the bid price execution
         """
-        if data.get('stop_loss', None):
-            if data[price_field] <= data['stop_loss']:
-                await REDIS_CLIENT.publish(
-                    channel=f"trades_{data['user_id']}",
-                    message=json.dumps({'error': 'Stop loss must be less than execution price'})
-                )
-                return False
+        attempt = 0
+        
+        while attempt < max_attempts:
+            try:
+                # Finding the price with the lowest distance from the bid_price
+                price_map = {
+                    key: abs(bid_price - key)
+                    for key in list(self.asks_price_levels)
+                    if key >= bid_price
+                    and self.asks[key]
+                }
+                
+                lowest_distance = min(val for _, val in price_map.items())
+                
+                for price, distance in price_map.items():
+                    if distance == lowest_distance:
+                        return price
+                
+                attempt += 1
+            except ValueError:
+                return None
+        return None
+    
+    
+    async def match_buy_order(
+        self, 
+        data: dict = None,
+        bid_price: float = None,
+        quantity: float =  None,
+        attempts: float = 0
+    ) -> tuple:
+        """
+        Recursively calls itself if the quantity
+        for the order is partially filled ( > 0)
+        . Once filled it'll return 2
+        
 
-        if data.get('take_profit', None):
-            if data[price_field] >= data['take_profit']:
-                await REDIS_CLIENT.publish(
-                    channel=f"trades_{data['user_id']}",
-                    message=json.dumps({'error': 'Take profit must be greater than execution price'})
-                )
-                return False
+        Args:
+            data (dict)
 
-        return True
+        Returns:
+            (0,): Order couldn't be filled due to insufficient asks
+            (1,): Order was partially filled
+            (2, ask_price): Order was successfully filled
+        """
+        bid_price = data["price"] if not bid_price else bid_price
+        quantity = data["quantity"] if not quantity else quantity 
+        
+        ask_price = await self.find_ask_price_level(bid_price)
+        if not ask_price:
+            return (0, )
+        
+        
+        # Fulfilling the order
+        for order in self.asks[ask_price]:
+            if quantity <= 0: 
+                break
+            
+            if quantity - order[1] >= 0:
+                quantity -= order[1]
+                self.asks[ask_price].remove(order) # Order is now satisfied
+            
+            elif quantity - order[1] < 0:
+                order[1] -= quantity
+                
+                print("-" * 10)
+                print(f"Order: {data["order_id"][:5]} filled at {ask_price}")
+                print("-" * 10)
+                
+                return (2, ask_price)
+        
+        # Trying again 3 times
+        if attempts < 2:
+            attempts += 1
+            return self.match_buy_order(
+                bid_price=bid_price, quantity=quantity, attempts=attempts)
+
+        # Order was partially filled
+        return (1, )
+    
+    
+    async def handle_sell_order(self, data: dict, channel: str) -> None:
+        """
+        Handles the creation and submission to orderbook
+        for a sell order
+
+        Args:
+            data (dict)
+        """    
+        result: tuple = await self.match_sell_order(data)
+        print("Tried to match sell order, result: ", result)
+        print("\n")
+        
+        # Not closed
+        if result[0] == 0:
+            await self.redis.publish(
+                channel=channel,
+                message=json.dumps({
+                    "status": "error",
+                    "message": "Insufficient asks to fulfill sell order",
+                    "order_id": data["order_id"]
+                })    
+            )
+            return
+
+        # Relaying message to user
+        status_message = {
+            1: {
+                "channel": channel,
+                "message": json.dumps({
+                    "status": "update", 
+                    "message": "Order partially closed",
+                    "order_id": data["order_id"]
+                })
+            },
+            
+            2: {
+                "channel": channel,
+                "message": json.dumps({
+                    "status": "success",
+                    "message": "Order successfully closed",
+                    "order_id": data["order_id"]
+                })
+            }
+        }.get(result[0])
+        
+        await self.publish_update_to_client(**status_message)
 
 
-# -----------------------------------------
-#                          End of Class
-# -----------------------------------------
-def match_trades(orderbook):
-    asyncio.run(orderbook.match_buy_order())
+        # Order was successfully closed
+        if result[0] == 2:
+            try:
+                data['close_price'] = result[1]
+                data['closed_at'] = datetime.now()
+                data['order_status'] = OrderStatus.CLOSED
+                
+                data.pop('market_price', None)
+                
+                await self.order_manager.update_order_in_db(data)
+                await self.order_manager.delete(
+                    data['order_id'],
+                    self.bids, 
+                    self.asks
+                )    
+                
+            except InvalidAction as e:
+                print("Error in handling buy order\n", str(e))
+                print('-' * 10)
+                await self.publish_update_to_client(channel=channel, message=str(e))
+            finally:
+                return
+        
+        
+        # Order was partially closed so we add to orderbook
+        data['order_status'] = OrderStatus.PARTIALLY_CLOSED
+        await self.order_manager.update_order_in_db(data)
+        await self.add_order_to_orderbook(data, data["quantity"], asks=self.asks)
+
+    
+    async def find_bid_price_level(
+      self,
+      ask_price: float,
+      max_attempts: int = 5  
+    ):
+        """
+        Finds the closest bid price level with active orders
+        to the ask_price
+
+        Args:
+            bid_price (float): 
+            max_attempts (int, optional): Defaults to 5.
+
+        Returns:
+            Price: The ask price with the lowest distance
+            None: No asks to match the bid price execution
+        """
+        attempt = 0
+        while attempt < max_attempts:
+            try:
+                # Finding the price with the lowest distance from the ask_price
+                price_map = {
+                    key: abs(ask_price - key)
+                    for key in self.bids_price_levels
+                    if key >= ask_price
+                    and self.bids[key]
+                }
+                
+                lowest_distance = min(val for _, val in price_map.items())
+                
+                for price, distance in price_map.items():
+                    if distance == lowest_distance:
+                        return price
+                
+                attempt += 1
+            except ValueError:
+                return None
+        return None
+        
+    
+    async def match_sell_order(
+        self,
+        data: dict = None,
+        ask_price: float = None, # Current ask price level
+        quantity: float =  None,
+        attempts: float = 0
+    ) -> tuple:
+        """
+        Recursively calls itself if the quantity
+        for the order is partially filled ( > 0). 
+        Once filled it'll return 2
+        
+
+        Args:
+            data (dict)
+
+        Returns:
+            (0,): Order couldn't be filled due to insufficient asks
+            (1,): Order was partially filled
+            (2, ask_price): Order was successfully filled
+        """        
+        ask_price = ask_price if ask_price else data["market_price"]
+        quantity = quantity if quantity else data["quantity"]
+        
+        bid_price = await self.find_bid_price_level(ask_price)
+        if not bid_price:
+            return (0, )
+        
+        
+        # Fulfilling the order
+        for order in self.bids[bid_price]:
+            if quantity <= 0: 
+                break
+            
+            if quantity - order[1] >= 0:
+                quantity -= order[1]
+                self.bids[bid_price].remove(order) # Order is now satisfied
+            
+            elif quantity - order[1] < 0:
+                order[1] -= quantity
+                
+                print("-" * 10)
+                print(f"Order: {data["order_id"][:5]} filled at {bid_price}")
+                print("-" * 10)
+                
+                return (2, bid_price)
+        
+        # Trying again 3 times
+        if attempts < 2:
+            attempts += 1
+            return self.match_sell_order(
+                ask_price=ask_price, quantity=quantity, attempts=attempts)
+
+        # Order was partially filled
+        return (1, )
+    
+    
+    async def handle_take_profit_change(
+        self,
+        order: dict,
+        order_id: str,
+        new_take_profit_price: float,
+        channel: str
+    ) -> None:
+        """
+        Movess the ask order from the original price level to the new price level
+
+        Args:
+            order_id (str): _description_
+            new_take_profit_price (float): _description_
+        """
+        try:
+            if await self.order_manager.update_take_profit_in_orderbook(order_id, new_take_profit_price, self.asks):
+                order['take_profit'] = new_take_profit_price
+                order.pop('new_take_profit_price', None)
+                
+                await self.order_manager.update_order_in_db(order)
+                
+                await self.publish_update_to_client(channel, message=json.dumps({
+                    'status': 'success',
+                    'message': 'Take Profit changed successfully',
+                    'order_id': order_id
+                }))
+                return
+            
+            await self.publish_update_to_client(
+                channel=channel,
+                message=json.dumps({
+                    'status': 'error',
+                    'message': "Couldn't update take profit",
+                    'order_id': order_id
+                })
+            )
+            
+        except InvalidAction as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                'status': 'error',
+                'message': str(e),
+                'order_id': order_id
+            }))
+        
+        except DoesNotExist as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                'status': 'error',
+                'message': str(e),
+                'order_id': order_id
+            }))
 
 
-def listen(orderbook):
-    asyncio.run(orderbook.listen_to_client_events())
+    async def handle_stop_loss_change(
+        self,
+        order: dict,
+        order_id: str,
+        new_stop_loss_price: float,
+        channel: str
+    ) -> None:
+        try:
+            if await self.order_manager.update_stop_loss_in_orderbook(order_id, new_stop_loss_price, self.asks):
+                order['stop_loss'] = new_stop_loss_price
+                order.pop('new_stop_loss_price', None)
+                
+                await self.order_manager.update_order_in_db(order)
+                
+                await self.publish_update_to_client(channel, message=json.dumps({
+                    'status': 'success',
+                    'message': 'Stop loss changed successfully',
+                    'order_id': order_id
+                }))
+                
+                return
+            
+            await self.publish_update_to_client(
+                channel=channel,
+                message=json.dumps({
+                    'status': 'error',
+                    'message': "Couldn't update stop loss",
+                    'order_id': order_id
+                })
+            )
+        
+        except InvalidAction as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                'status': 'error',
+                'message': str(e),
+                'order_id': order_id
+            }))
+        
+        except DoesNotExist as e:
+            await self.publish_update_to_client(channel=channel, message=json.dumps({
+                'status': 'error',
+                'message': str(e),
+                'order_id': order_id
+            }))
 
+
+    async def add_order_to_orderbook(
+        self,
+        data: dict,
+        quantity: float,
+        bids: list = None,
+        asks: list= None
+    ) -> None:
+        """
+        Adds order to the price level for either the bids
+        or asks
+
+        Args:
+            data (dict): 
+            quantity (float): 
+            bids (list, optional): Defaults to None.
+            asks (list, optional): Defaults to None.
+        """        
+        book = 'bids' if bids else 'asks'
+        target_book = asks if asks else bids
+        
+        target_book[data["price"]].append([
+            data["created_at"], quantity, data
+        ])
+        
+        await self.publish_update_to_client(
+            f"trades_{data["user_id"]}", 
+            json.dumps({
+                "status": "update",
+                "message": "Order added to orderbook"
+            })
+        )
+        print("\n")
+        print("-" * 10)
+        print(f"Successfully added {data['order_id'][-5:]} to {book}")
+        print("-" * 10)
+        print("\n")
+    
 
 def run():
     engine = MatchingEngine()
-
-    threads = [
-        # threading.Thread(target=match_trades, args=[orderbook], daemon=True),
-        threading.Thread(target=listen, args=[engine], daemon=True),
-    ]
-
-    for thread in threads:
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-
-if __name__ == "__main__":
-    run()
+    asyncio.run(engine.listen_to_client_events())

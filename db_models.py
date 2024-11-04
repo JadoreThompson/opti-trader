@@ -35,17 +35,20 @@ class Orders(Base):
     __tablename__ = 'orders'
 
     # Fields
-    order_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    order_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, unique=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=True)
     order_status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, name='order_status'), nullable=True, default=OrderStatus.NOT_FILLED)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     ticker: Mapped[str] = mapped_column(String)
     order_type: Mapped[OrderType] = mapped_column(Enum(OrderType, name='order_type'))
     quantity: Mapped[float] = mapped_column(Float)
     price: Mapped[float] = mapped_column(Float, nullable=True)
+    filled_price: Mapped[float] = mapped_column(Float, nullable=True)
     limit_price: Mapped[float] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
+    close_price: Mapped[float] = mapped_column(Float, nullable=True)
 
     # Constraints
     __tableargs__ = (

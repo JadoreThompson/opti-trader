@@ -1,4 +1,10 @@
+from sqlalchemy import update, select
+from datetime import datetime
+from uuid import UUID
+
 # Local
+from utils.db import get_db_session
+from db_models import Orders
 from exceptions import DoesNotExist, InvalidAction
 from enums import OrderStatus
 
@@ -8,7 +14,7 @@ class OrderManager:
         self._orders = {}
 
 
-    def _validate_sl_tp_entry(
+    async def _validate_sl_tp_entry(
             self,
             order: dict = None,
             stop_loss_price: float = None,
@@ -53,7 +59,7 @@ class OrderManager:
         return True
 
 
-    def add_order(
+    async def add_order(
             self,
             order_id: str, 
             entry_price: float,
@@ -72,7 +78,7 @@ class OrderManager:
         """        
         
         try:
-            if self._validate_sl_tp_entry(
+            if await self._validate_sl_tp_entry(
                 stop_loss_price=stop_loss_price,
                 take_profit_price=take_profit_price,
                 entry_price=entry_price
@@ -144,7 +150,7 @@ class OrderManager:
             raise
         
 
-    def _update_order_price(
+    async def _update_order_price_in_orderbook(
             self,
             order_id: str,
             new_price: float,
@@ -152,10 +158,11 @@ class OrderManager:
             asks: dict = None,
             bids: dict = None,
         ):
-        """Updates the entry price for the order
-        if the order isn't filled or partially filled.
-        If the order is parially or filled, it'll raise an InvalidAction
-        error.
+        """
+        Shifts the position of the respective order
+        within the orderbook for either bid or ask. If you wanted
+        to reflect this change in the order object itself you'd have to
+        do so manually
 
         Args:
             order_id (str): _description_
@@ -167,84 +174,144 @@ class OrderManager:
         """        
         try:
             if self.check_exists(order_id):
-                if self._validate_sl_tp_entry(
-                        order=self._orders[order_id]["order_list"][2],
-                        stop_loss_price=new_price if field == "stop_loss" else None,
-                        take_profit_price=new_price if field == "take_profit" else None,
-                        entry_price=new_price if field == "entry" else None
-                    ):
+                if await self._validate_sl_tp_entry(
+                    order=self._orders[order_id]["order_list"][2],
+                    stop_loss_price=new_price if field == "stop_loss" else None,
+                    take_profit_price=new_price if field == "take_profit" else None,
+                    entry_price=new_price if field == "entry" else None
+                ):
                     original_price = self._orders[order_id][f"{field}_price"]
                     order_list = self._orders[order_id]["order_list"]
                     
                     if bids:
-                        bids[original_price].remove(order_list)
-                        bids[new_price].append(order_list)
+                        if order_list in bids[original_price]:
+                            bids[original_price].remove(order_list)
+                            bids[new_price].append(order_list)
+                            return True
+                    
                     elif asks:
-                        asks[original_price].remove(order_list)
-                        asks[new_price].append(order_list)
-                
-                print(f"Updated {field} price successfully!")
+                        if order_list in asks[original_price]:
+                            asks[original_price].remove(order_list)
+                            asks[new_price].append(order_list)
+                            return True
+                        
+                    return False
         except DoesNotExist:
             raise
     
     
-    def update_entry_price(
+    async def update_entry_price_in_orderbook(
         self,
         order_id: str,
         new_entry_price: float,
         bids: dict
-    ) -> None:
-        is_placed = self.is_placed(order_id)
-        if isinstance(is_placed, bool):
-            self._update_order_price(order_id, new_entry_price, "entry", bids=bids)
-            return
-        raise InvalidAction(f"Can't edit entry price on {is_placed} order")
+    ) -> None:        
+        return await self._update_order_price_in_orderbook(order_id, new_entry_price, "entry", bids=bids)
 
 
-    def update_stop_loss(
+    async def update_stop_loss_in_orderbook(
         self,
         order_id: str,
         new_stop_loss_price: float,
         asks: dict
     ) -> None:
-        self._update_order_price(order_id, new_stop_loss_price, "stop_loss", asks=asks)
+        return await self._update_order_price_in_orderbook(order_id, new_stop_loss_price, "stop_loss", asks=asks)
         
         
-    def update_take_profit(
+    async def update_take_profit_in_orderbook(
         self,
         order_id: str,
         new_take_profit_price: float,
         asks: dict
     ) -> None:
-        self._update_order_price(order_id, new_take_profit_price, "take_profit", asks=asks)
-        
-
-    def remove_order(self, order_id: str, bids: dict, asks: dict) -> None:
+        return await self._update_order_price_in_orderbook(order_id, new_take_profit_price, "take_profit", asks=asks)
+            
+    
+    async def update_order_in_db(self, order: dict) -> None:
         """
-        Removes the Take Profit, Stop loss and Execution Order from
-        the bid and asks
+        Updates the order's record in persistent store
 
         Args:
-            order_id (str): _description_
-            bids (list): _description_
-            asks (list): _description_
+            data (dict):
+        """        
+        order.pop('type', None)
+        if isinstance(order["created_at"], str):
+            order["created_at"] = datetime.strptime(order["created_at"], "%Y-%m-%d %H:%M:%S.%f")
+        
+        async with get_db_session() as session:
+            await session.execute(
+                update(Orders)
+                .where(Orders.order_id == order['order_id'])
+                .values(**order)
+            )
+
+            await session.commit()
+    
+    
+    async def _get_order_from_db(self, order_id: str | UUID) -> dict:
+        """
+        Retrieves an order within the DB with the order_id
+
+        Args:
+            order_id (str | UUID)
+
+        Returns:
+            dict: A dictionary representation of the order without the _sa_instance_state key
         """        
         try:
-            if self.check_exists(order_id):
-                order = self._orders[order_id]
+            async with get_db_session() as session:
+                result = await session.execute(
+                    select(Orders)
+                    .where(Orders.order_id == order_id)
+                )
                 
-                if order.get("entry_price", None) in bids:
-                    bids[order["entry_price"]].remove(order["order_list"])
-                if order.get("stop_loss_price", None) in bids:
-                    bids[order["stop_loss_price"]].remove(order["order_list"])
-                if order.get("take_profit_price", None) in asks:
-                    asks[order["take_profit_price"]].remove(order["order_list"])
-                
-                # Discarding all trace of order
-                del self._orders[order_id]
-        except DoesNotExist:
-            raise
-            
+                return {
+                    key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
+                    for key, value in vars(result.scalar()).items()
+                    if key != '_sa_instance_state'
+                }
+        except Exception as e:
+            print("Retrieve order\n", type(e), str(e))
+            print("-" * 10)
+    
+    
+    async def delete(
+        self,
+        order_id: str | UUID,
+        bids: dict[float, list],
+        asks: dict[float, list]
+    ) -> None:
+        """
+        Deletes all traces of the order from the asks and bids orderbooks
+        Args:
+            order_id (str | UUID): _description_
+        """        
+        if order_id not in self._orders:
+            return
+
+        bid_price = self._orders[order_id]["entry_price"]
+        stop_loss_price = self._orders[order_id]["stop_loss_price"]
+        take_profit_price = self._orders[order_id]["take_profit_price"]
+        order_list = self._orders[order_id]["order_list"]
         
-manager = OrderManager()
+        # Setting as closed
+        order = await self._get_order_from_db(order_id)
+        order['order_status'] = OrderStatus.CLOSED
+        await self.update_order_in_db(order)
+        
+        
+        # Deleting from arrays and from _orders
+        if order_list in bids[bid_price]:
+            bids[bid_price].remove(order_list)
+        
+        if order_list in asks[stop_loss_price]:
+            asks[stop_loss_price].remove(order_list)
+        
+        if order_list in asks[take_profit_price]:
+            asks[take_profit_price].remvove(order_list)
+            
+        del self._orders[order_id]
+        
+        print(f"Closed Order: {order['order_id'][-5:]} successfully!")
+        print("-" * 10)
         

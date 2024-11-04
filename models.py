@@ -15,7 +15,6 @@ class Base(BaseModel):
 
 class User(Base):
     """Represents a user with email and password attributes."""
-
     email: str
     password: str
 
@@ -26,7 +25,7 @@ class TakeProfitOrder(Base):
 
 class StopLossOrder(Base):
     price: float = Field(gt=0)
-
+    
 
 class BaseOrder(Base):
     """Represents a base order with ticker, take profit, and stop loss settings.
@@ -79,6 +78,14 @@ class CloseOrder(Base):
     quantity: Optional[float] = Field(None, gt=0)
 
 
+class TakeProfitChange(TakeProfitOrder):
+    order_id: UUID
+
+
+class StopLossChange(StopLossOrder):
+    order_id: UUID
+
+
 class OrderRequest(Base):
     """Represents an order with type, market order, and limit order details.
 
@@ -91,3 +98,5 @@ class OrderRequest(Base):
     market_order: Optional[MarketOrder] = None
     limit_order: Optional[LimitOrder] = None
     close_order: Optional[CloseOrder] = None
+    take_profit_change: Optional[TakeProfitChange] = None
+    stop_loss_change: Optional[StopLossChange] = None

@@ -112,8 +112,8 @@ async def generate_db() -> tuple:
         return_asks = defaultdict(list)
 
         result = await conn.execute(select(Orders))
-        users = result.fetchall()
-        for order in users:
+        orders = result.fetchall()
+        for order in orders:
             order = dict(order._mapping)
             if order['created_at']:
                 if order['order_type'] != OrderType.CLOSE:
