@@ -38,8 +38,8 @@ class MatchingEngine:
 
         self.bids, self.asks = config()
         
-        self.bids_price_levels = self.bids.keys()
-        self.asks_price_levels = self.asks.keys()
+        self.bids_price_levels = {key: self.bids[key].keys() for key in self.bids}
+        self.asks_price_levels = {key: self.asks[key].keys() for key in self.asks}
         
         self.current_price: int
         
@@ -412,7 +412,7 @@ class MatchingEngine:
         Args:
             data (dict)
         """    
-        result: tuple = await self.match_sell_order(data)
+        result: tuple = await self.match_sell_order(data, ticker=data['ticker'])
         print("Tried to match sell order, result: ", result)
         print("\n")
         
@@ -485,6 +485,7 @@ class MatchingEngine:
     async def find_bid_price_level(
       self,
       ask_price: float,
+      ticker: str,
       max_attempts: int = 5  
     ):
         """
@@ -505,9 +506,9 @@ class MatchingEngine:
                 # Finding the price with the lowest distance from the ask_price
                 price_map = {
                     key: abs(ask_price - key)
-                    for key in self.bids_price_levels
+                    for key in self.bids_price_levels[ticker]
                     if key >= ask_price
-                    and self.bids[key]
+                    and self.bids[ticker][key]
                 }
                 
                 lowest_distance = min(val for _, val in price_map.items())
@@ -524,6 +525,7 @@ class MatchingEngine:
     
     async def match_sell_order(
         self,
+        ticker: str,
         data: dict = None,
         ask_price: float = None, # Current ask price level
         quantity: float =  None,
@@ -546,19 +548,19 @@ class MatchingEngine:
         ask_price = ask_price if ask_price else data["market_price"]
         quantity = quantity if quantity else data["quantity"]
         
-        bid_price = await self.find_bid_price_level(ask_price)
+        bid_price = await self.find_bid_price_level(ask_price, ticker=ticker)
         if not bid_price:
             return (0, )
         
         
         # Fulfilling the order
-        for order in self.bids[bid_price]:
+        for order in self.bids[ticker][bid_price]:
             if quantity <= 0: 
                 break
             
             if quantity - order[1] >= 0:
                 quantity -= order[1]
-                self.bids[bid_price].remove(order) # Order is now satisfied
+                self.bids[ticker][bid_price].remove(order) # Order is now satisfied
             
             elif quantity - order[1] < 0:
                 order[1] -= quantity
@@ -573,7 +575,7 @@ class MatchingEngine:
         if attempts < 2:
             attempts += 1
             return self.match_sell_order(
-                ask_price=ask_price, quantity=quantity, attempts=attempts)
+                ask_price=ask_price, quantity=quantity, attempts=attempts, ticker=ticker)
 
         # Order was partially filled
         return (1, )
@@ -728,7 +730,7 @@ class MatchingEngine:
         book = 'bids' if bids else 'asks'
         target_book = asks if asks else bids
         
-        target_book[data["price"]].append([
+        target_book[data['ticker']][data["price"]].append([
             data["created_at"], quantity, data
         ])
         
@@ -739,11 +741,9 @@ class MatchingEngine:
                 "message": "Order added to orderbook"
             })
         )
-        print("\n")
-        print("-" * 10)
+
         print(f"Successfully added {data['order_id'][-5:]} to {book}")
         print("-" * 10)
-        print("\n")
     
 
 def run():

@@ -6,7 +6,7 @@ from sqlalchemy import select
 # Local
 from utils.arithemtic import get_quantitative_metrics, beta, get_benchmark_returns, ghpr
 from utils.db import get_active_orders, get_orders, get_db_session
-from utils.auth import verify_jwt_token
+from utils.auth import verify_jwt_token_http
 from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus
 from exceptions import InvalidAction
@@ -165,7 +165,7 @@ portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
 @portfolio.get('/orders/')
 async def orders(
-    user_id: str = Depends(verify_jwt_token),
+    user_id: str = Depends(verify_jwt_token_http),
     order_status: Optional[OrderStatus] = None
 ) -> list[dict]:
     """
@@ -182,7 +182,7 @@ async def orders(
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
-async def performance(user_id: str = Depends(verify_jwt_token)):
+async def performance(user_id: str = Depends(verify_jwt_token_http)):
     """
     Returns performance metrics for the account
 
@@ -222,7 +222,7 @@ async def performance(user_id: str = Depends(verify_jwt_token)):
 
 @portfolio.get("/quantitative", response_model=QuantitativeMetrics)
 async def quantitative_metrics(
-    user_id: str = Depends(verify_jwt_token),
+    user_id: str = Depends(verify_jwt_token_http),
     benchmark_ticker: Optional[str] = None,
     months_ago: Optional[int] = None,
     total_trades: Optional[int] = None

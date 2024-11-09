@@ -42,13 +42,21 @@ def create_jwt_token(data: dict) -> str:
     return encode(data, SECRET_KEY, algorithm=ALGORITHM)
     
 
-def verify_jwt_token(token: str = Depends(oauth2_scheme)):
+def verify_jwt_token_http(token: str = Depends(oauth2_scheme)) -> str:
     try:
         payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload['sub']
     except InvalidTokenError:
         raise InvalidAction("User unauthorised")
 
+
+def verify_jwt_token_ws(token: str) -> str:
+    try:
+        payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload['sub']
+    except InvalidTokenError:
+        raise InvalidAction("User unauthorised")
+    
 
 async def check_user_exists(user: User) -> Users:
     """

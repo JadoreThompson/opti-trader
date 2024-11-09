@@ -21,6 +21,7 @@ from db_models import Orders, Users
 from exceptions import UnauthorisedError, InvalidAction
 from enums import OrderType, OrderStatus
 from models.matching_engine_models import OrderRequest
+from utils.auth import verify_jwt_token_ws
 from utils.db import get_db_session
 
 
@@ -38,8 +39,6 @@ def websocket_exception_handler(func):
     """
     @wraps(func)
     async def handle_exceptions(self, *args, **kwargs):
-        error_message = {'status': 'error', 'message': None}
-        
         try:
             return await func(self, *args, **kwargs)
         
@@ -77,7 +76,8 @@ class ClientManager:
         message = json.loads(message)
         
         # Verifying user
-        if not await self.check_user_exists(message["user_id"]):
+        user_id = verify_jwt_token_ws(message['token'])
+        if not await self.check_user_exists(user_id):
             raise UnauthorisedError("User doesn't exist")
 
         await self.socket.send_text(json.dumps({
