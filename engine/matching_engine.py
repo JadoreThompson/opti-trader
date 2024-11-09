@@ -14,7 +14,7 @@ from sqlalchemy import update, select
 from db_models import Orders
 from enums import OrderType, OrderStatus, _InternalOrderType
 from exceptions import DoesNotExist, InvalidAction
-from models import OrderRequest
+from models.matching_engine_models import OrderRequest
 from tests.test_config import config
 from utils.db import get_db_session
 from engine.order_manager import OrderManager
@@ -131,7 +131,7 @@ class MatchingEngine:
                 take_profit_data['internal_order_type'] = _InternalOrderType.TAKE_PROFIT_ORDER
                 take_profit_list = [take_profit_data["created_at"], take_profit_data["quantity"], take_profit_data]
                 
-                self.asks[take_profit_data["take_profit"]].append(take_profit_list)
+                self.asks[take_profit_data['ticker']][take_profit_data["take_profit"]].append(take_profit_list)
                 
                 await self.order_manager.add_take_profit(
                     take_profit_data['order_id'],
@@ -145,7 +145,7 @@ class MatchingEngine:
                 stop_loss_data['internal_order_type'] = _InternalOrderType.STOP_LOSS_ORDER
                 stop_loss_list = [stop_loss_data["created_at"], stop_loss_data["quantity"], stop_loss_data]
                 
-                self.asks[stop_loss_data["stop_loss"]].append(stop_loss_list)
+                self.asks[stop_loss_data['ticker']][stop_loss_data["stop_loss"]].append(stop_loss_list)
                 
                 await self.order_manager.add_stop_loss(
                     stop_loss_data['order_id'],
@@ -167,7 +167,7 @@ class MatchingEngine:
         Args:
             data (dict)
         """    
-        result: tuple = await self.match_buy_order(data)
+        result: tuple = await self.match_buy_order(data, ticker=data['ticker'])
         print("Handle buy order result\n", result)
         print('-' * 10)
         
@@ -241,6 +241,7 @@ class MatchingEngine:
     async def find_ask_price_level(
         self,
         bid_price: float,
+        ticker: str,
         max_attempts: int = 5,
     ):
         """
@@ -262,9 +263,9 @@ class MatchingEngine:
                 # Finding the price with the lowest distance from the bid_price
                 price_map = {
                     key: abs(bid_price - key)
-                    for key in list(self.asks_price_levels)
+                    for key in list(self.asks_price_levels[ticker])
                     if key >= bid_price
-                    and self.asks[key]
+                    and self.asks[ticker][key]
                 }
                 
                 lowest_distance = min(val for _, val in price_map.items())
@@ -281,6 +282,7 @@ class MatchingEngine:
     
     async def match_buy_order(
         self, 
+        ticker: str,
         data: dict = None,
         bid_price: float = None,
         quantity: float =  None,
@@ -301,9 +303,10 @@ class MatchingEngine:
             (2, ask_price): Order was successfully filled
         """
         bid_price = data["price"] if not bid_price else bid_price
-        quantity = data["quantity"] if not quantity else quantity 
+        quantity = data["quantity"] if not quantity else quantity
         
-        ask_price = await self.find_ask_price_level(bid_price)
+        
+        ask_price = await self.find_ask_price_level(bid_price, ticker=ticker)
         if not ask_price:
             return (0, )
         
@@ -311,7 +314,7 @@ class MatchingEngine:
         touched_orders = []
         
         # Fulfilling the order
-        for order in self.asks[ask_price]:
+        for order in self.asks[ticker][ask_price]:
             # Adding the order to the batch that needs to be updated
             order_copy = order[2]
             order_copy.pop('internal_order_type', None)
@@ -332,7 +335,7 @@ class MatchingEngine:
                     order[2]['filled_price'] = ask_price
                     order[2]['order_status'] = OrderStatus.FILLED
                 
-                self.asks[ask_price].remove(order)
+                self.asks[ticker][ask_price].remove(order)
             
             elif quantity - order[1] < 0:
                 order[1] -= quantity
@@ -352,7 +355,11 @@ class MatchingEngine:
         if attempts < 2:
             attempts += 1
             return await self.match_buy_order(
-                bid_price=bid_price, quantity=quantity, attempts=attempts)
+                bid_price=bid_price, 
+                quantity=quantity, 
+                attempts=attempts,
+                ticker=ticker,
+            )
 
         # Order was partially filled
         # Updating all touched orders
@@ -371,7 +378,7 @@ class MatchingEngine:
         
         try:
             order_list = [order['created_at'], order['quantity'], order]
-            self.bids[order['limit_price']].append(order_list)
+            self.bids[order['ticker']][order['limit_price']].append(order_list)
             
             await self.place_tp_sl(order)
             await self.order_manager.add_entry(
@@ -389,14 +396,7 @@ class MatchingEngine:
                 })
             )
         
-        except InvalidAction as e:
-            await self.publish_update_to_client(channel=channel, message=json.dumps({
-                    'status': 'error',
-                    'message': str(e),
-                    'order_id': order['order_id']
-                }))
-        
-        except DoesNotExist:
+        except (InvalidAction, DoesNotExist) as e:
             await self.publish_update_to_client(channel=channel, message=json.dumps({
                     'status': 'error',
                     'message': str(e),
@@ -616,14 +616,7 @@ class MatchingEngine:
                 })
             )
             
-        except InvalidAction as e:
-            await self.publish_update_to_client(channel=channel, message=json.dumps({
-                'status': 'error',
-                'message': str(e),
-                'order_id': order_id
-            }))
-        
-        except DoesNotExist as e:
+        except (InvalidAction, DoesNotExist) as e:
             await self.publish_update_to_client(channel=channel, message=json.dumps({
                 'status': 'error',
                 'message': str(e),
@@ -668,20 +661,13 @@ class MatchingEngine:
                 })
             )
             
-        except InvalidAction as e:
+        except (InvalidAction, DoesNotExist) as e:
             await self.publish_update_to_client(channel=channel, message=json.dumps({
                 'status': 'error',
                 'message': str(e),
                 'order_id': order_id
             }))
-        
-        except DoesNotExist as e:
-            await self.publish_update_to_client(channel=channel, message=json.dumps({
-                'status': 'error',
-                'message': str(e),
-                'order_id': order_id
-            }))
-
+            
 
     async def handle_stop_loss_change(
         self,
@@ -714,14 +700,7 @@ class MatchingEngine:
                 })
             )
         
-        except InvalidAction as e:
-            await self.publish_update_to_client(channel=channel, message=json.dumps({
-                'status': 'error',
-                'message': str(e),
-                'order_id': order_id
-            }))
-        
-        except DoesNotExist as e:
+        except (InvalidAction, DoesNotExist) as e:
             await self.publish_update_to_client(channel=channel, message=json.dumps({
                 'status': 'error',
                 'message': str(e),

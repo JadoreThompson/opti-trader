@@ -36,7 +36,7 @@ class BaseOrder(Base):
         stop_loss (Optional[float]): The stop-loss price, must be positive.
     """
     ticker: str
-    quantity: float = Field(gt=0)
+    quantity: int = Field(gt=0)
     take_profit: Optional[TakeProfitOrder] = Field(None)
     stop_loss: Optional[StopLossOrder] = Field(None)
 

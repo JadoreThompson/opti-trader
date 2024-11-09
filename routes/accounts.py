@@ -1,16 +1,16 @@
-# Local
 from sqlalchemy import insert
 
+# Local
 from config import PH
 from db_models import Users
 from exceptions import DuplicateError, DoesNotExist, InvalidError
-from models import User
+from models.matching_engine_models import User
+from utils.auth import check_user_exists, create_jwt_token
+from utils.db import get_db_session
 
 # FA
 from fastapi import APIRouter, HTTPException
-
-from utils.accounts import check_user_exists
-from utils.db import get_db_session
+from fastapi.responses import JSONResponse
 
 
 accounts = APIRouter(prefix="/accounts", tags=['accounts'])
@@ -24,6 +24,7 @@ async def register(body: User):
 
     Args:
         body (User): The user information for registration.
+        
     Raises:
         HTTPException: If registration is successful, raises with status code 200.
         DuplicateError: If the user already exists.
@@ -37,14 +38,23 @@ async def register(body: User):
     except DoesNotExist:
         password = PH.hash(body.password)
         async with get_db_session() as session:
-            await session.execute(insert(Users).values(email=body.email, password=password))
+            user = await session.execute(
+                insert(Users).values(email=body.email, password=password)
+                .returning(Users)
+            )
+            
             await session.commit()
-            raise HTTPException(status_code=200)
+            return JSONResponse(
+                status_code=200,
+                content={'token': create_jwt_token({'sub': str(user.scalar().user_id)})}
+            )
 
     except InvalidError:
         raise InvalidError("User already exists")
+    
     except Exception as e:
-        print("[REGISTER][ERROR] >> ", type(e), str(e))
+        print("Register", type(e), str(e))
+        print("-" * 10)
         raise
 
 
@@ -62,9 +72,14 @@ async def login(body: User):
         Exception: For unexpected errors.
     """
     try:
-        if await check_user_exists(body):
-            raise HTTPException(status_code=200)
-        raise DoesNotExist("User")
+        user = await check_user_exists(body)
+        if not user:
+            raise DoesNotExist("User")
+        
+        return JSONResponse(
+                status_code=200,
+                content={'token': create_jwt_token({'sub': str(user.user_id)})}
+            )
     except DoesNotExist as e:
         print("[LOGIN][ERROR] >> ", type(e), str(e))
         raise

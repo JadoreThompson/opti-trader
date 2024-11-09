@@ -18,8 +18,9 @@ from sqlalchemy import insert, select, inspect
 
 # Local
 from db_models import Orders, Users
+from exceptions import UnauthorisedError, InvalidAction
 from enums import OrderType, OrderStatus
-from models import OrderRequest
+from models.matching_engine_models import OrderRequest
 from utils.db import get_db_session
 
 
@@ -37,22 +38,23 @@ def websocket_exception_handler(func):
     """
     @wraps(func)
     async def handle_exceptions(self, *args, **kwargs):
+        error_message = {'status': 'error', 'message': None}
+        
         try:
             return await func(self, *args, **kwargs)
         
-        except ValidationError as e:
-            print(type(e), str(e))
-            print('-' * 10)
-            await self.socket.close(code=1014, reason="Invalid Schema")
+        except (ValidationError, AttributeError) as e:
+            error = "Invalid Schema"
+            await self.socket.close(code=1014, reason=error)
         
-        except AttributeError as e:
-            print(type(e), str(e))
-            print('-' * 10)
-            await self.socket.close(code=1014, reason='Invalid Schema')    
-            
+        except (UnauthorisedError, InvalidAction) as e:
+            error = str(e)
+            await self.socket.close(code=1014, reason=error)
+
         except Exception as e:
+            print('WebSocket Error:')
             print(type(e), str(e))
-            print('-' * 10)
+            print('-' * 10)           
             
     return handle_exceptions
 
@@ -76,8 +78,7 @@ class ClientManager:
         
         # Verifying user
         if not await self.check_user_exists(message["user_id"]):
-            await self.socket.close(code=1008, reason="User doesn't exist")
-            raise Exception("Websocket closed")
+            raise UnauthorisedError("User doesn't exist")
 
         await self.socket.send_text(json.dumps({
             'status': 'success',
@@ -103,17 +104,19 @@ class ClientManager:
         Returns:
             bool: True - user exists. False - user doesn't exist
         """        
-        async with get_db_session() as session:
-            result = await session.execute(
-                select(Users)
-                .where(Users.user_id == user_id)
-            )
-            if result.scalar():
-                self.user_id = user_id
+        try:
+            async with get_db_session() as session:
+                result = await session.execute(
+                    select(Users)
+                    .where(Users.user_id == user_id)
+                )
+                self.user = result.scalar()
                 return True
-            return False
-        
-        
+        except Exception as e:
+            print(type(e), str(e))
+            print('-' * 10)
+
+
     async def listen_to_prices(self) -> None:
         """
         Subscribes to the prices channel for 
@@ -144,6 +147,7 @@ class ClientManager:
             if message.type == OrderType.MARKET or \
                 message.type == OrderType.LIMIT:
                 order: dict = await self.create_order_in_db(message)
+                print(11)
             
             elif message.type == OrderType.CLOSE:
                 order_id = message.close_order.order_id
@@ -163,7 +167,7 @@ class ClientManager:
                 if order['order_status'] != OrderStatus.NOT_FILLED:
                     await self.socket.send_text(json.dumps({
                         'status': 'error',
-                        'message': "Can't update entry price of partially or fully filled ordre"
+                        'message': "Can't update entry price of partially or fully filled order",
                         'order_id': order['order_id']
                     }))
                     return
@@ -202,23 +206,30 @@ class ClientManager:
         Args:
             message (OrderRequest)
 
-        Raises:
-            Exception: _description_
-
         Returns:
             dict: A dictionary representation of the order without the _sa_instance_state key
-        """        
+        """
         try:
             message_dict = message.limit_order if message.limit_order else message.market_order
             message_dict = message_dict.model_dump()
             
-            message_dict['stop_loss'] = message_dict.get('stop_loss', {}).get('price', None)
-            message_dict['take_profit'] = message_dict.get('take_profit', {}).get('price', None)
-            message_dict['user_id'] = self.user_id
+            while message_dict['ticker'] not in self.ticker_quotes:
+                await asyncio.sleep(0.1)
+            
+            if self.ticker_quotes[message_dict['ticker']] * message_dict['quantity'] > self.user.balance:
+                raise InvalidAction("Insufficient balance")
+                        
+            for field in ['stop_loss', 'take_profit']:
+                if isinstance(message_dict.get(field, None), dict):
+                    message_dict[field] = message_dict.get(field, {}).get('price', None)
+            
+            message_dict['user_id'] = self.user.user_id
             message_dict['order_type'] = message.type
+            
+            # Getting the price
             message_dict['price'] = message_dict.get('limit_price', None)\
-                if message_dict.get('limit_price', None) else round(random.uniform(100, 150), 2)
-    
+                if message_dict.get('limit_price', None) else 110
+
             # Inserting
             async with get_db_session() as session:
                 result = await session.execute(
@@ -226,7 +237,7 @@ class ClientManager:
                     .values(message_dict)
                     .returning(Orders)
                 )
-                
+                    
                 order = {
                     key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
                     for key, value in vars(result.scalar()).items()
@@ -235,10 +246,8 @@ class ClientManager:
                 
                 await session.commit()
                 return order
-        except Exception as e:
-            print("[CREATE ORDER IN DB][ERROR] >> ", type(e), str(e))
-            raise Exception
-    
+        except InvalidAction:
+            raise
     
     async def retrieve_order(self, order_id: str | UUID) -> dict:
         """
@@ -287,10 +296,12 @@ class ClientManager:
         and relays the messages back to the client
         """        
         async with REDIS_CLIENT.pubsub() as pubsub:
-            await pubsub.subscribe(f"trades_{self.user_id}")
+            await pubsub.subscribe(f"trades_{self.user.user_id}")
             
             async for message in pubsub.listen():
                 await asyncio.sleep(0.1)
                 
                 if message.get('type', None) == 'message':
-                    await self.socket.send_text(message['data'])
+                    message = json.loads(message['data'])
+                    await self.socket.send_bytes(json.dumps(message))
+                    

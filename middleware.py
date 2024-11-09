@@ -21,7 +21,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     _TIME_LIMIT = timedelta(minutes=1)
-    _REQUEST_LIMIT = 5
+    _REQUEST_LIMIT = 10 ** 5
 
     def __init__(self, app):
         super().__init__(app)

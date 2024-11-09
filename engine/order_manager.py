@@ -85,9 +85,7 @@ class OrderManager:
                 self._orders[order_id]['entry_price'] = order.get('filled_price', None) if \
                     order.get('filled_price', None) else order.get('price', None)                    
                 self._orders[order_id]['entry_list'] = entry_list
-                
-                print(json.dumps(self._orders[order_id], indent=4))
-                print('-' * 10)
+                self._orders[order_id]['ticker'] = order['ticker']
         except InvalidAction:
             raise
 
@@ -240,17 +238,18 @@ class OrderManager:
                 ):
                     original_price = self._orders[order_id][f"{field}_price"]
                     order_list = self._orders[order_id][f"{field}_list"]
+                    ticker = self._orders[order_id]['ticker']
                     
                     if bids:
                         if order_list in bids[original_price]:
-                            bids[original_price].remove(order_list)
-                        bids[new_price].append(order_list)
+                            bids[ticker][original_price].remove(order_list)
+                        bids[ticker][new_price].append(order_list)
                         return True
                     
                     elif asks:
                         if order_list in asks[original_price]:
-                            asks[original_price].remove(order_list)
-                        asks[new_price].append(order_list)
+                            asks[ticker][original_price].remove(order_list)
+                        asks[ticker][new_price].append(order_list)
                         return True
                     return False
         except DoesNotExist:
@@ -358,6 +357,8 @@ class OrderManager:
         if order_id not in self._orders:
             return
 
+        ticker = self._orders[order_id]['ticker']
+
         bid_price = self._orders[order_id]["entry_price"]
         entry_list = self._orders[order_id]['entry_list']
         
@@ -376,13 +377,13 @@ class OrderManager:
         
         # Deleting from arrays and from _orders
         if entry_list in bids[bid_price]:
-            bids[bid_price].remove(entry_list)
+            bids[ticker][bid_price].remove(entry_list)
         
         if stop_loss_list in asks[stop_loss_price]:
-            asks[stop_loss_price].remove(stop_loss_list)
+            asks[ticker][stop_loss_price].remove(stop_loss_list)
         
         if take_profit_list in asks[take_profit_price]:
-            asks[take_profit_price].remvove(take_profit_list)
+            asks[ticker][take_profit_price].remvove(take_profit_list)
             
         del self._orders[order_id]
         

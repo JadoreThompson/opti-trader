@@ -9,32 +9,34 @@ import websockets
 
 # Local
 from enums import OrderType
-from models import OrderRequest, MarketOrder
+from models.matching_engine_models import OrderRequest, MarketOrder
 
 
 async def main(user_id, order_id=None):
-    BASE_URL = "ws://127.0.0.1:8000"
+    BASE_URL = "ws://127.0.0.1:80"
 
     async with websockets.connect(BASE_URL + '/stream/trade') as socket:
         await socket.send(json.dumps({'user_id': user_id}))
         m = await socket.recv()
+        
         # while True:
-            # message = {
-            #     'type': 'market_order',
-            #     'market_order': {
-            #         'ticker': 'BTC/USDT',
-            #         'quantity': random.randint(100, 100000),
-            #         'price': 100
-            #     }
-            # }
+        #     message = {
+        #         'type': 'market_order',
+        #         'market_order': {
+        #             'ticker': 'BTC/USDT',
+        #             'quantity': random.randint(100, 100000),
+        #             'price': 100
+        #         }
+        #     }
 
         order_ids = []
+        
         for _ in range(2):
             message = {
                 'type': 'limit_order',
                 'limit_order': {
-                    'ticker': 'BTC/USDT',
-                    'quantity': random.randint(100, 100000),
+                    'ticker': 'SOL/USDT',
+                    'quantity': random.randint(0, 1),
                     'limit_price': 130,
                     'stop_loss': {
                         'price': 100
@@ -51,9 +53,10 @@ async def main(user_id, order_id=None):
             print("Received message in websocket test!")
             print(m)
             print("-" * 10)
+            await asyncio.sleep(3)
         
-            order_ids.append(m['order_id'])
-            await asyncio.sleep(2)
+        #     order_ids.append(m['order_id'])
+        #     await asyncio.sleep(2)
             
         #     await asyncio.sleep(1)
 
@@ -77,51 +80,32 @@ async def main(user_id, order_id=None):
         #     await asyncio.sleep(2)
                 
         
-        for order_id in order_ids:
-            print("-" * 10)
-            print(order_id)
-            print("-" * 10)
-            for _ in range(5):
-                message = {
-                    # 'type': 'stop_loss_change',
-                    # 'stop_loss_change': {
-                    'type': 'take_profit_change',
-                    'take_profit_change': {
-                        'order_id': order_id,
-                        'price': 1000
-                    }
-                }
+        # for order_id in order_ids:
+        #     print("-" * 10)
+        #     print(order_id)
+        #     print("-" * 10)
+        #     for _ in range(5):
+        #         message = {
+        #             # 'type': 'stop_loss_change',
+        #             # 'stop_loss_change': {
+        #             'type': 'take_profit_change',
+        #             'take_profit_change': {
+        #                 'order_id': order_id,
+        #                 'price': 1000
+        #             }
+        #         }
             
-                await socket.send(json.dumps(message))
+        #         await socket.send(json.dumps(message))
                 
-                m = await socket.recv()
-                # m = json.loads(m)
+        #         m = await socket.recv()
+        #         # m = json.loads(m)
                 
-                print("-" * 10)
-                print("Received message in websocket test!")
-                print(m)
-                print("-" * 10)
+        #         print("-" * 10)
+        #         print("Received message in websocket test!")
+        #         print(m)
+        #         print("-" * 10)
                 
-                await asyncio.sleep(2)
-
-
-
-def run(user_id):
-    asyncio.run(main(user_id))
-
-
-def run2():
-    print(1)
-    time.sleep(0.5)
-    message = {
-        'type': 'close_order',
-        'close_order': {
-            'order_id': str(uuid4()),
-            'ticker': 'BTC/USDT',
-            'quantity': random.randint(100, 100000),
-        }
-    }
-    asyncio.run(main(message))
+        #         await asyncio.sleep(2)
 
 
 def start():

@@ -121,9 +121,9 @@ async def generate_db() -> tuple:
             
             if order['created_at']:
                 if i % 2 == 0:
-                    return_bids[order['price']].append([order['created_at'], order['quantity'], order])
+                    return_bids[order['ticker']][order['price']].append([order['created_at'], order['quantity'], order])
                 else:
-                    return_asks[order['price']].append([order['created_at'], order['quantity'], order])
+                    return_asks[order['ticker']][order['price']].append([order['created_at'], order['quantity'], order])
 
         return return_bids, return_asks
 
