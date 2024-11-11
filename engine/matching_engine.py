@@ -12,7 +12,7 @@ from sqlalchemy import update, select
 # Local
 # from config import REDIS_CLIENT
 from db_models import Orders
-from enums import OrderType, OrderStatus, _InternalOrderType
+from enums import ConsumerStatusType, OrderType, OrderStatus, _InternalOrderType
 from exceptions import DoesNotExist, InvalidAction
 from models.matching_engine_models import OrderRequest
 from tests.test_config import config
@@ -36,8 +36,7 @@ class MatchingEngine:
         self.redis = REDIS_CLIENT
         self.order_manager = OrderManager()
 
-        self.bids, self.asks = config()
-        
+        self.bids, self.asks = {"APPL": defaultdict(list)}, {"APPL": defaultdict(list)}
         self.bids_price_levels = {key: self.bids[key].keys() for key in self.bids}
         self.asks_price_levels = {key: self.asks[key].keys() for key in self.asks}
         
@@ -56,7 +55,7 @@ class MatchingEngine:
                 await asyncio.sleep(0.1)
                 if message.get("type", None) == "message":
                     asyncio.create_task(self.handle_incoming_message(message["data"]))
-
+                    print("Sent Message to handler")
 
     async def handle_incoming_message(self, data: dict):
         """
@@ -167,7 +166,7 @@ class MatchingEngine:
         Args:
             data (dict)
         """    
-        result: tuple = await self.match_buy_order(data, ticker=data['ticker'])
+        result: tuple = await self.match_buy_order(data=data, ticker=data['ticker'])
         print("Handle buy order result\n", result)
         print('-' * 10)
         
@@ -176,7 +175,7 @@ class MatchingEngine:
             await self.redis.publish(
                 channel=channel,
                 message=json.dumps({
-                    "status": "error",
+                    "status": ConsumerStatusType.ERROR,
                     "message": "Insufficient asks to fulfill bid order",
                     "order_id": data["order_id"]
                 })    
@@ -188,7 +187,7 @@ class MatchingEngine:
             1: {
                 "channel": channel,
                 "message": json.dumps({
-                    "status": "update", 
+                    "status": ConsumerStatusType.UPDATE, 
                     "message": "Order partially filled",
                     "order_id": data["order_id"]
                 })
@@ -197,7 +196,7 @@ class MatchingEngine:
             2: {
                 "channel": channel,
                 "message": json.dumps({
-                    "status": "success",
+                    "status": ConsumerStatusType.SUCCESS,
                     "message": "Order successfully placed",
                     "order_id": data["order_id"]
                 })
@@ -421,7 +420,7 @@ class MatchingEngine:
             await self.redis.publish(
                 channel=channel,
                 message=json.dumps({
-                    "status": "error",
+                    "status": ConsumerStatusType.ERROR,
                     "message": "Insufficient asks to fulfill sell order",
                     "order_id": data["order_id"]
                 })    
@@ -433,7 +432,7 @@ class MatchingEngine:
             1: {
                 "channel": channel,
                 "message": json.dumps({
-                    "status": "update", 
+                    "status": ConsumerStatusType.UPDATE, 
                     "message": "Order partially closed",
                     "order_id": data["order_id"]
                 })
@@ -442,7 +441,7 @@ class MatchingEngine:
             2: {
                 "channel": channel,
                 "message": json.dumps({
-                    "status": "success",
+                    "status": ConsumerStatusType.SUCCESS,
                     "message": "Order successfully closed",
                     "order_id": data["order_id"]
                 })
@@ -737,7 +736,7 @@ class MatchingEngine:
         await self.publish_update_to_client(
             f"trades_{data["user_id"]}", 
             json.dumps({
-                "status": "update",
+                "status": ConsumerStatusType.UPDATE,
                 "message": "Order added to orderbook"
             })
         )

@@ -1,6 +1,6 @@
 import asyncio
 from uuid import UUID
-from typing import Optional
+from typing import List, Optional
 from sqlalchemy import select
 
 # Local
@@ -11,7 +11,7 @@ from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus
 from exceptions import InvalidAction
 from db_models import Users
-from models.models import OrderRequest, PerformanceMetrics, QuantitativeMetrics
+from models.models import Order, OrderRequest, PerformanceMetrics, QuantitativeMetrics
 
 # FA
 from fastapi import APIRouter, Depends
@@ -163,7 +163,7 @@ async def get_avg_risk_per_trade(
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
 
-@portfolio.get('/orders/')
+@portfolio.get('/orders', response_model=List[Order])
 async def orders(
     user_id: str = Depends(verify_jwt_token_http),
     order_status: Optional[OrderStatus] = None
@@ -177,8 +177,8 @@ async def orders(
     Returns:
         list[dict]: all orders based on the constraints
     """
-    all_orders = await get_orders(locals())
-    return all_orders
+    all_orders: list[dict] = await get_orders(locals())
+    return [Order(**order) for order in all_orders]
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)

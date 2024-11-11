@@ -19,7 +19,7 @@ async def watch_price(ticker, exch):
             if new_price > price:
                 price = new_price
                 await redis_client.publish(channel='prices', message=json.dumps({ticker: round(price, 2)}))
-                print(f"{ticker}", price)
+                # print(f"{ticker}", price)
         except Exception as e:
             print(type(e), str(e))
             continue

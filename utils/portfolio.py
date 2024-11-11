@@ -2,6 +2,7 @@ from sqlalchemy import select
 from utils.db import get_db_session
 from db_models import Users
 
+
 async def get_monthly_returns(orders: list, all_dates: set) -> dict[str, float]:
     """
     Returns a dictionary with the key being YYYY-MM and value being the cumulative return

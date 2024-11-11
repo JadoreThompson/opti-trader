@@ -23,3 +23,10 @@ class _InternalOrderType(str, Enum):
     MARKET_ORDER = 'market_order'
     STOP_LOSS_ORDER = 'stop_loss_order'
     TAKE_PROFIT_ORDER = 'take_profit_order'
+
+
+class ConsumerStatusType (str, Enum):
+    SUCCESS = 'success',
+    UPDATE = 'update',
+    ERROR = 'error'
+    

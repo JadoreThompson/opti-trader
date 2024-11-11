@@ -19,7 +19,7 @@ from sqlalchemy import insert, select, inspect
 # Local
 from db_models import Orders, Users
 from exceptions import UnauthorisedError, InvalidAction
-from enums import OrderType, OrderStatus
+from enums import ConsumerStatusType, OrderType, OrderStatus
 from models.matching_engine_models import OrderRequest
 from utils.auth import verify_jwt_token_ws
 from utils.db import get_db_session
@@ -81,7 +81,7 @@ class ClientManager:
             raise UnauthorisedError("User doesn't exist")
 
         await self.socket.send_text(json.dumps({
-            'status': 'success',
+            'status': ConsumerStatusType.SUCCESS,
             'message': 'Connected successfully'
         }))
         
@@ -139,13 +139,13 @@ class ClientManager:
         the user sends. Acts as the funneler
         """    
         while True:
+            print('Handling')
             message = await self.socket.receive_text()
             message = OrderRequest(**(json.loads(message)))
             additional_fields = {'type': message.type}
             
-            
-            if message.type == OrderType.MARKET or \
-                message.type == OrderType.LIMIT:
+            if message.type == OrderType.MARKET or message.type == OrderType.LIMIT:    
+                print(10)
                 order: dict = await self.create_order_in_db(message)
                 print(11)
             
@@ -197,6 +197,7 @@ class ClientManager:
             # Shipping off to the engine for computation
             order.update(additional_fields)
             asyncio.create_task(self.send_order_to_engine(order))
+            print('sent to engine')
             
     
     async def create_order_in_db(self, message: OrderRequest) -> dict:
@@ -213,11 +214,11 @@ class ClientManager:
             message_dict = message.limit_order if message.limit_order else message.market_order
             message_dict = message_dict.model_dump()
             
-            while message_dict['ticker'] not in self.ticker_quotes:
-                await asyncio.sleep(0.1)
+            # while message_dict['ticker'] not in self.ticker_quotes:
+            #     await asyncio.sleep(0.1)
             
-            if self.ticker_quotes[message_dict['ticker']] * message_dict['quantity'] > self.user.balance:
-                raise InvalidAction("Insufficient balance")
+            # if self.ticker_quotes[message_dict['ticker']] * message_dict['quantity'] > self.user.balance:
+            #     raise InvalidAction("Insufficient balance")
                         
             for field in ['stop_loss', 'take_profit']:
                 if isinstance(message_dict.get(field, None), dict):
@@ -248,6 +249,7 @@ class ClientManager:
                 return order
         except InvalidAction:
             raise
+    
     
     async def retrieve_order(self, order_id: str | UUID) -> dict:
         """
@@ -303,5 +305,7 @@ class ClientManager:
                 
                 if message.get('type', None) == 'message':
                     message = json.loads(message['data'])
-                    await self.socket.send_bytes(json.dumps(message))
+                    print('engine message: ')
+                    print(message)
+                    await self.socket.send_text(json.dumps(message))
                     

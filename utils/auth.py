@@ -43,11 +43,16 @@ def create_jwt_token(data: dict) -> str:
     
 
 def verify_jwt_token_http(token: str = Depends(oauth2_scheme)) -> str:
+    print('True' * 10)
     try:
         payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(payload)
         return payload['sub']
     except InvalidTokenError:
         raise InvalidAction("User unauthorised")
+    
+    except Exception:
+        print('Chicken noode lsoup')
 
 
 def verify_jwt_token_ws(token: str) -> str:

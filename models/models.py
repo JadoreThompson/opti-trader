@@ -1,7 +1,8 @@
 from typing import Optional
+from datetime import datetime
 
 # Local
-from enums import OrderStatus
+from enums import OrderStatus, OrderType
 
 # Pydantic
 from uuid import UUID
@@ -37,3 +38,21 @@ class PerformanceMetrics(QuantitativeMetrics):
     balance: Optional[float] = None
     total_profit: Optional[float] = None
     winrate: Optional[float] = None
+
+
+class Order(Base):
+    """
+    Order Schema for API Endpoints        
+    """    
+    ticker: str
+    order_type: OrderType
+    limit_price: Optional[float] = None
+    take_profit: Optional[float] = None
+    stop_loss: Optional[float] = None
+    quantity: float
+    order_status: OrderStatus
+    price: Optional[float] = None
+    created_at: datetime
+    filled_price: Optional[float] = None
+    closed_at: Optional[datetime] = None
+    close_price: Optional[float] = None
