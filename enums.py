@@ -29,4 +29,5 @@ class ConsumerStatusType (str, Enum):
     SUCCESS = 'success',
     UPDATE = 'update',
     ERROR = 'error'
+    PRICE_UPDATE = 'price'
     

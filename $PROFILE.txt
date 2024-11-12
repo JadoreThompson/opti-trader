@@ -1,0 +1,3 @@
+function pip-active {
+	.\venv\Scripts\activate
+}

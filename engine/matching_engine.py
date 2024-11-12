@@ -7,11 +7,11 @@ from typing import Tuple
 from uuid import uuid4, UUID
 import redis
 
-from sqlalchemy import update, select
+from sqlalchemy import insert, update, select
 
 # Local
 # from config import REDIS_CLIENT
-from db_models import Orders
+from db_models import MarketData, Orders
 from enums import ConsumerStatusType, OrderType, OrderStatus, _InternalOrderType
 from exceptions import DoesNotExist, InvalidAction
 from models.matching_engine_models import OrderRequest
@@ -36,7 +36,27 @@ class MatchingEngine:
         self.redis = REDIS_CLIENT
         self.order_manager = OrderManager()
 
-        self.bids, self.asks = {"APPL": defaultdict(list)}, {"APPL": defaultdict(list)}
+        self.bids = {
+            "APPL": {
+                100: [[datetime.now().timestamp(), 100, {"order_id": "ABC123"}]] * 100,
+                110: [[datetime.now().timestamp(), 100, {"order_id": "DEF456"}]] * 100,
+                120: [[datetime.now().timestamp(), 100, {"order_id": "GHI789"}]] * 100,
+                130: [[datetime.now().timestamp(), 100, {"order_id": "JKL012"}]] * 100,
+                140: [[datetime.now().timestamp(), 100, {"order_id": "MNO345"}]] * 100,
+            }
+        }
+
+        self.asks = {
+            "APPL": {
+                100: [[datetime.now().timestamp(), 100, {"order_id": "PQR678"}]] * 100,
+                110: [[datetime.now().timestamp(), 100, {"order_id": "STU901"}]] * 100,
+                120: [[datetime.now().timestamp(), 100, {"order_id": "VWX234"}]] * 100,
+                130: [[datetime.now().timestamp(), 100, {"order_id": "YZA567"}]] * 100,
+                140: [[datetime.now().timestamp(), 100, {"order_id": "BCD890"}]] * 100,
+            }
+        }
+
+        
         self.bids_price_levels = {key: self.bids[key].keys() for key in self.bids}
         self.asks_price_levels = {key: self.asks[key].keys() for key in self.asks}
         
@@ -219,6 +239,19 @@ class MatchingEngine:
                 )                
                 
                 await self.order_manager.update_order_in_db(data)
+                
+                # Notifying on the price change
+                time = int(datetime.now().timestamp())
+                await self.publish_update_to_client(**{
+                    "channel": channel,
+                    "message": json.dumps({
+                        "status": ConsumerStatusType.PRICE_UPDATE,
+                        "message": {'ticker': data['ticker'], 'price': result[1], 'time': time},
+                    })
+                })
+                
+                await self.add_new_price_to_db(result[1], data['ticker'], time)
+                
 
             except InvalidAction as e:
                 await self.publish_update_to_client(channel=channel, message=json.dumps({
@@ -350,8 +383,9 @@ class MatchingEngine:
                 
                 return (2, ask_price)
         
+        print(ask_price)
         # Trying again 3 times
-        if attempts < 2:
+        if attempts < 20:
             attempts += 1
             return await self.match_buy_order(
                 bid_price=bid_price, 
@@ -743,7 +777,31 @@ class MatchingEngine:
 
         print(f"Successfully added {data['order_id'][-5:]} to {book}")
         print("-" * 10)
+        
     
+    async def add_new_price_to_db(self, new_price: float, ticker: str, new_time: int) -> None:
+        """
+        Creates a new record in the DB of the price
+        Args:
+            new_price (float):
+            ticker (str): 
+            new_time (int): UNIX Timestamp
+        """        
+        print('Entered Price Update DB')
+        print('-' * 10)
+        async with get_db_session() as session:
+            await session.execute(
+                insert(MarketData)
+                .values(
+                    ticker=ticker,
+                    date=new_time,
+                    price=new_price
+                )
+            )
+            await session.commit()
+            print("Sent it to DB")
+            print('-' * 10)
+
 
 def run():
     engine = MatchingEngine()

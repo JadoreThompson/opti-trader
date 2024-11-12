@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 
 # SA
-from sqlalchemy import String, UUID, Float, Enum, CheckConstraint, ForeignKey, DateTime
+from sqlalchemy import Integer, String, UUID, Float, Enum, CheckConstraint, ForeignKey, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Local
@@ -61,3 +61,12 @@ class Orders(Base):
 
     # Relationships
     users = relationship("Users", back_populates='orders')
+
+
+class MarketData(Base):
+    __tablename__ = 'market_data'
+    
+    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True),primary_key=True, default=uuid4)
+    ticker: Mapped[str] = mapped_column(String)
+    date: Mapped[int] = mapped_column(Integer, nullable=False, primary_key=True)
+    price: Mapped[float] = mapped_column(Float)
