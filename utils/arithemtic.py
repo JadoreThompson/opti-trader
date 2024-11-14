@@ -213,9 +213,7 @@ async def get_quantitative_metrics(
     #       or from the beginning of the segment
     if not total_num_trades:
         total_num_trades = 100
-    
-    print(total_num_trades)
-    
+        
     if benchmark_ticker and not months_ago or months_ago and not benchmark_ticker:
         raise InvalidAction("User specified benchmark ticker without specifying months_ago")
     
@@ -238,12 +236,14 @@ async def get_quantitative_metrics(
         zip([k for k in quant_metrics_map], await asyncio.gather(*[v for _, v in quant_metrics_map.items()]))
     )
     
-    quant_metrics_map['treynor'] = await treynor(
-            sum(pf_returns_pct) / len(pf_returns_pct),
-            sum(bm_returns) / len(pf_returns_pct),
-            quant_metrics_map['beta']
-        )
-    
+    try:
+        quant_metrics_map['treynor'] = await treynor(
+                sum(pf_returns_pct) / len(pf_returns_pct),
+                sum(bm_returns) / len(pf_returns_pct),
+                quant_metrics_map['beta']
+            )
+    except ZeroDivisionError:
+        quant_metrics_map['treynor'] = 0.0
     return quant_metrics_map
     
 

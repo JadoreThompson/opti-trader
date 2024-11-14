@@ -56,3 +56,14 @@ class Order(Base):
     filled_price: Optional[float] = None
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
+
+
+class TickerData(Base):
+    """
+    Ticker data object 
+    """
+    time: int    
+    open: float
+    high: float
+    low: float
+    close: float

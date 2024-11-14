@@ -60,7 +60,28 @@ class MatchingEngine:
         self.bids_price_levels = {key: self.bids[key].keys() for key in self.bids}
         self.asks_price_levels = {key: self.asks[key].keys() for key in self.asks}
         
-        self.current_price: int
+        self._current_price: float = None        
+
+
+    @property
+    def current_price(self):
+        return self._current_price
+
+    @current_price.setter
+    def current_price(self, value: float):
+        if self._current_price != value:
+            self._current_price = value
+            asyncio.create_task(self.on_price_change(value))  
+            
+    
+    async def on_price_change(self, new_price: float):
+        """
+        Publishes a message to all users when the price changes
+
+        Args:
+            new_price (float):
+        """        
+        await self.redis.publish(channel='prices', message=json.dumps({'ticker': 'APPL', 'price': new_price, 'time': int(datetime.now().timestamp())}))
         
     
     async def listen_to_client_events(self):
@@ -68,14 +89,14 @@ class MatchingEngine:
             Listens to messages from the to_order_book channel
             and relays to the handler
         """        
-        print("Matching Engine Listening...")
+        print('Listening for orders...')
         async with self.redis.pubsub() as pubsub:
             await pubsub.subscribe("to_order_book")
             async for message in pubsub.listen():
                 await asyncio.sleep(0.1)
                 if message.get("type", None) == "message":
                     asyncio.create_task(self.handle_incoming_message(message["data"]))
-                    print("Sent Message to handler")
+                    
 
     async def handle_incoming_message(self, data: dict):
         """
@@ -98,7 +119,8 @@ class MatchingEngine:
             await self.handle_limit_order(channel, data)
             
         elif action_type == OrderType.CLOSE:
-            await self.handle_sell_order(data, channel)
+            # await self.handle_sell_order(data, channel)
+            await self.handle_sell_order(data)
             
         elif action_type == OrderType.ENTRY_PRICE_CHANGE:
             await self.handle_entry_price_change(
@@ -124,7 +146,6 @@ class MatchingEngine:
                 channel
             )
         
-        print("Finished all")
                 
                 
     async def publish_update_to_client(self, channel: str, message: str) -> None:
@@ -139,6 +160,7 @@ class MatchingEngine:
             await self.redis.publish(channel=channel, message=message)
         except Exception as e:
             print("Publish update to client:", type(e), end=f"\n{str(e)}\n")
+            print('-' * 10)
             pass
     
     
@@ -172,7 +194,6 @@ class MatchingEngine:
                     stop_loss_data
                 )
             
-            print(f"Placed TP and SL for Order: {data['order_id'][:5]}")
         except Exception as e:
             print("Error placing TP SL\n", type(e), str(e))            
             print('-' * 10)
@@ -187,8 +208,6 @@ class MatchingEngine:
             data (dict)
         """    
         result: tuple = await self.match_buy_order(data=data, ticker=data['ticker'])
-        print("Handle buy order result\n", result)
-        print('-' * 10)
         
         # Not filled
         if result[0] == 0:
@@ -241,16 +260,17 @@ class MatchingEngine:
                 await self.order_manager.update_order_in_db(data)
                 
                 # Notifying on the price change
-                time = int(datetime.now().timestamp())
-                await self.publish_update_to_client(**{
-                    "channel": channel,
-                    "message": json.dumps({
-                        "status": ConsumerStatusType.PRICE_UPDATE,
-                        "message": {'ticker': data['ticker'], 'price': result[1], 'time': time},
-                    })
-                })
-                
-                await self.add_new_price_to_db(result[1], data['ticker'], time)
+                # time = int(datetime.now().timestamp())
+                # await self.publish_update_to_client(**{
+                #     "channel": channel,
+                #     "message": json.dumps({
+                #         "status": ConsumerStatusType.PRICE_UPDATE,
+                #         "message": {'ticker': data['ticker'], 'price': result[1], 'time': time},
+                #     })
+                # })
+                                
+                self.current_price = result[1]
+                await self.add_new_price_to_db(result[1], data['ticker'], int(datetime.now().timestamp()))
                 
 
             except InvalidAction as e:
@@ -382,8 +402,7 @@ class MatchingEngine:
                 await self.order_manager.update_touched_orders(touched_orders)
                 
                 return (2, ask_price)
-        
-        print(ask_price)
+            
         # Trying again 3 times
         if attempts < 20:
             attempts += 1
@@ -398,6 +417,47 @@ class MatchingEngine:
         # Updating all touched orders
         await self.order_manager.update_touched_orders(touched_orders)
         return (1, )
+    
+    
+    async def handle_sell_order(self, data: dict):
+        """
+        Handles the closure of orders in order to satisfy
+        the quantity of shares being desired to close
+        
+        Args:
+            data (dict): 
+        """        
+        print('Handling Sell Order')
+        print('-' * 10)
+        target_quantity = data['quantity']
+        
+        for order_id in data['order_ids']:
+            try: 
+                if await self.order_manager.declare_closed(order_id):
+                    cached_order = self.order_manager.get_order(order_id)['entry_list']
+                    
+                    new_order_list = [item for item in cached_order]
+                    new_order_list[2]['internal_order_type'] = _InternalOrderType.TAKE_PROFIT_ORDER
+                    
+                    leftover_quantity = target_quantity - cached_order[1]
+                    
+                    if leftover_quantity >= 0:
+                        target_quantity -= cached_order[1]    
+                    else:
+                        new_order_list[1] -= target_quantity     
+                        temp = [item for item in cached_order]
+                        temp[1] = abs(leftover_quantity)
+                        
+                        await self.order_manager.add_entry(
+                            order_id,
+                            temp,
+                            temp[2]
+                        )
+                    
+                    self.asks[new_order_list[2]['ticker']][self._current_price].append(new_order_list)
+            except DoesNotExist:
+                return
+                
     
     
     async def handle_limit_order(self, channel: str, order: dict) -> None:
@@ -437,82 +497,83 @@ class MatchingEngine:
                 }))
         
     
-    async def handle_sell_order(self, data: dict, channel: str) -> None:
-        """
-        Handles the creation and submission to orderbook
-        for a sell order
+    
+    # async def handle_sell_order(self, data: dict, channel: str) -> None:
+    #     """
+    #     Handles the creation and submission to orderbook
+    #     for a sell order
 
-        Args:
-            data (dict)
-        """    
-        result: tuple = await self.match_sell_order(data, ticker=data['ticker'])
-        print("Tried to match sell order, result: ", result)
-        print("\n")
+    #     Args:
+    #         data (dict)
+    #     """    
+    #     result: tuple = await self.match_sell_order(data, ticker=data['ticker'])
+    #     print("Tried to match sell order, result: ", result)
+    #     print("\n")
         
-        # Not closed
-        if result[0] == 0:
-            await self.redis.publish(
-                channel=channel,
-                message=json.dumps({
-                    "status": ConsumerStatusType.ERROR,
-                    "message": "Insufficient asks to fulfill sell order",
-                    "order_id": data["order_id"]
-                })    
-            )
-            return
+    #     # Not closed
+    #     if result[0] == 0:
+    #         await self.redis.publish(
+    #             channel=channel,
+    #             message=json.dumps({
+    #                 "status": ConsumerStatusType.ERROR,
+    #                 "message": "Insufficient asks to fulfill sell order",
+    #                 "order_id": data["order_id"]
+    #             })    
+    #         )
+    #         return
 
-        # Relaying message to user
-        status_message = {
-            1: {
-                "channel": channel,
-                "message": json.dumps({
-                    "status": ConsumerStatusType.UPDATE, 
-                    "message": "Order partially closed",
-                    "order_id": data["order_id"]
-                })
-            },
+    #     # Relaying message to user
+    #     status_message = {
+    #         1: {
+    #             "channel": channel,
+    #             "message": json.dumps({
+    #                 "status": ConsumerStatusType.UPDATE, 
+    #                 "message": "Order partially closed",
+    #                 "order_id": data["order_id"]
+    #             })
+    #         },
             
-            2: {
-                "channel": channel,
-                "message": json.dumps({
-                    "status": ConsumerStatusType.SUCCESS,
-                    "message": "Order successfully closed",
-                    "order_id": data["order_id"]
-                })
-            }
-        }.get(result[0])
+    #         2: {
+    #             "channel": channel,
+    #             "message": json.dumps({
+    #                 "status": ConsumerStatusType.SUCCESS,
+    #                 "message": "Order successfully closed",
+    #                 "order_id": data["order_id"]
+    #             })
+    #         }
+    #     }.get(result[0])
         
-        await self.publish_update_to_client(**status_message)
+    #     await self.publish_update_to_client(**status_message)
 
 
-        # Order was successfully closed
-        if result[0] == 2:
-            try:
-                data['close_price'] = result[1]
-                data['closed_at'] = datetime.now()
-                data['order_status'] = OrderStatus.CLOSED
+    #     # Order was successfully closed
+    #     if result[0] == 2:
+    #         try:
+    #             data['close_price'] = result[1]
+    #             data['closed_at'] = datetime.now()
+    #             data['order_status'] = OrderStatus.CLOSED
                 
-                data.pop('market_price', None)
+    #             data.pop('market_price', None)
                 
-                await self.order_manager.update_order_in_db(data)
-                await self.order_manager.delete(
-                    data['order_id'],
-                    self.bids, 
-                    self.asks
-                )    
+    #             await self.order_manager.update_order_in_db(data)
+    #             await self.order_manager.delete(
+    #                 data['order_id'],
+    #                 self.bids, 
+    #                 self.asks
+    #             )    
                 
-            except InvalidAction as e:
-                print("Error in handling buy order\n", str(e))
-                print('-' * 10)
-                await self.publish_update_to_client(channel=channel, message=str(e))
-            finally:
-                return
+    #         except InvalidAction as e:
+    #             print("Error in handling buy order\n", str(e))
+    #             print('-' * 10)
+    #             await self.publish_update_to_client(channel=channel, message=str(e))
+    #         finally:
+    #             return
         
         
-        # Order was partially closed so we add to orderbook
-        data['order_status'] = OrderStatus.PARTIALLY_CLOSED
-        await self.order_manager.update_order_in_db(data)
-        await self.add_order_to_orderbook(data, data["quantity"], asks=self.asks)
+    #     # Order was partially closed so we add to orderbook
+    #     data['order_status'] = OrderStatus.PARTIALLY_CLOSED
+    #     await self.order_manager.update_order_in_db(data)
+    #     await self.add_order_to_orderbook(data, data["quantity"], asks=self.asks)
 
     
     async def find_bid_price_level(
@@ -597,10 +658,6 @@ class MatchingEngine:
             
             elif quantity - order[1] < 0:
                 order[1] -= quantity
-                
-                print("-" * 10)
-                print(f"Order: {data["order_id"][:5]} filled at {bid_price}")
-                print("-" * 10)
                 
                 return (2, bid_price)
         
@@ -774,9 +831,6 @@ class MatchingEngine:
                 "message": "Order added to orderbook"
             })
         )
-
-        print(f"Successfully added {data['order_id'][-5:]} to {book}")
-        print("-" * 10)
         
     
     async def add_new_price_to_db(self, new_price: float, ticker: str, new_time: int) -> None:
@@ -787,8 +841,6 @@ class MatchingEngine:
             ticker (str): 
             new_time (int): UNIX Timestamp
         """        
-        print('Entered Price Update DB')
-        print('-' * 10)
         async with get_db_session() as session:
             await session.execute(
                 insert(MarketData)
@@ -799,8 +851,6 @@ class MatchingEngine:
                 )
             )
             await session.commit()
-            print("Sent it to DB")
-            print('-' * 10)
 
 
 def run():

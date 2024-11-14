@@ -14,6 +14,7 @@ from enums import OrderStatus
 class OrderManager:
     def __init__(self) -> None:
         self._orders = defaultdict(dict)
+        self.closed_orders = set()
 
 
     async def _validate_sl_tp_and_entry(
@@ -86,6 +87,8 @@ class OrderManager:
                     order.get('filled_price', None) else order.get('price', None)                    
                 self._orders[order_id]['entry_list'] = entry_list
                 self._orders[order_id]['ticker'] = order['ticker']
+                
+                # print(json.dumps(self._orders, indent=4))
         except InvalidAction:
             raise
 
@@ -114,8 +117,8 @@ class OrderManager:
                 self._orders[order_id]['take_profit_price'] = order.get('take_profit', None)
                 self._orders[order_id]['take_profit_list'] = take_profit_list
                 
-                print(json.dumps(self._orders, indent=4))
-                print('-' * 10)
+                # print(json.dumps(self._orders, indent=4))
+                # print('-' * 10)
         except InvalidAction:
             raise
         
@@ -144,8 +147,8 @@ class OrderManager:
                 self._orders[order_id]['stop_loss'] = order.get('stop_loss', None)
                 self._orders[order_id]['stop_loss_list'] = stop_loss_list
                 
-                print(json.dumps(self._orders, indent=4))
-                print('-' * 10)
+                # print(json.dumps(self._orders, indent=4))
+                # print('-' * 10)
         except InvalidAction:
             raise
 
@@ -362,11 +365,12 @@ class OrderManager:
         bid_price = self._orders[order_id]["entry_price"]
         entry_list = self._orders[order_id]['entry_list']
         
-        stop_loss_price = self._orders[order_id]["stop_loss_price"]
-        stop_loss_list = self._orders[order_id]['stop_loss_list']
-        
-        take_profit_price = self._orders[order_id]["take_profit_price"]
-        take_profit_list = self._orders[order_id]["take_profit_list"]
+        stop_loss_price = self._orders.get(order_id, {}).get("stop_loss_price", None)
+        stop_loss_list = self._orders.get(order_id, {}).get("stop_loss_list", None)
+
+        take_profit_price = self._orders.get(order_id, {}).get("take_profit_price", None)
+        take_profit_list = self._orders.get(order_id, {}).get("take_profit_list", None)
+
         
         
         # Setting as closed
@@ -376,17 +380,33 @@ class OrderManager:
         
         
         # Deleting from arrays and from _orders
-        if entry_list in bids[bid_price]:
-            bids[ticker][bid_price].remove(entry_list)
-        
-        if stop_loss_list in asks[stop_loss_price]:
-            asks[ticker][stop_loss_price].remove(stop_loss_list)
-        
-        if take_profit_list in asks[take_profit_price]:
-            asks[ticker][take_profit_price].remvove(take_profit_list)
-            
-        del self._orders[order_id]
-        
+        if bid_price is not None and entry_list is not None:
+            if bid_price in bids and entry_list in bids[bid_price]:
+                bids[ticker][bid_price].remove(entry_list)
+
+        if stop_loss_price is not None and stop_loss_list is not None:
+            if stop_loss_price in asks.get(ticker, {}) and stop_loss_list in asks[ticker][stop_loss_price]:
+                asks[ticker][stop_loss_price].remove(stop_loss_list)
+
+        if take_profit_price is not None and take_profit_list is not None:
+            if take_profit_price in asks.get(ticker, {}) and take_profit_list in asks[ticker][take_profit_price]:
+                asks[ticker][take_profit_price].remove(take_profit_list)
+
+        if order_id in self._orders:
+            del self._orders[order_id]
+
         print(f"Closed Order: {order['order_id'][-5:]} successfully!")
         print("-" * 10)
         
+    
+    async def declare_closed(self, order_id: str) -> None:
+        """
+        Adds order id to a set
+        
+        Args:
+            order_id (str): _description_
+        """        
+        if order_id not in self.closed_orders:
+            self.closed_orders.add(order_id)
+            return  True
+        return False

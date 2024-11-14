@@ -1,11 +1,9 @@
+ors = []
+ool = [122191289319283, 100000, {'order_id': 'abc'}]
 
-import random
-from datetime import datetime
+nol = [item for item in ool]
+nol[1] -= 12388
+ors.append(nol)
+ool[1] = 12388
 
-old_target = None
-while True:
-    target = int(str(int(datetime.now().timestamp()))[-3:])
-    if target % 60 == 0:
-        if target != old_target:
-            print("Hit a minute: ", random.randint(0, 1000))
-            old_target = target
+print(ors, ool)

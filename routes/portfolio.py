@@ -92,7 +92,10 @@ async def get_average_monthly_return(
         price_change = ((order['close_price'] - start_price) / start_price) + 1
         date_return[f"{order['created_at']:%Y-%m}"] += round((initial_value * price_change) - initial_value, 2)
     
-    return (((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100
+    try:
+        return (((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100
+    except ZeroDivisionError:
+        return 0.0
 
 
 async def get_average_daily_return_and_total_profit_and_winrate(
@@ -124,8 +127,21 @@ async def get_average_daily_return_and_total_profit_and_winrate(
         if order_return > 0:
             wins += 1
     
-    return sum(v for _, v in date_return.items()) / len(date_return), total_return, (wins / len(orders)) * 100
-
+    return_tuple = tuple()
+    
+    try:
+        average_daily_return = sum(v for _, v in date_return.items()) / len(date_return)
+    except ZeroDivisionError:
+        average_daily_return = 0.0
+    
+    try:
+        win_rate = (wins / len(orders)) * 100
+    except ZeroDivisionError:
+        win_rate = 0.0
+    
+    return average_daily_return, total_return, win_rate
+    
+    
 
 async def get_avg_risk_per_trade(
     all_orders: list[dict],
@@ -156,7 +172,10 @@ async def get_avg_risk_per_trade(
         
         total_risk += (risk / balance) * 100
     
-    return round(total_risk / len(all_orders), 2)
+    try:
+        return round(total_risk / len(all_orders), 2)
+    except ZeroDivisionError:
+        return 0.0
 
 
 # Initialisation

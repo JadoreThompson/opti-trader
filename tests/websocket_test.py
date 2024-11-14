@@ -12,12 +12,23 @@ from enums import OrderType
 from models.matching_engine_models import OrderRequest, MarketOrder
 
 
-async def main(user_id, order_id=None):
-    BASE_URL = "ws://127.0.0.1:80"
-
+async def main(user_id=None, order_id=None):
+    BASE_URL = "ws://127.0.0.1:8000"
+    TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0ZWRjYjA5Zi0zMWRlLTRlYzMtODc0NS1lYjJkMGQzZTBjYjkiLCJleHAiOjE3Mzc1MTYyODJ9.nk6CL0vreDoaAQLdpNKi2AQVQMrUMkLzjilv9pYJP-o'
+    
     async with websockets.connect(BASE_URL + '/stream/trade') as socket:
-        await socket.send(json.dumps({'user_id': user_id}))
+        await socket.send(json.dumps({'token': TOKEN}))
         m = await socket.recv()
+        
+        message = {
+            'type': 'close_order',
+            'close_order': {
+                'ticker': 'APPL',
+                'quantity': 1000
+            }
+        }
+        
+        await socket.send(json.dumps(message))
         
         # while True:
         #     message = {
@@ -29,31 +40,31 @@ async def main(user_id, order_id=None):
         #         }
         #     }
 
-        order_ids = []
+        # order_ids = []
         
-        for _ in range(2):
-            message = {
-                'type': 'limit_order',
-                'limit_order': {
-                    'ticker': 'SOL/USDT',
-                    'quantity': random.randint(0, 1),
-                    'limit_price': 130,
-                    'stop_loss': {
-                        'price': 100
-                    },
-                    'take_profit': {
-                        'price': 500
-                    }
-                }
-            }
+        # for _ in range(2):
+        #     message = {
+        #         'type': 'limit_order',
+        #         'limit_order': {
+        #             'ticker': 'SOL/USDT',
+        #             'quantity': random.randint(0, 1),
+        #             'limit_price': 130,
+        #             'stop_loss': {
+        #                 'price': 100
+        #             },
+        #             'take_profit': {
+        #                 'price': 500
+        #             }
+        #         }
+        #     }
 
-            await socket.send(json.dumps(message))
-            m = await socket.recv()
-            m = json.loads(m)        
-            print("Received message in websocket test!")
-            print(m)
-            print("-" * 10)
-            await asyncio.sleep(3)
+        #     await socket.send(json.dumps(message))
+        #     m = await socket.recv()
+        #     m = json.loads(m)        
+        #     print("Received message in websocket test!")
+        #     print(m)
+        #     print("-" * 10)
+        #     await asyncio.sleep(3)
         
         #     order_ids.append(m['order_id'])
         #     await asyncio.sleep(2)
@@ -109,9 +120,8 @@ async def main(user_id, order_id=None):
 
 
 def start():
-    user_id = input("User id: ")
     # order_id = input("Order Id: ")
-    asyncio.run(main(user_id,))
+    asyncio.run(main())
     
 
 if __name__ == "__main__":

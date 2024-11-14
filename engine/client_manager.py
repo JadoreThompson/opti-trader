@@ -14,7 +14,7 @@ from fastapi import WebSocket
 from pydantic import ValidationError
 
 # SA
-from sqlalchemy import insert, select, inspect
+from sqlalchemy import insert, select, inspect, update
 
 # Local
 from db_models import Orders, Users
@@ -61,10 +61,32 @@ def websocket_exception_handler(func):
 class ClientManager:
     def __init__(self, websocket: WebSocket):
         self.socket: WebSocket = websocket
-        self.ticker_quotes: dict[str, float] = defaultdict(float)
-        pass
+        self.ticker_quotes: dict[str, float] = {'APPL': 130}
+        self._balance: float =  None
+    
+            
+    @property
+    def balance(self) -> float:
+        return self._balance
+
+
+    @balance.setter
+    def balance(self, value: float) -> None:
+        if self._balance != value:
+            self._balance = value
+            asyncio.create_task(self.save_changes_db())
     
     
+    async def save_changes_db(self) -> None:
+        async with get_db_session() as session:
+            await session.execute(
+                update(Users)
+                .where((Users.user_id == self.user.user_id))
+                .values(balance=self.balance)
+            )
+            await session.commit()
+    
+            
     @websocket_exception_handler
     async def connect(self) -> None:
         await self.socket.accept()
@@ -76,7 +98,12 @@ class ClientManager:
         message = json.loads(message)
         
         # Verifying user
-        user_id = verify_jwt_token_ws(message['token'])
+        try:
+            user_id = verify_jwt_token_ws(message['token'])
+        except KeyError:
+            await self.socket.close(code=1014, reason='Token not provided')
+            return
+        
         if not await self.check_user_exists(user_id):
             raise UnauthorisedError("User doesn't exist")
 
@@ -111,6 +138,7 @@ class ClientManager:
                     .where(Users.user_id == user_id)
                 )
                 self.user = result.scalar()
+                self.balance = self.user.balance
                 return True
         except Exception as e:
             print(type(e), str(e))
@@ -124,13 +152,21 @@ class ClientManager:
         """        
         
         async with REDIS_CLIENT.pubsub() as pubsub:
+            await asyncio.sleep(0.1)
             await pubsub.subscribe('prices')
             
             async for message in pubsub.listen():
                 await asyncio.sleep(0.1)
+                
                 if message.get('type', None) == 'message':
-                    self.ticker_quotes.update(json.loads(message['data'].decode()))
-
+                    data = json.loads(message['data'].decode())
+                    self.ticker_quotes[data['ticker']] = data['price']
+                    
+                    await self.socket.send_text(json.dumps({
+                        "status": ConsumerStatusType.PRICE_UPDATE,
+                        "message": data,
+                    }))
+                    
 
     @websocket_exception_handler
     async def handle_incoming_requests(self) -> None:
@@ -139,26 +175,38 @@ class ClientManager:
         the user sends. Acts as the funneler
         """    
         while True:
-            print('Handling')
             message = await self.socket.receive_text()
             message = OrderRequest(**(json.loads(message)))
             additional_fields = {'type': message.type}
             
             if message.type == OrderType.MARKET or message.type == OrderType.LIMIT:    
-                print(10)
                 order: dict = await self.create_order_in_db(message)
-                print(11)
+                if not order:
+                    continue
             
             elif message.type == OrderType.CLOSE:
-                order_id = message.close_order.order_id
+                order_ids: list = await self.fetch_orders(
+                    message.close_order.quantity,
+                    message.close_order.ticker,
+                )
+                if not order_ids:
+                    await self.socket.send_text(json.dumps({
+                        'status': ConsumerStatusType.ERROR,
+                        'message': 'Insufficient asset value'
+                    }))
+                    continue
                 
-                # while not price:
-                # market_price = self.ticker_quotes.get(order['ticker'], None)
-                # await asyncio.sleep(0.1)
                 
-                market_price = round(random.uniform(100, 150), 2)
-                additional_fields['market_price'] = market_price
-                order: dict = await self.retrieve_order(order_id)
+                payload = vars(message.close_order)
+                
+                additional_fields['order_ids'] = order_ids
+                additional_fields['user_id'] = str(self.user.user_id)
+                
+                payload.update(additional_fields)
+                asyncio.create_task(self.send_order_to_engine(payload))
+                
+                # print(json.dumps(payload, indent=4))
+                continue
                 
             elif message.type == OrderType.ENTRY_PRICE_CHANGE:
                 order_id = message.entry_price_change.order_id
@@ -197,7 +245,6 @@ class ClientManager:
             # Shipping off to the engine for computation
             order.update(additional_fields)
             asyncio.create_task(self.send_order_to_engine(order))
-            print('sent to engine')
             
     
     async def create_order_in_db(self, message: OrderRequest) -> dict:
@@ -216,10 +263,13 @@ class ClientManager:
             
             # while message_dict['ticker'] not in self.ticker_quotes:
             #     await asyncio.sleep(0.1)
+            amount = self.ticker_quotes[message_dict['ticker']] * message_dict['quantity']
+            if amount > self.user.balance:
+                await self.socket.send_text(json.dumps({'status': ConsumerStatusType.ERROR, 'message': 'Insufficient balance'}))
+                return
             
-            # if self.ticker_quotes[message_dict['ticker']] * message_dict['quantity'] > self.user.balance:
-            #     raise InvalidAction("Insufficient balance")
-                        
+            self.balance -= amount
+                                    
             for field in ['stop_loss', 'take_profit']:
                 if isinstance(message_dict.get(field, None), dict):
                     message_dict[field] = message_dict.get(field, {}).get('price', None)
@@ -229,7 +279,7 @@ class ClientManager:
             
             # Getting the price
             message_dict['price'] = message_dict.get('limit_price', None)\
-                if message_dict.get('limit_price', None) else 110
+                if message_dict.get('limit_price', None) else self.ticker_quotes['APPL']
 
             # Inserting
             async with get_db_session() as session:
@@ -251,6 +301,42 @@ class ClientManager:
             raise
     
     
+    async def fetch_orders(
+        self,        
+        target_quantity: int, 
+        ticker: str
+    ) -> list:
+        """
+        Fetches all orders where the quantity adds up to the
+        quantity being requested and the ticker is the ticker in
+        question
+        
+        :param: quantity[int]
+        :param: user_id[str]
+        :param: ticker[str]
+        """
+        async with get_db_session() as session:
+            r = await session.execute(
+                select(Orders.order_id, Orders.quantity)
+                .where(
+                    (Orders.user_id == self.user.user_id) 
+                    & (Orders.ticker == ticker) 
+                    & (Orders.order_status != OrderStatus.CLOSED)
+                )
+            )
+            all_orders = r.all()        
+            
+        order_ids = []
+        for order in all_orders:
+            target_quantity -= order[1]
+            order_ids.append(str(order[0]))
+            
+            if target_quantity <= 0:
+                return order_ids
+            
+        return []
+        
+        
     async def retrieve_order(self, order_id: str | UUID) -> dict:
         """
         Retrieves an order within the DB with the order_id
@@ -262,7 +348,6 @@ class ClientManager:
             dict: A dictionary representation of the order without the _sa_instance_state key
         """        
         try:
-            print("Order ID: ", type(order_id))
             async with get_db_session() as session:
                 result = await session.execute(
                     select(Orders)
@@ -305,7 +390,5 @@ class ClientManager:
                 
                 if message.get('type', None) == 'message':
                     message = json.loads(message['data'])
-                    print('engine message: ')
-                    print(message)
                     await self.socket.send_text(json.dumps(message))
                     

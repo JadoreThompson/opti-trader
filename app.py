@@ -16,7 +16,7 @@ from middleware import RateLimitMiddleware
 from routes.portfolio import portfolio
 from routes.accounts import accounts
 from routes.stream import stream
-
+from routes.instrument import instrument
 
 app = FastAPI()
 app.add_middleware(
@@ -39,7 +39,7 @@ templates = Jinja2Templates(directory='templates')
 app.include_router(accounts)
 app.include_router(portfolio)
 app.include_router(stream)
-
+app.include_router(instrument)
 
 """Exception handlers"""
 @app.exception_handler(DoesNotExist)

@@ -74,7 +74,7 @@ class LimitOrder(BaseOrder):
 
 
 class CloseOrder(Base):
-    order_id: UUID
+    ticker: str
     quantity: Optional[float] = Field(None, gt=0)
 
 
