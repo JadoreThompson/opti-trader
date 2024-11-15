@@ -156,11 +156,11 @@ class ClientManager:
             await pubsub.subscribe('prices')
             
             async for message in pubsub.listen():
-                await asyncio.sleep(0.1)
-                
                 if message.get('type', None) == 'message':
                     data = json.loads(message['data'].decode())
                     self.ticker_quotes[data['ticker']] = data['price']
+                    
+                    print(json.dumps(data, indent=4))
                     
                     await self.socket.send_text(json.dumps({
                         "status": ConsumerStatusType.PRICE_UPDATE,

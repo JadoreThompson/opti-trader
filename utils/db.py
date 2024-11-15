@@ -32,8 +32,6 @@ async def get_db_session():
     async with async_session_maker() as session:
         try:
             yield session
-            print(session)
-            print("-" * 10)
         
         except DoesNotExist:
             raise

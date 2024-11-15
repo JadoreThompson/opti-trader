@@ -37,7 +37,9 @@ async def get_data(
         
     candle_data_list = []
     
-    for dp in all_data:        
+    for i in range(len(all_data)):
+        dp = all_data[i]
+        
         time_passed = (dp['date'] - target_time) // chosen_interval_seconds
         price = dp['price']
         
@@ -45,7 +47,7 @@ async def get_data(
             for _ in range(time_passed):
                 new_item = {
                     'time': target_time + chosen_interval_seconds,
-                    'open': price,
+                    'open': all_data[i - 1]['price'] if i > 0 else price,
                     'high': price,
                     'low': price,
                     'close': price
@@ -57,6 +59,27 @@ async def get_data(
         existing['high'] = max(existing['high'], price)
         existing['low'] = min(existing['low'], price)
         existing['close'] = price
+        
+    # for dp in all_data:        
+    #     time_passed = (dp['date'] - target_time) // chosen_interval_seconds
+    #     price = dp['price']
+        
+    #     if time_passed >= 1:
+    #         for _ in range(time_passed):
+    #             new_item = {
+    #                 'time': target_time + chosen_interval_seconds,
+    #                 'open': price,
+    #                 'high': price,
+    #                 'low': price,
+    #                 'close': price
+    #             }
+    #             candle_data_list.append(new_item)
+    #             target_time += chosen_interval_seconds            
+                        
+    #     existing = candle_data_list[-1]
+    #     existing['high'] = max(existing['high'], price)
+    #     existing['low'] = min(existing['low'], price)
+    #     existing['close'] = price
     
     time_passed = (int(now.timestamp()) - target_time) // chosen_interval_seconds
     last_price = candle_data_list[-1]['close']

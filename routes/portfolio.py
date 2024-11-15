@@ -1,6 +1,9 @@
 import asyncio
+from collections import defaultdict
+from datetime import datetime, timedelta
 from uuid import UUID
 from typing import List, Optional
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 # Local
@@ -8,10 +11,10 @@ from utils.arithemtic import get_quantitative_metrics, beta, get_benchmark_retur
 from utils.db import get_active_orders, get_orders, get_db_session
 from utils.auth import verify_jwt_token_http
 from utils.portfolio import get_balance, get_monthly_returns
-from enums import OrderStatus
+from enums import OrderStatus, GrowthInterval
 from exceptions import InvalidAction
-from db_models import Users
-from models.models import Order, OrderRequest, PerformanceMetrics, QuantitativeMetrics
+from db_models import Users, Orders
+from models.models import GrowthModel, Order, OrderRequest, PerformanceMetrics, QuantitativeMetrics, TickerDistribution
 
 # FA
 from fastapi import APIRouter, Depends
@@ -93,7 +96,7 @@ async def get_average_monthly_return(
         date_return[f"{order['created_at']:%Y-%m}"] += round((initial_value * price_change) - initial_value, 2)
     
     try:
-        return (((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100
+        return round((((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100, 2)
     except ZeroDivisionError:
         return 0.0
 
@@ -107,6 +110,7 @@ async def get_average_daily_return_and_total_profit_and_winrate(
     
     Args:
         orders (list[dict])
+        all_dates: List[datetime.date()] -> All must be unique
 
     Returns:
         dict
@@ -126,8 +130,6 @@ async def get_average_daily_return_and_total_profit_and_winrate(
         
         if order_return > 0:
             wins += 1
-    
-    return_tuple = tuple()
     
     try:
         average_daily_return = sum(v for _, v in date_return.items()) / len(date_return)
@@ -201,7 +203,7 @@ async def orders(
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
-async def performance(user_id: str = Depends(verify_jwt_token_http)):
+async def performance(user_id: str = Depends(verify_jwt_token_http)) -> PerformanceMetrics:
     """
     Returns performance metrics for the account
 
@@ -256,3 +258,104 @@ async def quantitative_metrics(
     """    
     data: dict = await get_quant_metrics_handler(**locals())
     return QuantitativeMetrics(**data)
+
+
+@portfolio.get("/growth", )
+async def growth(
+    interval: GrowthInterval,
+    user_id: str = Depends(verify_jwt_token_http),
+):    
+    
+    query = select(Orders).where((Orders.user_id == user_id) & (Orders.order_status == OrderStatus.CLOSED))
+    today = datetime.now()
+    today = datetime(day=today.day, month=today.month, year=today.year)
+    
+    if interval == GrowthInterval.DAY:
+        query = query.where(Orders.created_at >= today)
+
+    elif interval == GrowthInterval.WEEK:
+        start_of_week = today - timedelta(days=today.weekday())
+        query = query.where(Orders.created_at >= start_of_week)
+
+    elif interval == GrowthInterval.MONTH:
+        start_of_month = today.replace(days=1)
+        query = query.where(Orders.created_at >= start_of_month)
+    
+    elif interval == GrowthInterval.YEAR:
+        start_of_year = datetime(year=today.year, month=1, day=1)
+        query = query.where(Orders.created_at >= start_of_year)
+    
+    async def retrieve_orders(query) -> list:
+        async with get_db_session() as session:
+            r = await session.execute(query)
+            return r.scalars().all()
+    
+    try:
+        all_orders, current_balance = await asyncio.gather(*[retrieve_orders(query), get_balance(user_id)])
+    except Exception as e:
+        print("Fetching Error: ", type(e), str(e))
+        print('-' * 10)
+            
+    starting_period_balance: float = current_balance
+    
+    all_orders_with_gain = []
+    return_list = []
+        
+    # Getting the starting balance for the peiod
+    for order in all_orders:
+        quantity = order.quantity
+        monetary_gain = -1 * ((order.filled_price * quantity) - (order.close_price * quantity))
+        starting_period_balance += monetary_gain
+        all_orders_with_gain.append({'date': order.created_at, 'gain': monetary_gain})
+
+    for order in all_orders_with_gain:
+        return_list.append(GrowthModel(**{
+            'time': int(order['date'].timestamp()),
+            'value': round((order['gain'] / starting_period_balance) * 100, 2)
+        }))    
+    
+    return return_list
+        
+
+@portfolio.get("/distribution", response_model=List[TickerDistribution])
+async def distribution(user_id: str = Depends(verify_jwt_token_http)) -> List[TickerDistribution]:
+        all_orders = await get_active_orders(user_id)
+        ticker_map = {
+            ticker: 0
+            for ticker in 
+            set(order['ticker'] for order in all_orders)
+        }
+        
+        for order in all_orders:
+            price = order['price'] or order['filled_price']
+            ticker_map[order['ticker']] += price * order['quantity']
+        total = sum(ticker_map.values())
+        ticker_map = {
+            k: (v / total)
+            for k, v in ticker_map.items()
+        }
+        
+        return [TickerDistribution(name=key, value=value) for key, value in ticker_map.items()]
+    
+    
+@portfolio.get('/weekday-results')
+async def wins_losses_weekday(user_id: str = Depends(verify_jwt_token_http)):
+    constraints = locals()
+    constraints.update({'order_status': OrderStatus.CLOSED})
+    
+    all_orders = await get_orders(locals())
+    
+    num_range = range(7)
+    wins = [0 for _ in num_range]    
+    losses = [0 for _ in num_range]
+    
+    for order in all_orders:
+        close_price = order['close_price']
+        price = order['price']
+        
+        if close_price > price:
+            wins[order['created_at'].weekday()] += 1
+        elif close_price < price:
+            losses[order['created_at'].weekday()] += 1
+    
+    return JSONResponse(status_code=200, content={'wins': wins, 'losses': losses})

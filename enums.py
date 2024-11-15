@@ -55,3 +55,11 @@ class IntervalTypes(str, Enum):
             '15m': 900,
             '1m': 60
         }[self.value]
+
+
+class GrowthInterval(str, Enum):
+    DAY = '1d'
+    WEEK = '1w'
+    MONTH = '1m'
+    YEAR = '1y'
+    ALL = 'all'

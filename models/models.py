@@ -67,3 +67,13 @@ class TickerData(Base):
     high: float
     low: float
     close: float
+    
+
+class GrowthModel(Base):
+    time: int
+    value: float
+    
+
+class TickerDistribution(Base):
+    value: float
+    name: str

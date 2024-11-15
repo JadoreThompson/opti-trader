@@ -69,9 +69,9 @@ class MatchingEngine:
 
     @current_price.setter
     def current_price(self, value: float):
-        if self._current_price != value:
-            self._current_price = value
-            asyncio.create_task(self.on_price_change(value))  
+        # if self._current_price != value:
+        self._current_price = value
+        asyncio.create_task(self.on_price_change(value))  
             
     
     async def on_price_change(self, new_price: float):
@@ -82,7 +82,8 @@ class MatchingEngine:
             new_price (float):
         """        
         await self.redis.publish(channel='prices', message=json.dumps({'ticker': 'APPL', 'price': new_price, 'time': int(datetime.now().timestamp())}))
-        
+        print('Published Price message')
+        print('-' * 10)
     
     async def listen_to_client_events(self):
         """
