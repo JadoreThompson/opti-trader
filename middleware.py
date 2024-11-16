@@ -47,16 +47,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ip_address = request.client.host
         self.request_counter.setdefault(ip_address, [0, datetime.now()])
         api_usage = self.request_counter.get(ip_address)
-
+        time_since_last_request = datetime.now() - api_usage[1]
+        
         # Rate limit checks
-        if (datetime.now() - api_usage[1]) < self._TIME_LIMIT and api_usage[0] >= self._REQUEST_LIMIT:
-            return JSONResponse(status_code=401, content={'Error': 'Rate Limit reached'})
-
-        if (datetime.now() - api_usage[1]) >= self._TIME_LIMIT and api_usage[0] >= self._REQUEST_LIMIT:
+        if time_since_last_request <= self._TIME_LIMIT:
+            if api_usage[0] >= self._REQUEST_LIMIT:
+                return JSONResponse(status_code=401, content={'Error': 'Rate Limit reached'})
+            else:
+                self.request_counter[ip_address][0] += 1
+                self.request_counter[ip_address][1] = datetime.now()
+                
+        elif time_since_last_request >= self._TIME_LIMIT:
             self.request_counter[ip_address] = [0, datetime.now()]
-
-        if (datetime.now() - api_usage[1]) < self._TIME_LIMIT and api_usage[0] != 5:
-            self.request_counter[ip_address][0] += 1
 
         response = await call_next(request)
         return response
