@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 # Local
@@ -6,7 +6,7 @@ from enums import OrderStatus, OrderType
 
 # Pydantic
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Base(BaseModel):
@@ -32,13 +32,48 @@ class QuantitativeMetrics(BaseModel):
     ghpr: Optional[float] = None
     risk_of_ruin: Optional[float] = None
     
+    @field_validator(
+        "std", "beta", "sharpe", "treynor",
+        "ahpr", "ghpr", "risk_of_ruin",
+        mode="before"
+    )
+    def validator(cls, value):
+        if isinstance(value, float):
+            value = round(value, 2)
+        return value
+    
 
 class PerformanceMetrics(QuantitativeMetrics):
-    daily: Optional[float] = None
-    balance: Optional[float] = None
-    total_profit: Optional[float] = None
-    winrate: Optional[float] = None
-
+    daily: Optional[float | str] = None
+    balance: Optional[float | str] = None
+    total_profit: Optional[float | str] = None
+    winrate: Optional[float | str] = None
+    
+    
+    @field_validator("daily", "balance", "total_profit", "winrate", mode="before")
+    def convert_to_float(cls, value, name):
+        field = name.field_name
+        
+        if field in ['daily', 'balance', 'total_profit']:
+            chunks = []
+            value_list = list(str(value).split('.')[0])
+            i = len(value_list)
+            
+            while i >= 1:
+                splitter = i - 3
+                if splitter >= 0:
+                    chunks.append(value_list[splitter: i])
+                else:
+                    chunks.append(value_list[0: i])
+                i -= 3
+            
+            value = '$' + ",".join(["".join(chunk) for chunk in chunks[::-1]])
+            
+        elif field == 'winrate':
+            value = f"{value}%"
+        
+        return value
+    
 
 class Order(Base):
     """

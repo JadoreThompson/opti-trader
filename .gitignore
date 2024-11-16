@@ -3,3 +3,5 @@
 **.env
 **venv
 Yahoo Ticker Symbols - September 2017.xlsx
+gc_client_secret.json
+gc_client.json

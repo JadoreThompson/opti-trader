@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+from uuid import UUID
+import asyncio
 
 # SA
 from sqlalchemy import select
@@ -46,22 +48,58 @@ async def get_db_session():
             await session.close()
 
 
-async def get_orders(constraints: dict) -> list[dict]:
+from async_lru import alru_cache
+
+def constraints_to_tuple(constraints: dict) -> tuple:
+    return tuple(sorted(constraints.items()))
+
+
+_CACHE = {}
+
+def delete_from_internal_cache(user_id: str | UUID, channel: str | list) -> None:
+    if isinstance(channel, list):
+        for c in channel:
+            _CACHE[user_id].pop(c, None)
+    else:
+        _CACHE[user_id].pop(channel, None)
+    
+    
+async def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
+    _CACHE.setdefault(user_id, {})    
+    _CACHE[user_id][channel] = value
+    
+
+async def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
+    try:
+        return _CACHE[user_id][channel]
+    except KeyError:
+        return None
+
+
+# @alru_cache(maxsize=100)
+async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
     """
     Returns all orders withhin a DB that follow the constraints
 
     Args:
         constraints (dict)
     """ 
-    query = select(Orders).where(Orders.user_id == constraints['user_id'])
-    constraints = {k: v for k, v in constraints.items() if v and k != 'user_id'}
+    existing_data = await retrieve_from_internal_cache(user_id, 'orders')
+    if existing_data:
+        return existing_data
     
-    if constraints.get('order_status', None):
+    query = select(Orders).where(Orders.user_id == user_id)
+    constraints = kwargs
+        
+    if constraints.get('order_status', None) != None:
         query = query.where(Orders.order_status == constraints['order_status'])
         
     async with get_db_session() as session:
-        results = await session.execute(query)
-        return [vars(order) for order in results.scalars()]
+        results = await session.execute(query.limit(1000))
+    
+    order_list = [vars(order) for order in results.scalars().all()]
+    asyncio.create_task(add_to_internal_cache(user_id, 'orders', order_list))
+    return order_list
 
 
 async def get_active_orders(user_id: str) -> list[dict]:
@@ -70,7 +108,11 @@ async def get_active_orders(user_id: str) -> list[dict]:
 
     Args:
         constraints (dict)
-    """ 
+    """
+    existing_data = await retrieve_from_internal_cache(user_id, 'active_orders')
+    if existing_data:
+        return existing_data
+    
     async with get_db_session() as session:
         results = await session.execute(
             select(Orders).where(
@@ -78,10 +120,15 @@ async def get_active_orders(user_id: str) -> list[dict]:
                 & (Orders.order_status != OrderStatus.CLOSED)
             )
         )
-        return [
+        
+        existing_data = [
             {
                 k: v 
                 for k, v in vars(order).items() if k != '_sa_instance_state'    
             } 
             for order in results.scalars().all()
         ]
+        
+        asyncio.create_task(add_to_internal_cache(user_id, 'active_orders', existing_data))
+        
+        return existing_data

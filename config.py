@@ -1,6 +1,3 @@
-import asyncio
-import json
-
 import os
 from dotenv import load_dotenv
 from urllib.parse import quote
@@ -10,9 +7,9 @@ import redis
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-import exceptions
-
 load_dotenv()
+
+CACHE: dict[str, dict[str, any]] = {}
 
 # Security
 API_KEY_ALIAS = 'api-key'

@@ -160,8 +160,6 @@ class ClientManager:
                     data = json.loads(message['data'].decode())
                     self.ticker_quotes[data['ticker']] = data['price']
                     
-                    print(json.dumps(data, indent=4))
-                    
                     await self.socket.send_text(json.dumps({
                         "status": ConsumerStatusType.PRICE_UPDATE,
                         "message": data,
@@ -205,7 +203,6 @@ class ClientManager:
                 payload.update(additional_fields)
                 asyncio.create_task(self.send_order_to_engine(payload))
                 
-                # print(json.dumps(payload, indent=4))
                 continue
                 
             elif message.type == OrderType.ENTRY_PRICE_CHANGE:

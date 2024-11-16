@@ -82,8 +82,6 @@ class MatchingEngine:
             new_price (float):
         """        
         await self.redis.publish(channel='prices', message=json.dumps({'ticker': 'APPL', 'price': new_price, 'time': int(datetime.now().timestamp())}))
-        print('Published Price message')
-        print('-' * 10)
     
     async def listen_to_client_events(self):
         """
@@ -94,7 +92,7 @@ class MatchingEngine:
         async with self.redis.pubsub() as pubsub:
             await pubsub.subscribe("to_order_book")
             async for message in pubsub.listen():
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
                 if message.get("type", None) == "message":
                     asyncio.create_task(self.handle_incoming_message(message["data"]))
                     
@@ -107,7 +105,6 @@ class MatchingEngine:
         Args:
             data (dict): A dictionary representation of the request
         """        
-        await asyncio.sleep(0.1)
         data = json.loads(data)
         
         action_type = data["type"]
@@ -120,7 +117,6 @@ class MatchingEngine:
             await self.handle_limit_order(channel, data)
             
         elif action_type == OrderType.CLOSE:
-            # await self.handle_sell_order(data, channel)
             await self.handle_sell_order(data)
             
         elif action_type == OrderType.ENTRY_PRICE_CHANGE:
@@ -147,8 +143,7 @@ class MatchingEngine:
                 channel
             )
         
-                
-                
+                   
     async def publish_update_to_client(self, channel: str, message: str) -> None:
         """
         Publishes message to channel using REDIS
@@ -210,18 +205,6 @@ class MatchingEngine:
         """    
         result: tuple = await self.match_buy_order(data=data, ticker=data['ticker'])
         
-        # Not filled
-        if result[0] == 0:
-            await self.redis.publish(
-                channel=channel,
-                message=json.dumps({
-                    "status": ConsumerStatusType.ERROR,
-                    "message": "Insufficient asks to fulfill bid order",
-                    "order_id": data["order_id"]
-                })    
-            )
-            return
-
         # Relaying message to user
         status_message = {
             1: {
@@ -244,9 +227,21 @@ class MatchingEngine:
         }.get(result[0])
         
         await self.publish_update_to_client(**status_message)
+        
+        # Not filled
+        if result[0] == 0:
+            await self.redis.publish(
+                channel=channel,
+                message=json.dumps({
+                    "status": ConsumerStatusType.ERROR,
+                    "message": "Insufficient asks to fulfill bid order",
+                    "order_id": data["order_id"]
+                })    
+            )
+            return
 
         # Order was successfully filled
-        if result[0] == 2:
+        elif result[0] == 2:
             try:
                 data["filled_price"] = result[1]
                 data['order_status'] = OrderStatus.FILLED
@@ -428,8 +423,6 @@ class MatchingEngine:
         Args:
             data (dict): 
         """        
-        print('Handling Sell Order')
-        print('-' * 10)
         target_quantity = data['quantity']
         
         for order_id in data['order_ids']:
@@ -818,7 +811,6 @@ class MatchingEngine:
             bids (list, optional): Defaults to None.
             asks (list, optional): Defaults to None.
         """        
-        book = 'bids' if bids else 'asks'
         target_book = asks if asks else bids
         
         target_book[data['ticker']][data["price"]].append([

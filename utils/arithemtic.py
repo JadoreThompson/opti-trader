@@ -16,7 +16,7 @@ from enums import OrderStatus
 RISK_FREE = 4.0
 BENCHMARK_TICKER = "^GSPC"
 
-async def get_benchmark_returns(months_ago: int, ticker: str = BENCHMARK_TICKER) -> list[float]:
+async def get_benchmark_returns(months_ago: int = 6, ticker: str = BENCHMARK_TICKER) -> list[float]:
     """
     Returns
 
@@ -143,7 +143,7 @@ async def treynor(avg_pf_return: float, avg_bm_return: float, pf_beta: float) ->
         return 0.0
 
 
-async def ghpr(pf_returns: list[float]) -> float:
+async def get_ghpr(pf_returns: list[float]) -> float:
     """
     Returns the Geometric Holding Period Return for a portfolio
     

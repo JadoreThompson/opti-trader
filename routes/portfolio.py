@@ -1,3 +1,4 @@
+import  traceback
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -7,8 +8,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 # Local
-from utils.arithemtic import get_quantitative_metrics, beta, get_benchmark_returns, ghpr
-from utils.db import get_active_orders, get_orders, get_db_session
+from utils.arithemtic import get_quantitative_metrics, beta, get_benchmark_returns, get_ghpr
+from utils.db import add_to_internal_cache, get_active_orders, get_orders, get_db_session, retrieve_from_internal_cache
 from utils.auth import verify_jwt_token_http
 from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus, GrowthInterval
@@ -26,31 +27,55 @@ async def get_quant_metrics_handler(
     user_id: str,
     benchmark_ticker: str = "^GSPC",
     months_ago: int = 6,
-    total_trades: int = 100
-):
-    params = locals()
+    total_trades: int = 100,
+    all_orders: list[dict] = None,
+    balance: float = None,
+    all_dates: set = None
+) -> dict:
+    """
+    Handles the retrieval of common quantitative metrics
+
+    Args:
+        user_id (str).
+        benchmark_ticker (str, optional): Risk Free Rate or Benchmark. Defaults to "^GSPC".
+        months_ago (int, optional): How far ago to retrieve benchmark_ticker returns. Defaults to 6.
+        total_trades (int, optional): The total span of trades to consider for risk of ruin. Defaults to 100.
+        all_orders (list[dict], optional): List of all orders. Defaults to None.
+        balance (float, optional): Defaults to None.
+        all_dates (set, optional): All unique days YYYY-MM-DD for all_orders. Defaults to None.
+
+    Returns:
+        dict: Quantitative Metrics.
+    """    
+    params = {k: v for k, v in locals().items() if v}
     params['order_status'] = OrderStatus.CLOSED
-    all_orders = await get_orders(params)
     
-    balance = await get_balance(user_id)
-    all_dates = set([order['created_at'].date() for order in all_orders])
+    if not balance:
+        balance = await get_balance(user_id)
+    
+    if not all_orders:
+        all_orders = await get_orders(user_id=user_id, order_status=OrderStatus.CLOSED)
+    
+    if not all_dates:
+        all_dates = set([order['created_at'].date() for order in all_orders])    
+    
     monthly_returns: dict = await get_monthly_returns(all_orders, all_dates)
     _, _, winrate = await get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
     risk_per_trade = await get_avg_risk_per_trade(all_orders, balance)
     
     data: dict = await get_quantitative_metrics(
-        risk_per_trade,
-        winrate,
-        monthly_returns,
-        balance,
-        benchmark_ticker,
-        months_ago,
-        total_trades
+        risk_per_trade=risk_per_trade,
+        winrate=winrate,
+        monthly_returns=monthly_returns,
+        balance=balance,
+        benchmark_ticker=benchmark_ticker,
+        months_ago=months_ago,
+        total_num_trades=total_trades
     )
     
     more_metrics: dict = {
-        'ahpr': get_average_monthly_return(all_orders, all_dates, balance),
-        'ghpr': ghpr([v for _, v in monthly_returns.items()]),
+        'ahpr': get_ahpr(all_orders, all_dates, balance),
+        'ghpr': get_ghpr([v for _, v in monthly_returns.items()]),
     }
     
     data.update(dict(
@@ -69,7 +94,7 @@ async def get_beta(months_ago: int, benchmark_ticker: str, portfolio_returns: li
         raise
 
 
-async def get_average_monthly_return(
+async def get_ahpr(
     orders: list[dict], 
     all_dates: list, 
     balance: float
@@ -93,10 +118,10 @@ async def get_average_monthly_return(
         start_price = (order.get('filled_price', None) or order.get('price', None))
         initial_value = order['quantity'] * start_price
         price_change = ((order['close_price'] - start_price) / start_price) + 1
-        date_return[f"{order['created_at']:%Y-%m}"] += round((initial_value * price_change) - initial_value, 2)
+        date_return[f"{order['created_at']:%Y-%m}"] += (initial_value * price_change) - initial_value
     
     try:
-        return round((((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100, 2)
+        return (((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100
     except ZeroDivisionError:
         return 0.0
 
@@ -120,17 +145,19 @@ async def get_average_daily_return_and_total_profit_and_winrate(
     wins = 0
     
     for order in orders:        
-        start_price = (order.get('filled_price', None) or order.get('price', None))
-        initial_value = order['quantity'] * start_price
-        price_change = ((order['close_price'] - start_price) / start_price) + 1
-        
-        order_return = round((initial_value * price_change) - initial_value, 2)
-        date_return[order['created_at'].date()] += order_return
-        total_return += order_return
-        
-        if order_return > 0:
-            wins += 1
-    
+        try:
+            start_price = (order.get('filled_price', None) or order.get('price', None))
+            initial_value = order['quantity'] * start_price
+            price_change = ((order['close_price'] - start_price) / start_price) + 1
+            
+            order_return = round((initial_value * price_change) - initial_value, 2)
+            date_return[order['created_at'].date()] += order_return
+            total_return += order_return
+            
+            if order_return > 0:
+                wins += 1
+        except TypeError:
+            pass
     try:
         average_daily_return = sum(v for _, v in date_return.items()) / len(date_return)
     except ZeroDivisionError:
@@ -198,8 +225,7 @@ async def orders(
     Returns:
         list[dict]: all orders based on the constraints
     """
-    all_orders: list[dict] = await get_orders(locals())
-    return [Order(**order) for order in all_orders]
+    return [Order(**order) for order in await get_orders(**{'user_id': user_id, 'order_status': order_status})]
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
@@ -212,41 +238,50 @@ async def performance(user_id: str = Depends(verify_jwt_token_http)) -> Performa
 
     Returns:
         PerformanceMetrics()
-    """    
-    return_params = locals()
-    return_params['order_status'] = OrderStatus.CLOSED
-    all_orders = await get_orders(return_params)
-    
-    all_dates = set(order['created_at'].date() for order in all_orders)
-    monthly_returns = await get_monthly_returns(all_orders, all_dates)
-    balance = await get_balance(user_id)
-    
-    # Retrieving non-quant metric values
-    data_sources = {
-        'balance': get_balance(user_id),
-        'ahpr': get_average_monthly_return(all_orders, all_dates, balance),
-        'ghpr': ghpr([v for _, v in monthly_returns.items()]),
-    }
-    
-    results = await asyncio.gather(*[
-        v for _, v in data_sources.items()
-    ])
-    
-    data_sources.update(dict(zip([key for key in data_sources], results)))
-    data_sources['daily'], data_sources['total_profit'], data_sources['winrate'] = \
-        await get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
-    
-    data_sources.update(await get_quant_metrics_handler(user_id,))
-    
-    return PerformanceMetrics(**data_sources)
+    """
+    main_dictionary = {}
+    try:
+        main_dictionary['balance'], all_orders = await asyncio.gather(*[
+            get_balance(user_id),
+            get_orders(**{'user_id': user_id, 'order_status': OrderStatus.CLOSED})
+        ])
+        
+        all_dates = set(order['created_at'].date() for order in all_orders)
+        
+        tasks = [
+            (asyncio.create_task(get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)), ['daily', 'total_profit', 'winrate']),
+            (asyncio.create_task(get_quant_metrics_handler(
+                user_id=user_id, 
+                all_orders=all_orders, 
+                all_dates=all_dates,
+                balance=main_dictionary['balance']
+            )),)  
+        ]
+        
+        results = await asyncio.gather(*[pair[0] for pair in tasks])
+        
+        for i in range(len(results)):
+            current_result = results[i]
+            
+            if isinstance(current_result, dict):
+                main_dictionary.update(current_result)
+            elif isinstance(current_result, tuple):
+                main_dictionary.update(dict(zip([item for item in tasks[i][1]], [item for item in current_result])))
+            elif isinstance(current_result, float):
+                main_dictionary.update({key: current_result for key in tasks[i][1]})
+            
+    except Exception:
+        traceback.print_exc()
+    finally:
+        return PerformanceMetrics(**main_dictionary)
 
 
 @portfolio.get("/quantitative", response_model=QuantitativeMetrics)
 async def quantitative_metrics(
     user_id: str = Depends(verify_jwt_token_http),
-    benchmark_ticker: Optional[str] = None,
-    months_ago: Optional[int] = None,
-    total_trades: Optional[int] = None
+    benchmark_ticker: Optional[str] = "^GSPC",
+    months_ago: Optional[int] = 6,
+    total_trades: Optional[int] = 100
 ) -> QuantitativeMetrics:
     """
     Args:
@@ -260,11 +295,27 @@ async def quantitative_metrics(
     return QuantitativeMetrics(**data)
 
 
-@portfolio.get("/growth", )
+@portfolio.get("/growth")
 async def growth(
     interval: GrowthInterval,
     user_id: str = Depends(verify_jwt_token_http),
 ):    
+    """
+    Returns growth list for the tradingview chart frontend
+    Args:
+        interval (GrowthInterval): 
+        user_id (str, optional): Defaults to Depends(verify_jwt_token_http).
+
+    Returns:
+        list
+    """    
+    
+    existing_data = await retrieve_from_internal_cache(user_id, 'growth')
+    try:
+        if interval in existing_data:
+            return existing_data
+    except TypeError:
+        pass
     
     query = select(Orders).where((Orders.user_id == user_id) & (Orders.order_status == OrderStatus.CLOSED))
     today = datetime.now()
@@ -278,7 +329,7 @@ async def growth(
         query = query.where(Orders.created_at >= start_of_week)
 
     elif interval == GrowthInterval.MONTH:
-        start_of_month = today.replace(days=1)
+        start_of_month = today.replace(day=1)
         query = query.where(Orders.created_at >= start_of_month)
     
     elif interval == GrowthInterval.YEAR:
@@ -314,8 +365,9 @@ async def growth(
             'value': round((order['gain'] / starting_period_balance) * 100, 2)
         }))    
     
+    asyncio.create_task(add_to_internal_cache(user_id, 'growth', {interval: return_list}))
     return return_list
-        
+    
 
 @portfolio.get("/distribution", response_model=List[TickerDistribution])
 async def distribution(user_id: str = Depends(verify_jwt_token_http)) -> List[TickerDistribution]:
@@ -343,7 +395,7 @@ async def wins_losses_weekday(user_id: str = Depends(verify_jwt_token_http)):
     constraints = locals()
     constraints.update({'order_status': OrderStatus.CLOSED})
     
-    all_orders = await get_orders(locals())
+    all_orders = await get_orders(**{'user_id': user_id, 'order_status': OrderStatus.CLOSED})
     
     num_range = range(7)
     wins = [0 for _ in num_range]    

@@ -88,7 +88,6 @@ class OrderManager:
                 self._orders[order_id]['entry_list'] = entry_list
                 self._orders[order_id]['ticker'] = order['ticker']
                 
-                # print(json.dumps(self._orders, indent=4))
         except InvalidAction:
             raise
 
@@ -117,8 +116,7 @@ class OrderManager:
                 self._orders[order_id]['take_profit_price'] = order.get('take_profit', None)
                 self._orders[order_id]['take_profit_list'] = take_profit_list
                 
-                # print(json.dumps(self._orders, indent=4))
-                # print('-' * 10)
+
         except InvalidAction:
             raise
         
@@ -147,8 +145,7 @@ class OrderManager:
                 self._orders[order_id]['stop_loss'] = order.get('stop_loss', None)
                 self._orders[order_id]['stop_loss_list'] = stop_loss_list
                 
-                # print(json.dumps(self._orders, indent=4))
-                # print('-' * 10)
+
         except InvalidAction:
             raise
 
@@ -341,9 +338,6 @@ class OrderManager:
                 orders
             )
             await session.commit()
-        
-        for order in orders:
-            print(f'Order: {order['order_id']} updated')
     
     
     async def delete(
@@ -394,9 +388,6 @@ class OrderManager:
 
         if order_id in self._orders:
             del self._orders[order_id]
-
-        print(f"Closed Order: {order['order_id'][-5:]} successfully!")
-        print("-" * 10)
         
     
     async def declare_closed(self, order_id: str) -> None:
