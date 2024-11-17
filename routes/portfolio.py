@@ -21,8 +21,6 @@ from models.models import GrowthModel, Order, OrderRequest, PerformanceMetrics, 
 from fastapi import APIRouter, Depends
 
 
-# TODO: Trim everything
-
 async def get_quant_metrics_handler(
     user_id: str,
     benchmark_ticker: str = "^GSPC",

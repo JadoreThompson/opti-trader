@@ -56,12 +56,15 @@ def constraints_to_tuple(constraints: dict) -> tuple:
 
 _CACHE = {}
 
-def delete_from_internal_cache(user_id: str | UUID, channel: str | list) -> None:
-    if isinstance(channel, list):
-        for c in channel:
-            _CACHE[user_id].pop(c, None)
-    else:
-        _CACHE[user_id].pop(channel, None)
+async def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
+    try:    
+        if isinstance(channel, list):
+            for c in channel:
+                _CACHE[user_id].pop(c, None)
+        else:
+            _CACHE[user_id].pop(channel, None)
+    except KeyError:
+        pass
     
     
 async def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:

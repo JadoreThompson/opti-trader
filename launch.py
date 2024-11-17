@@ -12,7 +12,7 @@ threads = [
     # Thread(target=run_price, daemon=True),
     Thread(target=run_matching_engine, daemon=True),
     # Thread(target=socket_test, daemon=True),
-    Thread(target=db_listener, args=(DB_URL,), daemon=True),
+    # Thread(target=db_listener, args=(DB_URL,), daemon=True),
 ]
 
 for thread in threads:

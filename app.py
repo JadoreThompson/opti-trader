@@ -1,6 +1,3 @@
-# import jinja2
-# from jinja2 import Jin
-
 # FA
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +14,7 @@ from routes.portfolio import portfolio
 from routes.accounts import accounts
 from routes.stream import stream
 from routes.instruments import instrument
+
 
 app = FastAPI()
 app.add_middleware(
@@ -70,6 +68,35 @@ async def index(request: Request):
     )
 
 
+from engine.db_listener import main as db_listener
+
+
+def db_listener_wrapper() -> None:
+    asyncio.run(db_listener())
+
+def uvicorn_wrapper() -> None:
+    uvicorn.run("app:app", port=8000)
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app")
+    import threading
+    import sys
+    
+    try:
+        threads = [
+            threading.Thread(target=db_listener_wrapper, daemon=True),
+            threading.Thread(target=uvicorn_wrapper, daemon=True),
+        ]
+        
+        for thread in threads:
+            thread.start()
+            
+        while True:
+            for thread in threads:
+                thread.join(timeout=0.1)
+            
+                if not thread.is_alive():
+                    print(f"Thread: {thread.name} died")
+    except KeyboardInterrupt:
+        sys.exit(0)
