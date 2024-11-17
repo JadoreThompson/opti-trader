@@ -15,6 +15,7 @@ def main(DB_URL: str):
     curs = conn.cursor()
     curs.execute("LISTEN order_change;")
 
+    print('Listening for DB Updates')
     while True:
         time.sleep(1)
         try:

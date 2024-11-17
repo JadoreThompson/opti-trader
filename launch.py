@@ -10,7 +10,7 @@ from engine.price_scanner import run as run_price
 
 threads = [
     # Thread(target=run_price, daemon=True),
-    # Thread(target=run_matching_engine, daemon=True),
+    Thread(target=run_matching_engine, daemon=True),
     # Thread(target=socket_test, daemon=True),
     Thread(target=db_listener, args=(DB_URL,), daemon=True),
 ]

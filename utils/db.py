@@ -84,9 +84,11 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
     Args:
         constraints (dict)
     """ 
+    key = kwargs.get('order_status', None) or 'all'
     existing_data = await retrieve_from_internal_cache(user_id, 'orders')
     if existing_data:
-        return existing_data
+        if key in existing_data:
+            return existing_data[key]
     
     query = select(Orders).where(Orders.user_id == user_id)
     constraints = kwargs
@@ -98,7 +100,7 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
         results = await session.execute(query.limit(1000))
     
     order_list = [vars(order) for order in results.scalars().all()]
-    asyncio.create_task(add_to_internal_cache(user_id, 'orders', order_list))
+    asyncio.create_task(add_to_internal_cache(user_id, 'orders', {key: order_list}))
     return order_list
 
 

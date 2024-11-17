@@ -225,7 +225,7 @@ async def orders(
     Returns:
         list[dict]: all orders based on the constraints
     """
-    return [Order(**order) for order in await get_orders(**{'user_id': user_id, 'order_status': order_status})]
+    return [Order(**order) for order in await get_orders(**locals())]
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
@@ -247,7 +247,7 @@ async def performance(user_id: str = Depends(verify_jwt_token_http)) -> Performa
         ])
         
         all_dates = set(order['created_at'].date() for order in all_orders)
-        
+
         tasks = [
             (asyncio.create_task(get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)), ['daily', 'total_profit', 'winrate']),
             (asyncio.create_task(get_quant_metrics_handler(
@@ -313,7 +313,7 @@ async def growth(
     existing_data = await retrieve_from_internal_cache(user_id, 'growth')
     try:
         if interval in existing_data:
-            return existing_data
+            return existing_data[interval]
     except TypeError:
         pass
     
@@ -344,7 +344,7 @@ async def growth(
     try:
         all_orders, current_balance = await asyncio.gather(*[retrieve_orders(query), get_balance(user_id)])
     except Exception as e:
-        print("Fetching Error: ", type(e), str(e))
+        print("Growth Error: ", type(e), str(e))
         print('-' * 10)
             
     starting_period_balance: float = current_balance
@@ -395,7 +395,7 @@ async def wins_losses_weekday(user_id: str = Depends(verify_jwt_token_http)):
     constraints = locals()
     constraints.update({'order_status': OrderStatus.CLOSED})
     
-    all_orders = await get_orders(**{'user_id': user_id, 'order_status': OrderStatus.CLOSED})
+    all_orders = await get_orders(**constraints)
     
     num_range = range(7)
     wins = [0 for _ in num_range]    

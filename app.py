@@ -16,7 +16,7 @@ from middleware import RateLimitMiddleware
 from routes.portfolio import portfolio
 from routes.accounts import accounts
 from routes.stream import stream
-from routes.instrument import instrument
+from routes.instruments import instrument
 
 app = FastAPI()
 app.add_middleware(

@@ -13,7 +13,7 @@ from utils.auth import verify_jwt_token_http
 from utils.db import get_db_session
 
 
-instrument = APIRouter(prefix="/instrument", tags=["instrument"])
+instrument = APIRouter(prefix="/instruments", tags=["instrument"])
 
 
 @instrument.get("/", response_model=List[TickerData])
@@ -59,27 +59,6 @@ async def get_data(
         existing['high'] = max(existing['high'], price)
         existing['low'] = min(existing['low'], price)
         existing['close'] = price
-        
-    # for dp in all_data:        
-    #     time_passed = (dp['date'] - target_time) // chosen_interval_seconds
-    #     price = dp['price']
-        
-    #     if time_passed >= 1:
-    #         for _ in range(time_passed):
-    #             new_item = {
-    #                 'time': target_time + chosen_interval_seconds,
-    #                 'open': price,
-    #                 'high': price,
-    #                 'low': price,
-    #                 'close': price
-    #             }
-    #             candle_data_list.append(new_item)
-    #             target_time += chosen_interval_seconds            
-                        
-    #     existing = candle_data_list[-1]
-    #     existing['high'] = max(existing['high'], price)
-    #     existing['low'] = min(existing['low'], price)
-    #     existing['close'] = price
     
     time_passed = (int(now.timestamp()) - target_time) // chosen_interval_seconds
     last_price = candle_data_list[-1]['close']
