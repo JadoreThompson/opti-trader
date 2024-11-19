@@ -27,6 +27,7 @@ class DBListener:
         
         
     async def process_notifications(self) -> None:
+        print('Waiting for DB Notifications...')
         while True:
             user_id = await self.queue.get()
             await delete_from_internal_cache(user_id, list(self.channels))

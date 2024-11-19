@@ -1,20 +1,18 @@
 import asyncio
 import json
-import random
-from collections import defaultdict
-from contextlib import asynccontextmanager
-from dataclasses import asdict
 from datetime import datetime
 from functools import wraps
 from uuid import UUID
 import redis
+
 
 # FA
 from fastapi import WebSocket
 from pydantic import ValidationError
 
 # SA
-from sqlalchemy import insert, select, inspect, update
+import redis.asyncio.connection
+from sqlalchemy import insert, select, update
 
 # Local
 from db_models import Orders, Users
@@ -22,12 +20,22 @@ from exceptions import UnauthorisedError, InvalidAction
 from enums import ConsumerStatusType, OrderType, OrderStatus
 from models.matching_engine_models import OrderRequest
 from utils.auth import verify_jwt_token_ws
+from utils.connection import RedisConnection
 from utils.db import get_db_session
 
 
 # Redis
-REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(max_connections=20)
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL)
+import os
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
+
+host = os.getenv('REDIS_HOST')
+REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
+    connection_class=RedisConnection, 
+    max_connections=20
+)
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=host)
 
 
 def websocket_exception_handler(func):

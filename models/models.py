@@ -93,15 +93,15 @@ class Order(Base):
     close_price: Optional[float] = None
 
 
-class TickerData(Base):
+class TickerData(BaseModel):
     """
-    Ticker data object 
+    Ticker data object
     """
-    time: int    
-    open: float
-    high: float
-    low: float
-    close: float
+    time: Optional[int] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
     
 
 class GrowthModel(Base):
@@ -110,5 +110,5 @@ class GrowthModel(Base):
     
 
 class TickerDistribution(Base):
-    value: float
-    name: str
+    value: Optional[float] = None
+    name: Optional[str] = None

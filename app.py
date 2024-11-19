@@ -66,17 +66,22 @@ async def index(request: Request):
     return templates.TemplateResponse(
         request=request, name='index.html'
     )
+    
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
+print("The current postgres user is: ", os.getenv("DB_USER"))
 
 from engine.db_listener import main as db_listener
-
+from engine.matching_engine import run as matching_engine
 
 def db_listener_wrapper() -> None:
     asyncio.run(db_listener())
 
 def uvicorn_wrapper() -> None:
-    uvicorn.run("app:app", port=8000)
-
+    uvicorn.run("app:app", port=8000, host='0.0.0.0')
+    
 
 if __name__ == "__main__":
     import uvicorn
@@ -87,6 +92,7 @@ if __name__ == "__main__":
         threads = [
             threading.Thread(target=db_listener_wrapper, daemon=True),
             threading.Thread(target=uvicorn_wrapper, daemon=True),
+            threading.Thread(target=matching_engine, daemon=True),
         ]
         
         for thread in threads:
@@ -97,6 +103,6 @@ if __name__ == "__main__":
                 thread.join(timeout=0.1)
             
                 if not thread.is_alive():
-                    print(f"Thread: {thread.name} died")
+                    raise KeyboardInterrupt
     except KeyboardInterrupt:
         sys.exit(0)

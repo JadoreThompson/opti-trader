@@ -34,7 +34,12 @@ async def get_data(
             .order_by(asc(MarketData.date))
         )
         all_data = [vars(item) for item in result.scalars().all()]
-        
+    
+    if not all_data:
+        m = (int(now.timestamp()) - target_time) // 60
+        nt = (m * 60) + target_time
+        return [TickerData(time=nt)]
+    
     candle_data_list = []
     
     for i in range(len(all_data)):

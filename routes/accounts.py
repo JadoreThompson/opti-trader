@@ -73,16 +73,13 @@ async def login(body: User):
     """
     try:
         user = await check_user_exists(body)
-        if not user:
-            raise DoesNotExist("User")
         
         return JSONResponse(
                 status_code=200,
                 content={'token': create_jwt_token({'sub': str(user.user_id)})}
             )
     except DoesNotExist as e:
-        print("[LOGIN][ERROR] >> ", type(e), str(e))
-        raise
+        return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
     except Exception as e:
         print("[LOGIN][ERROR] >> ", type(e), str(e))
         raise

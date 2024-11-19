@@ -6,6 +6,8 @@ from argon2 import PasswordHasher
 import redis
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from utils.connection import RedisConnection
+
 
 load_dotenv()
 
@@ -18,11 +20,20 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 PH = PasswordHasher(time_cost=2, memory_cost=102400, parallelism=8)
 
 
+import os
+from dotenv import load_dotenv
+load_dotenv(override=False)
+
 # Redis
-REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(max_connections=20)
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL)
+redis_host = os.getenv('REDIS_HOST')
+REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
+    connection_class=RedisConnection,
+    max_connections=20
+)
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=redis_host)
 
 
+# print("The DB Host ")
 # DB
 DB_URL = \
     f"postgresql+asyncpg://{os.getenv("DB_USER")}:{quote(os.getenv('DB_PASSWORD'))}\

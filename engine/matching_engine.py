@@ -16,13 +16,25 @@ from enums import ConsumerStatusType, OrderType, OrderStatus, _InternalOrderType
 from exceptions import DoesNotExist, InvalidAction
 from models.matching_engine_models import OrderRequest
 from tests.test_config import config
+from utils.connection import RedisConnection
 from utils.db import get_db_session
 from engine.order_manager import OrderManager
 
 
+
 # Redis
-REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(max_connections=20)
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL)
+import os
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
+
+host = os.getenv('REDIS_HOST')
+REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
+    connection_class=RedisConnection, 
+    max_connections=20
+)
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=host)
+
 
 
 class MatchingEngine:

@@ -47,9 +47,6 @@ async def get_db_session():
         finally:
             await session.close()
 
-
-from async_lru import alru_cache
-
 def constraints_to_tuple(constraints: dict) -> tuple:
     return tuple(sorted(constraints.items()))
 
@@ -79,7 +76,6 @@ async def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any
         return None
 
 
-# @alru_cache(maxsize=100)
 async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
     """
     Returns all orders withhin a DB that follow the constraints

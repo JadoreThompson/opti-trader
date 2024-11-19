@@ -25,7 +25,7 @@ class Users(Base):
     user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String, unique=True)
     password: Mapped[str] = mapped_column(String)
-    balance: Mapped[float] = mapped_column(Float, default=10000, nullable=True)
+    balance: Mapped[float] = mapped_column(Float, default=1000000, nullable=True)
     api_key: Mapped[str] = mapped_column(String, default=generate_api_key)
 
     # Relationships
