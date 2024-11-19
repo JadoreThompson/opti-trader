@@ -7,3 +7,5 @@ gc_client_secret.json
 gc_client.json
 rec.py
 dockerfile
+docker-compose.yaml
+entrypoint.sh
