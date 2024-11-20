@@ -5,6 +5,10 @@ jobs:
   Update-Docker-Image:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-        docker build --no-cache -t zeznjt/order-matcher-backend-api .
-        docker push zeznjt/order-matcher-backend-api
+      - run: echo "Testing"
+    
+    # steps:
+    #   - name
+    #     run: |
+    #     docker build --no-cache -t zeznjt/order-matcher-backend-api .
+    #     docker push zeznjt/order-matcher-backend-api
