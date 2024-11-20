@@ -22,9 +22,3 @@ jobs:
         run: |
           docker build --no-cache -t zeznjt/order-matcher-backend-api .
           docker push zeznjt/order-matcher-backend-api
-    
-    # steps:
-    #   - name
-    #     run: |
-    #     docker build --no-cache -t zeznjt/order-matcher-backend-api .
-    #     docker push zeznjt/order-matcher-backend-api
