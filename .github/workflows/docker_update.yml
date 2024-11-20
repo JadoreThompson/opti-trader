@@ -1,11 +1,21 @@
 name: Update Docker Image
 run-name: ${{ github.actor }} pushed content to be updated in docker image
-on: [push]
+on:
+  push:
+    branches: [release]
+
 jobs:
   Update-Docker-Image:
     runs-on: ubuntu-latest
+    
     steps:
-      - run: echo "Testing"
+      - name: Checkout code
+        uses: actions/checkout@v4
+    
+      - name: Update docker image
+        run: |
+          docker build --no-cache -t zeznjt/order-matcher-backend-api .
+          docker push zeznjt/order-matcher-backend-api
     
     # steps:
     #   - name
