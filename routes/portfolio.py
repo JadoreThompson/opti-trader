@@ -364,6 +364,7 @@ async def growth(
         }))    
     
     asyncio.create_task(add_to_internal_cache(user_id, 'growth', {interval: return_list}))
+    return_list.sort(key= lambda item: item.time)
     return return_list
     
 

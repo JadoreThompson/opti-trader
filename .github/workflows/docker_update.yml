@@ -1,0 +1,8 @@
+name: Update Docker Image
+run-name: ${{ github.actor }} pushed content to be updated in docker image
+on: [push]
+jobs:
+  - name: Update docker image in repo
+    run: |
+      docker build --no-cache -t zeznjt/order-matcher-backend-api
+      docker push zeznjt/order-matcher-backend-api
