@@ -512,7 +512,7 @@ class MatchingEngine:
         if result[0] == 2:
             try:
                 open_price = order_obj.data.get('filled_price', None) or order_obj.data.get('price')
-                pnl = (price / open_price) * (order_obj.quantity * open_price)
+                pnl = (price / open_price) * (quantity * open_price)
                 order_obj.data['realised_pnl'] += pnl
                 
                 if order_obj.standing_quantity == 0:
@@ -524,7 +524,6 @@ class MatchingEngine:
 
                 await self.order_manager.batch_update([order_obj.data])
                 self.current_price = result[1]
-                print('Current Price: ',self.current_price)
                 await self.add_new_price_to_db(result[1], order_obj.data['ticker'], int(datetime.now().timestamp()))
             except InvalidAction as e:
                 print("Error in handling buy order\n", str(e))
