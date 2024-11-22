@@ -144,15 +144,16 @@ async def get_average_daily_return_and_total_profit_and_winrate(
     
     for order in orders:        
         try:
-            start_price = (order.get('filled_price', None) or order.get('price', None))
-            initial_value = order['quantity'] * start_price
-            price_change = ((order['close_price'] - start_price) / start_price) + 1
+            # start_price = (order.get('filled_price', None) or order.get('price', None))
+            # initial_value = order['quantity'] * start_price
+            # new_value = ((order['close_price'] - start_price) / start_price) + 1
             
-            order_return = round((initial_value * price_change) - initial_value, 2)
-            date_return[order['created_at'].date()] += order_return
-            total_return += order_return
+            # order_return = round((initial_value * new_value) - initial_value, 2)
+            realised_pnl = order['realised_pnl']
+            date_return[order['created_at'].date()] += realised_pnl
+            total_return += realised_pnl
             
-            if order_return > 0:
+            if realised_pnl > 0:
                 wins += 1
         except TypeError:
             pass
@@ -353,10 +354,12 @@ async def growth(
         
     # Getting the starting balance for the peiod
     for order in all_orders:
-        quantity = order.quantity
-        monetary_gain = -1 * ((order.filled_price * quantity) - (order.close_price * quantity))
-        starting_period_balance += monetary_gain
-        all_orders_with_gain.append({'date': order.created_at, 'gain': monetary_gain})
+        # quantity = order.quantity
+        # monetary_gain = -1 * ((order.filled_price * quantity) - (order.close_price * quantity))
+        starting_period_balance += -1 * order.realised_pnl
+        print({'date': order.created_at, 'gain': order.realised_pnl})
+        print('Balance ', starting_period_balance)
+        all_orders_with_gain.append({'date': order.created_at, 'gain': order.realised_pnl})
 
     for order in all_orders_with_gain:
         return_list.append(GrowthModel(**{
@@ -402,12 +405,10 @@ async def wins_losses_weekday(user_id: str = Depends(verify_jwt_token_http)):
     losses = [0 for _ in num_range]
     
     for order in all_orders:
-        close_price = order['close_price']
-        price = order['price']
-        
-        if close_price > price:
-            wins[order['created_at'].weekday()] += 1
-        elif close_price < price:
+        realised_pnl = order['realised_pnl']
+        if realised_pnl < 0:
             losses[order['created_at'].weekday()] += 1
+        elif realised_pnl > 0:
+            wins[order['created_at'].weekday()] += 1
     
     return JSONResponse(status_code=200, content={'wins': wins, 'losses': losses})

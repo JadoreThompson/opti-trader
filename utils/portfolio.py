@@ -3,7 +3,7 @@ from utils.db import get_db_session
 from db_models import Users
 
 
-async def get_monthly_returns(orders: list, all_dates: set) -> dict[str, float]:
+async def get_monthly_returns(orders: list[dict], all_dates: set) -> dict[str, float]:
     """
     Returns a dictionary with the key being YYYY-MM and value being the cumulative return
     for that month
@@ -19,10 +19,10 @@ async def get_monthly_returns(orders: list, all_dates: set) -> dict[str, float]:
     monthly_return = {key: 0 for key in all_dates}
     
     for order in orders:        
-        start_price = (order.get('filled_price', None) or order.get('price', None))
-        initial_value = order['quantity'] * start_price
-        price_change = ((order['close_price'] - start_price) / start_price) + 1
-        monthly_return[f"{order['created_at']:%Y-%m}"] += round((initial_value * price_change) - initial_value, 2)
+        # start_price = (order.get('filled_price', None) or order.get('price', None))
+        # initial_value = order['quantity'] * start_price
+        # new_value = ((order['close_price'] - start_price) / start_price) + 1
+        monthly_return[f"{order['created_at']:%Y-%m}"] += round(order['realised_pnl'], 2)
     return monthly_return
 
 
