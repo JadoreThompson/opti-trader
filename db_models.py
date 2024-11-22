@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 # SA
@@ -43,14 +44,17 @@ class Orders(Base):
     closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     ticker: Mapped[str] = mapped_column(String)
     order_type: Mapped[OrderType] = mapped_column(Enum(OrderType, name='order_type'))
-    quantity: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=True)
     filled_price: Mapped[float] = mapped_column(Float, nullable=True)
     limit_price: Mapped[float] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
     close_price: Mapped[float] = mapped_column(Float, nullable=True)
-
+    standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    realised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
+    unrealised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
+    
     # Constraints
     __tableargs__ = (
         CheckConstraint(quantity > 0, name='quantity_minimum_value'),
@@ -61,6 +65,10 @@ class Orders(Base):
 
     # Relationships
     users = relationship("Users", back_populates='orders')
+
+    def __init__(self, **kwargs: Any):
+        kwargs['standing_quantity'] = kwargs['quantity']
+        super().__init__(**kwargs)
 
 
 class MarketData(Base):

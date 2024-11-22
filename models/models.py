@@ -91,6 +91,7 @@ class Order(Base):
     filled_price: Optional[float] = None
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
+    realised_pnl: Optional[float] = None
 
 
 class TickerData(BaseModel):

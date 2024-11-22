@@ -1,5 +1,5 @@
 .idea
-**/__pycache__
+__pycache__/
 **.env
 **venv
 
@@ -12,3 +12,4 @@ docker-compose.yaml
 entrypoint.sh
 
 Yahoo Ticker Symbols - September 2017.xlsx
+.pytest_cache

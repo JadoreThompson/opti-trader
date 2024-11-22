@@ -8,10 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 # Local
+from config import DB_ENGINE
 from enums import OrderStatus
 from exceptions import DoesNotExist
 from db_models import Orders
-from tests.test_config import DB_ENGINE
+
 
 
 async_session_maker = sessionmaker(
@@ -31,21 +32,18 @@ async def get_db_session():
     Raises:
         Exception: If an error occurs during the session.
     """
+    
     async with async_session_maker() as session:
         try:
             yield session
         
         except DoesNotExist:
             raise
-        
         except Exception as e:
-            print('Get DB Session Error: ', type(e), str(e))
-            print("-" * 10)
             await session.rollback()
-            pass
-        
         finally:
             await session.close()
+            
 
 def constraints_to_tuple(constraints: dict) -> tuple:
     return tuple(sorted(constraints.items()))

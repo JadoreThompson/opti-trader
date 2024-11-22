@@ -16,18 +16,24 @@ class OrderStatus(str, Enum):
     PARTIALLY_FILLED = 'partially_filled'
     NOT_FILLED = 'not_filled'
     CLOSED = 'closed'
+    
+    # The order has quantity that needs to be closed, this can't be closed again
     PARTIALLY_CLOSED = 'partially_closed'
 
+    # The order still has some quantity that can be closed
+    PARTIALLY_CLOSED_ACTIVE = 'partially_closed_active'
 
-class _InternalOrderType(str, Enum):
+
+class _InternalOrderType(int, Enum):
     """
     Within the Matching engine, to allow tracking and differentation
     of order types we have these types as an added key:pair
     """    
-    MARKET_ORDER = 'market_order'
-    STOP_LOSS_ORDER = 'stop_loss_order'
-    TAKE_PROFIT_ORDER = 'take_profit_order'
-
+    MARKET_ORDER = 0
+    LIMIT_ORDER = 1
+    STOP_LOSS_ORDER = 2
+    TAKE_PROFIT_ORDER = 3
+    CLOSE_ORDER = 4
 
 class ConsumerStatusType(str, Enum):
     """

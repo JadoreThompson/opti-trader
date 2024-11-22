@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Local
 import config
-from tests.test_config import *
 from exceptions import DoesNotExist, InvalidError, DuplicateError, InvalidAction
 from middleware import RateLimitMiddleware
 from routes.portfolio import portfolio
@@ -69,6 +68,7 @@ async def index(request: Request):
     
 import os
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 print("The current postgres user is: ", os.getenv("DB_USER"))

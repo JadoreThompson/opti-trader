@@ -69,7 +69,7 @@ def websocket_exception_handler(func):
 class ClientManager:
     def __init__(self, websocket: WebSocket):
         self.socket: WebSocket = websocket
-        self.ticker_quotes: dict[str, float] = {'APPL': 130}
+        self.ticker_quotes: dict[str, float] = {'APPL': 100}
         self._balance: float =  None
     
             
@@ -104,7 +104,6 @@ class ClientManager:
     async def receive(self) -> None:
         message = await self.socket.receive_text()
         message = json.loads(message)
-        
         # Verifying user
         try:
             user_id = verify_jwt_token_ws(message['token'])
@@ -146,6 +145,10 @@ class ClientManager:
                     .where(Users.user_id == user_id)
                 )
                 self.user = result.scalar()
+                
+                if not self.user:
+                    return False
+                
                 self.balance = self.user.balance
                 return True
         except Exception as e:
@@ -182,7 +185,9 @@ class ClientManager:
         """    
         while True:
             message = await self.socket.receive_text()
-            message = OrderRequest(**(json.loads(message)))
+            message = json.loads(message)
+            print(f'[{datetime.now()}] Received Message: ', [key for key in message.keys() if message[key]])
+            message = OrderRequest(**message)
             additional_fields = {'type': message.type}
             
             if message.type == OrderType.MARKET or message.type == OrderType.LIMIT:    
@@ -202,40 +207,16 @@ class ClientManager:
                     }))
                     continue
                 
-                
                 payload = vars(message.close_order)
                 
                 additional_fields['order_ids'] = order_ids
                 additional_fields['user_id'] = str(self.user.user_id)
+                additional_fields['price'] = self.ticker_quotes.get(payload['ticker'])
                 
                 payload.update(additional_fields)
                 asyncio.create_task(self.send_order_to_engine(payload))
                 
                 continue
-                
-            elif message.type == OrderType.ENTRY_PRICE_CHANGE:
-                order_id = message.entry_price_change.order_id
-                order: dict = await self.retrieve_order(order_id)
-                
-                if order['order_status'] != OrderStatus.NOT_FILLED:
-                    await self.socket.send_text(json.dumps({
-                        'status': 'error',
-                        'message': "Can't update entry price of partially or fully filled order",
-                        'order_id': order['order_id']
-                    }))
-                    return
-                
-                additional_fields['new_entry_price'] = message.entry_price_change.price
-            
-            elif message.type == OrderType.TAKE_PROFIT_CHANGE:
-                order_id = message.take_profit_change.order_id
-                additional_fields['new_take_profit_price'] = message.take_profit_change.price
-                order: dict = await self.retrieve_order(order_id)
-            
-            elif message.type == OrderType.STOP_LOSS_CHANGE:
-                order_id = message.stop_loss_change.order_id
-                additional_fields['new_stop_loss_price'] = message.stop_loss_change.price
-                order: dict = await self.retrieve_order(order_id)
             
             # Can't edit a closed order
             if order['order_status'] == OrderStatus.CLOSED:
@@ -250,7 +231,7 @@ class ClientManager:
             # Shipping off to the engine for computation
             order.update(additional_fields)
             asyncio.create_task(self.send_order_to_engine(order))
-            
+            await asyncio.sleep(0.1)
     
     async def create_order_in_db(self, message: OrderRequest) -> dict:
         """
@@ -281,6 +262,7 @@ class ClientManager:
             
             message_dict['user_id'] = self.user.user_id
             message_dict['order_type'] = message.type
+            message_dict['standing_quantity'] = message_dict['quantity']
             
             # Getting the price
             message_dict['price'] = message_dict.get('limit_price', None)\
@@ -322,11 +304,12 @@ class ClientManager:
         """
         async with get_db_session() as session:
             r = await session.execute(
-                select(Orders.order_id, Orders.quantity)
+                select(Orders.order_id, Orders.standing_quantity)
                 .where(
                     (Orders.user_id == self.user.user_id) 
                     & (Orders.ticker == ticker) 
                     & (Orders.order_status != OrderStatus.CLOSED)
+                    & (Orders.order_status != OrderStatus.PARTIALLY_CLOSED)
                 )
             )
             all_orders = r.all()        
@@ -336,38 +319,11 @@ class ClientManager:
             target_quantity -= order[1]
             order_ids.append(str(order[0]))
             
-            if target_quantity <= 0:
+            if target_quantity <= 0:                
                 return order_ids
             
         return []
-        
-        
-    async def retrieve_order(self, order_id: str | UUID) -> dict:
-        """
-        Retrieves an order within the DB with the order_id
-
-        Args:
-            order_id (str | UUID)
-
-        Returns:
-            dict: A dictionary representation of the order without the _sa_instance_state key
-        """        
-        try:
-            async with get_db_session() as session:
-                result = await session.execute(
-                    select(Orders)
-                    .where(Orders.order_id == order_id)
-                )
-                                
-                return {
-                    key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
-                    for key, value in vars(result.scalar()).items()
-                    if key != '_sa_instance_state'
-                }
-        except Exception as e:
-            print("Retrieve order\n", type(e), str(e))
-            print("-" * 10)
-    
+ 
     
     async def send_order_to_engine(self, order: dict) -> None:
         """

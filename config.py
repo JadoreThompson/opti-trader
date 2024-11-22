@@ -4,6 +4,7 @@ from urllib.parse import quote
 from argon2 import PasswordHasher
 
 import redis
+from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from utils.connection import RedisConnection
@@ -38,6 +39,5 @@ REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=
 DB_URL = \
     f"postgresql+asyncpg://{os.getenv("DB_USER")}:{quote(os.getenv('DB_PASSWORD'))}\
 @{os.getenv("DB_HOST")}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
-DB_ENGINE = create_async_engine(DB_URL, pool_size=20)
-
+DB_ENGINE = create_async_engine(DB_URL, future=True, poolclass=NullPool)
 TICKERS = ['BTC/USDT', 'SOL/USDT', 'ETH/USDT']

@@ -206,6 +206,7 @@ async def get_avg_risk_per_trade(
 
 
 # Initialisation
+# ^^^^^^^^^^^^^^
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
 
