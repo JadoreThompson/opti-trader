@@ -1,50 +1,37 @@
-import asyncio
-import json
-from collections import defaultdict
+import asyncio, json, random, redis, faker
+
 from datetime import datetime
-import random
-from typing import Tuple
-from uuid import uuid4, UUID
-import redis
-import faker
 from faker import Faker
-from sqlalchemy import insert, update, select
+from sqlalchemy import insert
 
 # Local
-# from config import REDIS_CLIENT
-from db_models import MarketData, Orders
+from db_models import MarketData
 from engine._order import _Order
-from enums import ConsumerStatusType, OrderType, OrderStatus, _InternalOrderType
-from exceptions import DoesNotExist, InvalidAction
-from models.matching_engine_models import OrderRequest
+from engine.order_manager import OrderManager
 from utils.connection import RedisConnection
 from utils.db import get_db_session
-from engine.order_manager import OrderManager
+from enums import ConsumerStatusType, OrderType, OrderStatus, _OrderType
+from exceptions import DoesNotExist, InvalidAction
+from .config import REDIS_HOST
 
 
-
-# Redis
-import os
-from dotenv import load_dotenv
-
-load_dotenv(override=False)
-
-host = os.getenv('REDIS_HOST')
 REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
     connection_class=RedisConnection, 
     max_connections=20
 )
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=host)
-
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=REDIS_HOST)
 
 Faker.seed(0)
 faker = Faker()
+
 class MatchingEngine:
     def __init__(self):
         """
         Bids and asks data structure
         {
-            price[float]: [ [timestamp[float], quantity[float], order_data[dict] ] ]
+            ticker: {
+                price: [_Order()]
+            }
         }
         """
         self.redis = REDIS_CLIENT
@@ -57,7 +44,7 @@ class MatchingEngine:
                 price: [
                         _Order(
                             {'order_id': faker.pystr(), 'quantity': random.randint(20, 50), 'order_status': random.choice([OrderStatus.PARTIALLY_CLOSED,]), 'created_at': datetime.now()},
-                            random.choice([_InternalOrderType.TAKE_PROFIT_ORDER, _InternalOrderType.STOP_LOSS_ORDER])
+                            random.choice([_OrderType.TAKE_PROFIT_ORDER, _OrderType.STOP_LOSS_ORDER])
                         ) for _ in range(ask_quant)
                     ]
                 for price in ask_range
@@ -71,7 +58,7 @@ class MatchingEngine:
                 price: [
                         _Order(
                             {'order_id': faker.pystr(), 'quantity': random.randint(5, 10), 'order_status': OrderStatus.NOT_FILLED, 'created_at': datetime.now()},
-                            random.choice([_InternalOrderType.MARKET_ORDER, _InternalOrderType.LIMIT_ORDER])
+                            random.choice([_OrderType.MARKET_ORDER, _OrderType.LIMIT_ORDER])
                         ) for _ in range(bids_quant)
                     ]
                 for price in bid_range
@@ -132,12 +119,13 @@ class MatchingEngine:
         action_type = data["type"]
         channel = f"trades_{data['user_id']}"
         
-        if action_type == OrderType.MARKET:
-            await self.handle_market_order(data, channel)
-            
-        elif action_type == OrderType.CLOSE:
-            await self.handle_close_order(data, channel)
+        options = {
+            OrderType.MARKET: self.handle_market_order,
+            OrderType.CLOSE: self.handle_close_order,
+            OrderType.LIMIT: self.handle_limit_order
+        }
         
+        await options.get(action_type)(data, channel)
                    
     async def publish_update_to_client(self, channel: str, message: str | dict) -> None:
         """
@@ -163,13 +151,13 @@ class MatchingEngine:
         try:
             # TP
             if data.get('take_profit', None):
-                tp_order = _Order(data, _InternalOrderType.TAKE_PROFIT_ORDER)
+                tp_order = _Order(data, _OrderType.TAKE_PROFIT_ORDER)
                 self.asks[tp_order.data['ticker']][tp_order.data['take_profit']].append(tp_order)
                 await self.order_manager.append_tp(tp_order)
 
             # Stop Loss
             if data.get('stop_loss', None):
-                sl_order = _Order(data, _InternalOrderType.TAKE_PROFIT_ORDER)
+                sl_order = _Order(data, _OrderType.TAKE_PROFIT_ORDER)
                 self.asks[sl_order.data['ticker']][sl_order.data['take_profit']].append(sl_order)
                 await self.order_manager.append_sl(sl_order)
                 
@@ -186,7 +174,7 @@ class MatchingEngine:
         Args:
             data (dict)
         """
-        order = _Order(data, _InternalOrderType.MARKET_ORDER)
+        order = _Order(data, _OrderType.MARKET_ORDER)
         result: tuple = await self.match_bid_order(order=order, ticker=order.data['ticker'])
         
         # Relaying message to user
@@ -340,12 +328,12 @@ class MatchingEngine:
                 order.reduce_standing_quantity(ex_order.standing_quantity)
                 ex_order.standing_quantity = 0
 
-                if ex_order.order_type in [_InternalOrderType.STOP_LOSS_ORDER, _InternalOrderType.TAKE_PROFIT_ORDER]:
+                if ex_order.order_type in [_OrderType.STOP_LOSS_ORDER, _OrderType.TAKE_PROFIT_ORDER]:
                     ex_order.order_status = OrderStatus.CLOSED
                     ex_order.data['close_price'] = ask_price
                     ex_order.data['closed_at'] = datetime.now()
                 
-                elif ex_order.order_type == _InternalOrderType.CLOSE_ORDER:
+                elif ex_order.order_type == _OrderType.CLOSE_ORDER:
                     if ex_order.standing_quantity == 0:
                         ex_order.order_status == OrderStatus.CLOSED
                         ex_order.data['close_price'] = ask_price
@@ -356,7 +344,7 @@ class MatchingEngine:
                 ex_order.reduce_standing_quantity(order.standing_quantity)
                 order.standing_quantity = 0
                 
-                if ex_order.order_type in [_InternalOrderType.STOP_LOSS_ORDER, _InternalOrderType.TAKE_PROFIT_ORDER, _InternalOrderType.CLOSE_ORDER]:
+                if ex_order.order_type in [_OrderType.STOP_LOSS_ORDER, _OrderType.TAKE_PROFIT_ORDER, _OrderType.CLOSE_ORDER]:
                     ex_order.order_status = OrderStatus.PARTIALLY_CLOSED
                 else:
                     ex_order.order_status = OrderStatus.PARTIALLY_FILLED
@@ -393,7 +381,7 @@ class MatchingEngine:
         """        
         
         try:
-            order = _Order(data, _InternalOrderType.LIMIT_ORDER)
+            order = _Order(data, _OrderType.LIMIT_ORDER)
 
             self.bids[data['ticker']][data['limit_price']].append(order)
             
@@ -615,13 +603,16 @@ class MatchingEngine:
         
         # Fulfilling the order
         for ex_order in self.bids[ticker][bid_price]:
+            print('Current Trying to fill against: ', ex_order)
             touched_orders.append(ex_order)
             
             remaining_quantity = quantity - ex_order.standing_quantity
             
             if remaining_quantity >= 0:
+                ex_order.order_status = OrderStatus.FILLED
                 main_order.reduce_standing_quantity(ex_order.standing_quantity)
             else:
+                ex_order.order_status = OrderStatus.PARTIALLY_FILLED
                 main_order.reduce_standing_quantity(quantity)
                 
             quantity -= ex_order.standing_quantity
@@ -646,6 +637,21 @@ class MatchingEngine:
     
         return (1,)
         
+    
+    async def handle_limit_order(self, data: dict, channel: str) -> None:
+        """
+        Places limit order into the bids list
+
+        Args:
+            data (dict): 
+            channel (str): 
+        """        
+        self.bids[data['ticker']][data['limit_price']].append(_Order(data, _OrderType.LIMIT_ORDER))
+        await self.publish_update_to_client(
+            channel,
+            {'status': ConsumerStatusType.SUCCESS, 'message': 'Limit Order placed successfully'}
+        )
+        print(self.bids[data['ticker']][data['limit_price']])
     
     async def add_new_price_to_db(self, new_price: float, ticker: str, new_time: int) -> None:
         """

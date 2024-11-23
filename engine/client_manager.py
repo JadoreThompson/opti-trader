@@ -1,10 +1,7 @@
-import asyncio
-import json
+import asyncio, json, redis
 from datetime import datetime
 from functools import wraps
 from uuid import UUID
-import redis
-
 
 # FA
 from fastapi import WebSocket
@@ -22,20 +19,14 @@ from models.matching_engine_models import OrderRequest
 from utils.auth import verify_jwt_token_ws
 from utils.connection import RedisConnection
 from utils.db import get_db_session
+from .config import REDIS_HOST
 
 
-# Redis
-import os
-from dotenv import load_dotenv
-
-load_dotenv(override=False)
-
-host = os.getenv('REDIS_HOST')
 REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
     connection_class=RedisConnection, 
     max_connections=20
 )
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=host)
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=REDIS_HOST)
 
 
 def websocket_exception_handler(func):
@@ -175,7 +166,82 @@ class ClientManager:
                         "status": ConsumerStatusType.PRICE_UPDATE,
                         "message": data,
                     }))
-                    
+
+
+    async def create_market_order_handler(self, message: OrderRequest) -> dict:
+        """
+        Creates order in the DB, returns the order as a (dict)
+        
+        Args:
+            message (OrderRequest):
+
+        Returns:
+            dict: Created Order
+        """        
+        order: dict = await self.create_order_in_db(message)
+        if order:
+            return order
+        print('Error creating order')
+    
+    async def create_limit_order_handler(self, message: OrderRequest) -> dict | None:
+        """
+        Checks that the price beign requested is within reason, creates order
+
+        Args:
+            message (OrderRequest):
+
+        Returns:
+            dict: Order as a (dict)
+            None: Price was outside of the boundary
+        """        
+        current_price = self.ticker_quotes[message.limit_order.ticker]
+        boundary = current_price * 0.5
+        
+        if boundary >= message.limit_order.limit_price or message.limit_order.limit_price >= (boundary + current_price):
+            await self.socket.send_text(json.dumps({
+                'status': ConsumerStatusType.ERROR,
+                'message': "Can't place order on specified  price"
+            }))
+            return
+        
+        order: dict = await self.create_order_in_db(message)
+        if order:
+            return order
+        
+        print('Error creating order')
+    
+    
+    async def close_orders_handler(self, message: OrderRequest) -> None:
+        """
+        Retrieves orders and sends to the engine. It'll send to the engine 
+        if the user has enough quantity to satisfy their request else it'll
+        notify the user of the insufficient inventory
+
+        Args:
+            message (OrderRequest):
+        """        
+        order_ids: list = await self.fetch_orders(
+            message.close_order.quantity,
+            message.close_order.ticker,
+        )
+        
+        if not order_ids:
+            await self.socket.send_text(json.dumps({
+                'status': ConsumerStatusType.ERROR,
+                'message': 'Insufficient asset value'
+            }))
+            return
+    
+        payload = vars(message.close_order)
+        payload.update({
+            'type': message.type,
+            'order_ids': order_ids,
+            'user_id': str(self.user.user_id),
+            'price': self.ticker_quotes.get(payload['ticker'])
+        })
+        
+        asyncio.create_task(self.send_order_to_engine(payload))
+
 
     @websocket_exception_handler
     async def handle_incoming_requests(self) -> None:
@@ -185,52 +251,32 @@ class ClientManager:
         """    
         while True:
             message = await self.socket.receive_text()
-            message = json.loads(message)
-            print(f'[{datetime.now()}] Received Message: ', [key for key in message.keys() if message[key]])
-            message = OrderRequest(**message)
+            message = OrderRequest(**json.loads(message))
             additional_fields = {'type': message.type}
             
-            if message.type == OrderType.MARKET or message.type == OrderType.LIMIT:    
-                order: dict = await self.create_order_in_db(message)
-                if not order:
-                    continue
+            options = {
+                OrderType.MARKET: self.create_market_order_handler,
+                OrderType.LIMIT: self.create_limit_order_handler,
+                OrderType.CLOSE: self.close_orders_handler,
+            }
             
-            elif message.type == OrderType.CLOSE:
-                order_ids: list = await self.fetch_orders(
-                    message.close_order.quantity,
-                    message.close_order.ticker,
-                )
-                if not order_ids:
-                    await self.socket.send_text(json.dumps({
-                        'status': ConsumerStatusType.ERROR,
-                        'message': 'Insufficient asset value'
-                    }))
-                    continue
-                
-                payload = vars(message.close_order)
-                
-                additional_fields['order_ids'] = order_ids
-                additional_fields['user_id'] = str(self.user.user_id)
-                additional_fields['price'] = self.ticker_quotes.get(payload['ticker'])
-                
-                payload.update(additional_fields)
-                asyncio.create_task(self.send_order_to_engine(payload))
-                
+            result = await options.get(message.type)(message)
+            
+            if not isinstance(result, dict):
                 continue
             
             # Can't edit a closed order
-            if order['order_status'] == OrderStatus.CLOSED:
+            if result['order_status'] == OrderStatus.CLOSED:
                 await self.socket.send_text(json.dumps({
                     'status': 'error',
                     'message': 'Order already closed',
-                    'order_id': order['order_id']
+                    'order_id': result['order_id']
                 }))
                 return
-            
-            
+                    
             # Shipping off to the engine for computation
-            order.update(additional_fields)
-            asyncio.create_task(self.send_order_to_engine(order))
+            result.update(additional_fields)
+            asyncio.create_task(self.send_order_to_engine(result))
             await asyncio.sleep(0.1)
     
     async def create_order_in_db(self, message: OrderRequest) -> dict:

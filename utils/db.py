@@ -41,6 +41,7 @@ async def get_db_session():
             raise
         except Exception as e:
             await session.rollback()
+            raise e
         finally:
             await session.close()
             

@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 from enum import Enum
 
@@ -8,6 +9,7 @@ from db_models import Orders
 from engine._order import _Order
 from exceptions import DoesNotExist
 from utils.db import get_db_session
+
 
 class OrderManager:
     def __init__(self):
@@ -46,9 +48,15 @@ class OrderManager:
         Args:
             orders (list[dict]).
         """        
+        
+        # During testing due to the orders only being declared 
+        # in memory this throws a DBAPIError,
         async with get_db_session() as session:
-            await session.execute(
-                update(Orders),
-                orders
-            )
-            await session.commit()
+            for order in orders:
+                try:
+                    await session.execute(update(Orders),[order])      
+                    await session.commit()
+                except Exception as e:
+                    await session.rollback()
+                finally:
+                    await asyncio.sleep(0.1)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from enums import _InternalOrderType, OrderStatus
+from enums import _OrderType, OrderStatus
 
 
 class _Order:
@@ -10,7 +10,7 @@ class _Order:
     for retrieval and later computation
     """
     
-    def __init__(self, data: dict, order_type: _InternalOrderType) -> None:
+    def __init__(self, data: dict, order_type: _OrderType) -> None:
         if isinstance(data['created_at'], str):
             data['created_at'] = datetime.strptime(data['created_at'], "%Y-%m-%d %H:%M:%S.%f")
         
@@ -67,6 +67,9 @@ class _Order:
     
     def list(self) -> list:
         return [self.quantity, self.data]
+        
+    def __str__(self) -> str:
+        return f"{self.data['order_id'][:5]} >> {self.order_status}"
         
     def __repr__(self):
         return f"{self.data['order_id'][:5]} >> {self.order_status}"

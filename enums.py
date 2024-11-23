@@ -24,7 +24,7 @@ class OrderStatus(str, Enum):
     PARTIALLY_CLOSED_ACTIVE = 'partially_closed_active'
 
 
-class _InternalOrderType(int, Enum):
+class _OrderType(int, Enum):
     """
     Within the Matching engine, to allow tracking and differentation
     of order types we have these types as an added key:pair
