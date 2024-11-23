@@ -620,7 +620,8 @@ class MatchingEngine:
                 break
             
         for item in touched_orders:
-            self.bids[ticker][bid_price].remove(item)
+            if item.order_status == OrderStatus.FILLED:
+                self.bids[ticker][bid_price].remove(item)
         
         asyncio.create_task(self.order_manager.batch_update([item.data for item in touched_orders]))    
         if quantity <= 0:
