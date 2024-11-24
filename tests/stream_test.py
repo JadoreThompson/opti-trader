@@ -37,7 +37,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
         order_obj = random.choice([
             matching_engine_models.MarketOrder(
                 ticker='APPL',
-                quantity=random.randint(20, 50),
+                quantity=random.randint(1, 5),
             ),
             
             # matching_engine_models.LimitOrder(
@@ -80,7 +80,7 @@ async def test_create_user():
 
 async def test_socket(
     divider: int = None,
-    quantity: int = 20,
+    close_quantity: int = 20,
     order_quantity: int = 100,
     **kwargs
 ):
@@ -100,7 +100,7 @@ async def test_socket(
         print('Signing Message: ', m)
         
         for i in range(len(orders)):
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.1)
             print(f"{kwargs.get('name', None)} - ", i)
             await socket.send(json.dumps(orders[i].model_dump()))
             
@@ -109,15 +109,15 @@ async def test_socket(
                     await socket.send(json.dumps({
                         'type': OrderType.CLOSE,
                         'close_order': {
-                            'quantity': quantity,
+                            'quantity': close_quantity,
                             'ticker': 'APPL'
                         }
                     }))
 
 async def main():
     await asyncio.gather(*[
-        test_socket(divider=2, quantity=20, order_quantity=500, name='seller'),
-        test_socket(name='buyer', quantity=200)
+        test_socket(divider=2, close_quantity=10, order_quantity=1000, name='seller'),
+        test_socket(name='buyer', divider=3, order_quantity=500, close_quantity=10)
     ])
 
 

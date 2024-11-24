@@ -6,13 +6,13 @@ from sqlalchemy import insert
 
 # Local
 from db_models import MarketData
-from engine._order import _Order
+from ._order import _Order, AskOrder, BidOrder
 from engine.order_manager import OrderManager
 from utils.connection import RedisConnection
 from utils.db import get_db_session
 from enums import ConsumerStatusType, OrderType, OrderStatus, _OrderType
 from exceptions import DoesNotExist, InvalidAction
-from .config import REDIS_HOST
+from .config import ASK_LEVELS, ASKS, BIDS, BIDS_LEVELS, REDIS_HOST
 
 
 REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
@@ -26,51 +26,45 @@ faker = Faker()
 
 class MatchingEngine:
     def __init__(self):
-        """
-        Bids and asks data structure
-        {
-            ticker: {
-                price: [_Order()]
-            }
-        }
-        """
         self.redis = REDIS_CLIENT
         self.order_manager = OrderManager()
-
-        ask_quant = 100
-        ask_range = range(110, 150, 5)
-        self.asks: dict[str, dict[float, list[_Order]]] = {
-            'APPL': {
-                price: [
-                        _Order(
-                            {'order_id': faker.pystr(), 'quantity': random.randint(20, 50), 'order_status': random.choice([OrderStatus.PARTIALLY_CLOSED,]), 'created_at': datetime.now()},
-                            random.choice([_OrderType.TAKE_PROFIT_ORDER, _OrderType.STOP_LOSS_ORDER])
-                        ) for _ in range(ask_quant)
-                    ]
-                for price in ask_range
-            }
-        }
-        
-        bids_quant = 2
-        bid_range = range(70, 150, 2)
-        self.bids: dict[str, dict[float, list[_Order]]] = {
-            'APPL': {
-                price: [
-                        _Order(
-                            {'order_id': faker.pystr(), 'quantity': random.randint(5, 10), 'order_status': OrderStatus.NOT_FILLED, 'created_at': datetime.now()},
-                            random.choice([_OrderType.MARKET_ORDER, _OrderType.LIMIT_ORDER])
-                        ) for _ in range(bids_quant)
-                    ]
-                for price in bid_range
-            }
-        }
-
-        
-        self.bids_price_levels = {key: self.bids[key].keys() for key in self.bids}
-        self.asks_price_levels = {key: self.asks[key].keys() for key in self.asks}
-        
         self._current_price: float = None        
 
+    async def configure_bids_asks(self, quantity: int = 100, divider: int = 5) -> None:
+        for i in range(quantity):
+            order = BidOrder(
+                {
+                    'order_id': faker.pystr(), 
+                    'quantity': random.randint(1, 20), 
+                    'order_status': random.choice([OrderStatus.NOT_FILLED, OrderStatus.PARTIALLY_FILLED]), 
+                    'created_at': datetime.now(),
+                    'ticker': 'APPL',
+                },
+                random.choice([_OrderType.LIMIT_ORDER, _OrderType.MARKET_ORDER])
+            )
+            
+            bid_price = random.choice([i for i in range(90, 170, 5)])
+            if order.order_type == _OrderType.LIMIT_ORDER:
+                order.data['limit_price'] = bid_price
+            else:
+                order.data['price'] = bid_price
+
+            tp = [None]
+            tp.extend([i for i in range(120, 150, 5)])
+            order.data['take_profit'] = random.choice(tp)
+            
+            sl = [None]
+            sl.extend([i for i  in range(60, 105, 5)])
+            order.data['stop_loss'] = random.choice(sl)
+            
+            BIDS[order.data['ticker']].setdefault(bid_price, [])
+            
+            if i % divider == 0:
+                order.data['filled_price'] = random.choice([i for i in range(100, 130, 5)])
+                order.order_status = OrderStatus.FILLED
+            else:
+                BIDS[order.data['ticker']][bid_price].append(order)
+            
 
     @property
     def current_price(self):
@@ -89,13 +83,15 @@ class MatchingEngine:
             new_price (float):
         """        
         await self.redis.publish(channel='prices', message=json.dumps({'ticker': 'APPL', 'price': new_price, 'time': int(datetime.now().timestamp())}))
-        print('Current Price: ', self._current_price)
+        
         
     async def listen_to_client_events(self):
         """
             Listens to messages from the to_order_book channel
             and relays to the handler
-        """        
+        """
+        await self.configure_bids_asks()
+        
         async with self.redis.pubsub() as pubsub:
             await pubsub.subscribe("to_order_book")
             print('Listening for orders...')
@@ -115,17 +111,15 @@ class MatchingEngine:
             data (dict): A dictionary representation of the request
         """        
         data = json.loads(data)
-        
         action_type = data["type"]
         channel = f"trades_{data['user_id']}"
         
-        options = {
+        await {
             OrderType.MARKET: self.handle_market_order,
             OrderType.CLOSE: self.handle_close_order,
             OrderType.LIMIT: self.handle_limit_order
-        }
-        
-        await options.get(action_type)(data, channel)
+        }.get(action_type)(data, channel)
+
                    
     async def publish_update_to_client(self, channel: str, message: str | dict) -> None:
         """
@@ -145,25 +139,6 @@ class MatchingEngine:
             print("Publish update to client:", type(e), end=f"\n{str(e)}\n")
             print('-' * 10)
             pass
-    
-    
-    async def place_tp_sl(self, data: dict) -> None:
-        try:
-            # TP
-            if data.get('take_profit', None):
-                tp_order = _Order(data, _OrderType.TAKE_PROFIT_ORDER)
-                self.asks[tp_order.data['ticker']][tp_order.data['take_profit']].append(tp_order)
-                await self.order_manager.append_tp(tp_order)
-
-            # Stop Loss
-            if data.get('stop_loss', None):
-                sl_order = _Order(data, _OrderType.TAKE_PROFIT_ORDER)
-                self.asks[sl_order.data['ticker']][sl_order.data['take_profit']].append(sl_order)
-                await self.order_manager.append_sl(sl_order)
-                
-        except Exception as e:
-            print("Error placing TP SL\n", type(e), str(e))            
-            print('-' * 10)
             
     
     async def handle_market_order(self, data: dict, channel: str) -> None:
@@ -172,11 +147,15 @@ class MatchingEngine:
         for a buy order
 
         Args:
-            data (dict)
+            data (dict).
+            channel (str).
         """
-        order = _Order(data, _OrderType.MARKET_ORDER)
-        result: tuple = await self.match_bid_order(order=order, ticker=order.data['ticker'])
-        
+        order = BidOrder(data, _OrderType.MARKET_ORDER)
+        result: tuple = await self.match_bid_order(main_order=order, ticker=order.data['ticker'])        
+        print('Market order result:', result)
+        if result[0] == 0:
+            await self.configure_bids_asks()
+            self.current_price *= 0.7
         # Relaying message to user
         status_message = {
             0: {
@@ -208,44 +187,43 @@ class MatchingEngine:
 
         await self.publish_update_to_client(**status_message)
         
-        # Insufficient liquidity, not filled or forwarded to the book
-        if result[0] == 0:
+        async def not_filled(**kwargs):
             return
         
-        # Sending to the order manager for reference
-        await self.order_manager.append_entry(order)
-        
-        # Order was successfully filled
-        if result[0] == 2:
+        async def partial_fill(**kwargs):
             try:
-                # await self.place_tp_sl(data)
-                
-                data["filled_price"] = result[1]
-                order.order_status = OrderStatus.FILLED
-                order.standing_quantity = data['quantity']
+                order.order_status = OrderStatus.PARTIALLY_FILLED
+                await self.order_manager.batch_update([data])
+                BIDS[order.data['ticker']].setdefault(order.data['price'], [])
+                BIDS[order.data['ticker']][order.data['price']].append(order) # Adding to the orderbook
+            except Exception as e:
+                print('partial fill error:', str(e))
+        
+        async def filled(**kwargs):
+            data = kwargs['data']
+            target_order = kwargs['target_order']
+            result = kwargs['result']
+            
+            try:
+                kwargs['data']["filled_price"] = result[1]
+                target_order.order_status = OrderStatus.FILLED
+                target_order.standing_quantity = data['quantity']
                 await self.order_manager.batch_update([data])
                 
                 self.current_price = result[1]
                 await self.add_new_price_to_db(result[1], data['ticker'], int(datetime.now().timestamp()))
-
-                print("Order successfully filled: ", self.order_manager.retrieve_entry(data['order_id']))
+            except Exception as e:
+                print('Filled market order error:', str(e))
                 
-            except InvalidAction as e:
-                await self.publish_update_to_client(channel=channel, message=json.dumps({
-                    'status': 'error',
-                    'message': str(e),
-                    'order_id': data['order_id']
-                }))
-                
-            finally:
-                return
+        # Sending to the order manager for future reference
+        await self.order_manager.append_entry(order)
         
+        await {
+            0: not_filled,
+            1: partial_fill,
+            2: filled
+        }.get(result[0])(result=result, target_order=order, data=data)
         
-        # Order was partially filled so we add to orderbook
-        order.order_status = OrderStatus.PARTIALLY_FILLED
-        await self.order_manager.batch_update([data])
-        self.bids[order.data['ticker']][order.data['price']].append(order) # Adding to the orderbook
-    
     
     async def find_ask_price_level(
         self,
@@ -272,9 +250,9 @@ class MatchingEngine:
                 # Finding the price with the lowest distance from the bid_price
                 price_map = {
                     key: abs(bid_price - key)
-                    for key in list(self.asks_price_levels[ticker])
+                    for key in list(ASK_LEVELS[ticker])
                     if key >= bid_price
-                    and self.asks[ticker][key]
+                    and ASKS[ticker][key]
                 }
                 
                 lowest_distance = min(val for _, val in price_map.items())
@@ -292,7 +270,7 @@ class MatchingEngine:
     async def match_bid_order(
         self, 
         ticker: str,
-        order: _Order = None,
+        main_order: _Order = None,
         bid_price: float = None,
         attempts: float = 0
     ) -> tuple:
@@ -310,60 +288,59 @@ class MatchingEngine:
             (1,): Order was partially filled
             (2, ask_price): Order was successfully filled
         """
-        bid_price = bid_price if bid_price else order.data["price"]
+        if not bid_price:
+            bid_price = main_order.data["price"]
+            
         ask_price = await self.find_ask_price_level(bid_price, ticker=ticker)
         if not ask_price:
             return (0, )
 
-        touched_orders: list[_Order] = []
+        closed_orders = []
+        touched_orders = []
         
-        for ex_order in self.asks[ticker][ask_price]:        
-            # Adding the dictionary to a batch for DB update
+        for ex_order in ASKS[ticker][ask_price]:                    
             touched_orders.append(ex_order)
+            remaining_quantity = main_order.standing_quantity - ex_order.standing_quantity
             
-            # Filling order against the quantity
-            remaining_quantity = order.standing_quantity - ex_order.standing_quantity
-            
+            # Existing order is fully consumed
             if remaining_quantity >= 0:
-                order.reduce_standing_quantity(ex_order.standing_quantity)
+                main_order.reduce_standing_quantity(ex_order.standing_quantity)
+                
+                closed_orders.append(ex_order)
                 ex_order.standing_quantity = 0
+                ex_order.data['close_price'] = ask_price
+                ex_order.data['closed_at'] = datetime.now()
 
-                if ex_order.order_type in [_OrderType.STOP_LOSS_ORDER, _OrderType.TAKE_PROFIT_ORDER]:
-                    ex_order.order_status = OrderStatus.CLOSED
-                    ex_order.data['close_price'] = ask_price
-                    ex_order.data['closed_at'] = datetime.now()
-                
-                elif ex_order.order_type == _OrderType.CLOSE_ORDER:
-                    if ex_order.standing_quantity == 0:
-                        ex_order.order_status == OrderStatus.CLOSED
-                        ex_order.data['close_price'] = ask_price
-                        ex_order.data['closed_at'] = datetime.now()
-                    else:
-                        ex_order.order_status == OrderStatus.PARTIALLY_CLOSED
+            # Existing order not fully consumed
             else:
-                ex_order.reduce_standing_quantity(order.standing_quantity)
-                order.standing_quantity = 0
+                ex_order.reduce_standing_quantity(main_order.standing_quantity)
+                main_order.standing_quantity = 0
                 
-                if ex_order.order_type in [_OrderType.STOP_LOSS_ORDER, _OrderType.TAKE_PROFIT_ORDER, _OrderType.CLOSE_ORDER]:
+                if ex_order.order_type in [_OrderType.TAKE_PROFIT_ORDER, _OrderType.STOP_LOSS_ORDER]:
                     ex_order.order_status = OrderStatus.PARTIALLY_CLOSED
-                else:
-                    ex_order.order_status = OrderStatus.PARTIALLY_FILLED
-            
-            if order.standing_quantity == 0:
+                else: # this was a user submitted close request: _OrderType.CLOSE_ORDER
+                    ex_order.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
+                    
+            if main_order.standing_quantity == 0:
                 break
-        
-        for item in touched_orders:
-            self.asks[ticker][ask_price].remove(item)
+
+        count = 0
+        for item in closed_orders:
+            try:
+                item.order_status = OrderStatus.CLOSED
+            except ValueError:
+                count += 1
+                pass
         
         asyncio.create_task(self.order_manager.batch_update([item.data for item in touched_orders]))    
-        if order.standing_quantity == 0:
+        if main_order.standing_quantity == 0:
             return (2, ask_price)
 
         if attempts < 20:
             attempts += 1
             return await self.match_bid_order(
                 ticker,
-                order,
+                main_order,
                 bid_price,
                 attempts
             )
@@ -381,9 +358,9 @@ class MatchingEngine:
         """        
         
         try:
-            order = _Order(data, _OrderType.LIMIT_ORDER)
+            order = BidOrder(data, _OrderType.LIMIT_ORDER)
 
-            self.bids[data['ticker']][data['limit_price']].append(order)
+            BIDS[data['ticker']][data['limit_price']].append(order)
             
             # await self.place_tp_sl(data)
             await self.order_manager.append_entry(order)
@@ -396,13 +373,15 @@ class MatchingEngine:
                     'order_id': data['order_id']
                 })
             )
+        except Exception as e:
+            print('handle limit order error:', str(e))
         
-        except (InvalidAction, DoesNotExist) as e:
-            await self.publish_update_to_client(channel=channel, message=json.dumps({
-                    'status': 'error',
-                    'message': str(e),
-                    'order_id': data['order_id']
-                }))
+        # except (InvalidAction, DoesNotExist) as e:
+        #     await self.publish_update_to_client(channel=channel, message=json.dumps({
+        #             'status': 'error',
+        #             'message': str(e),
+        #             'order_id': data['order_id']
+        #         }))
         
     
     async def handle_close_order(self, data: dict, channel: str) -> None:
@@ -413,10 +392,16 @@ class MatchingEngine:
         Args:
             data (dict)
         """    
-        orders: list[_Order] = []
+        orders = []
+        
         for order_id in data['order_ids']:
-            orders.append(self.order_manager.retrieve_entry(order_id))
-            
+            try:
+                orders.append(self.order_manager.retrieve_entry(order_id))
+            except AttributeError:
+                pass
+            finally:
+                continue
+
         quantity = data['quantity']
         
         for order in orders:
@@ -424,7 +409,6 @@ class MatchingEngine:
                 break
             
             remaining_quantity = quantity - order.standing_quantity
-            
             if remaining_quantity >= 0:
                 target_quantity = order.standing_quantity                
             else:
@@ -461,19 +445,17 @@ class MatchingEngine:
             ask_price=price,
             quantity=quantity
         )
-        print('Fill close order result: ', result)
-        
-        # Not closed
-        if result[0] == 0:
-            await self.publish_update_to_client(channel, {
+
+        # Relaying message to user
+        status_message = {
+            0: {
+                'channel': channel,
+                'message': json.dumps({
                     "status": ConsumerStatusType.ERROR,
                     "message": "Insufficient bids to fulfill sell order",
                     "order_id": order_obj.data['order_id']
                 })
-            return False
-
-        # Relaying message to user
-        status_message = {
+            },
             1: {
                 "channel": channel,
                 "message": json.dumps({
@@ -495,11 +477,13 @@ class MatchingEngine:
         
         await self.publish_update_to_client(**status_message)
 
+        if result[0] == 0:
+            return False
 
         # Order was successfully closed
         if result[0] == 2:
             try:
-                open_price = order_obj.data.get('filled_price', None) or order_obj.data.get('price')
+                open_price = order_obj.data['filled_price']
                 pnl = (price / open_price) * (quantity * open_price)
                 order_obj.data['realised_pnl'] += pnl
                 
@@ -511,6 +495,7 @@ class MatchingEngine:
                     order_obj.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
 
                 await self.order_manager.batch_update([order_obj.data])
+                
                 self.current_price = result[1]
                 await self.add_new_price_to_db(result[1], order_obj.data['ticker'], int(datetime.now().timestamp()))
             except InvalidAction as e:
@@ -552,9 +537,9 @@ class MatchingEngine:
                 # Finding the price with the lowest distance from the ask_price
                 price_map = {
                     key: abs(ask_price - key)
-                    for key in self.bids_price_levels[ticker]
+                    for key in BIDS_LEVELS[ticker]
                     if key <= ask_price
-                    and self.bids[ticker][key]
+                    and BIDS[ticker][key]
                 }
                 
                 lowest_distance = min(val for _, val in price_map.items())
@@ -599,31 +584,32 @@ class MatchingEngine:
         if not bid_price:
             return (0, )
         
-        touched_orders: list[_Order] = []
+        touched_orders = []
+        filled_orders = []
         
         # Fulfilling the order
-        for ex_order in self.bids[ticker][bid_price]:
-            print('Current Trying to fill against: ', ex_order)
-            touched_orders.append(ex_order)
-            
+        for ex_order in BIDS[ticker][bid_price]:
+            touched_orders.append(ex_order)                
             remaining_quantity = quantity - ex_order.standing_quantity
             
             if remaining_quantity >= 0:
-                ex_order.order_status = OrderStatus.FILLED
+                filled_orders.append(ex_order)
+                ex_order.data['filled_price'] = bid_price
                 main_order.reduce_standing_quantity(ex_order.standing_quantity)
             else:
-                ex_order.order_status = OrderStatus.PARTIALLY_FILLED
+                ex_order.reduce_standing_quantity(quantity)
                 main_order.reduce_standing_quantity(quantity)
                 
             quantity -= ex_order.standing_quantity
+            
             if quantity <= 0:
                 break
-            
-        for item in touched_orders:
-            if item.order_status == OrderStatus.FILLED:
-                self.bids[ticker][bid_price].remove(item)
+        
+        for item in filled_orders:
+            item.order_status = OrderStatus.FILLED
         
         asyncio.create_task(self.order_manager.batch_update([item.data for item in touched_orders]))    
+        
         if quantity <= 0:
             return (2, bid_price)
 
@@ -647,12 +633,11 @@ class MatchingEngine:
             data (dict): 
             channel (str): 
         """        
-        self.bids[data['ticker']][data['limit_price']].append(_Order(data, _OrderType.LIMIT_ORDER))
+        BIDS[data['ticker']][data['limit_price']].append(BidOrder(data, _OrderType.LIMIT_ORDER))
         await self.publish_update_to_client(
             channel,
             {'status': ConsumerStatusType.SUCCESS, 'message': 'Limit Order placed successfully'}
         )
-        print(self.bids[data['ticker']][data['limit_price']])
     
     async def add_new_price_to_db(self, new_price: float, ticker: str, new_time: int) -> None:
         """

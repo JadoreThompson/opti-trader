@@ -42,12 +42,16 @@ def websocket_exception_handler(func):
             return await func(self, *args, **kwargs)
         
         except (ValidationError, AttributeError) as e:
-            error = "Invalid Schema"
-            await self.socket.close(code=1014, reason=error)
+            await self.socket.send_text(json.dumps({
+                'status': ConsumerStatusType.ERROR,
+                'message': 'Invalid Schema'
+            }))
         
         except (UnauthorisedError, InvalidAction) as e:
-            error = str(e)
-            await self.socket.close(code=1014, reason=error)
+            await self.socket.send_text(json.dumps({
+                'status': ConsumerStatusType.ERROR,
+                'message': str(e)
+            }))
 
         except Exception as e:
             print('WebSocket Error:')
@@ -60,7 +64,7 @@ def websocket_exception_handler(func):
 class ClientManager:
     def __init__(self, websocket: WebSocket):
         self.socket: WebSocket = websocket
-        self.ticker_quotes: dict[str, float] = {'APPL': 100}
+        self.ticker_quotes: dict[str, float] = {'APPL': 110}
         self._balance: float =  None
     
             
@@ -178,10 +182,38 @@ class ClientManager:
         Returns:
             dict: Created Order
         """        
+        # current_price = self.ticker_quotes[message.market_order.ticker]
+        # boundary = current_price * 0.5
+        
+        # if boundary >= message.limit_order.limit_price or message.limit_order.limit_price >= (boundary + current_price):
+        #     await self.socket.send_text(json.dumps({
+        #         'status': ConsumerStatusType.ERROR,
+        #         'message': "Can't place order on specified  price"
+        #     }))
+        #     return
+        
+        temp_message = message.market_order.model_dump()
+        
+        take_profit_price = None
+        stop_loss_price = None
+
+        if isinstance(temp_message.get('take_profit'), dict):
+            take_profit_price = temp_message['take_profit'].get('price')
+
+        if isinstance(temp_message.get('stop_loss'), dict):
+            stop_loss_price = temp_message['stop_loss'].get('price')
+
+        if not await self.validate_tp_sl(
+            take_profit_price=take_profit_price,
+            stop_loss_price=stop_loss_price,
+            ticker=temp_message['ticker']
+        ): return
+        
+        
         order: dict = await self.create_order_in_db(message)
         if order:
             return order
-        print('Error creating order')
+        
     
     async def create_limit_order_handler(self, message: OrderRequest) -> dict | None:
         """
@@ -194,6 +226,25 @@ class ClientManager:
             dict: Order as a (dict)
             None: Price was outside of the boundary
         """        
+        
+        temp_message = message.limit_order.model_dump()
+        
+        take_profit_price = None
+        stop_loss_price = None
+
+        if isinstance(temp_message.get('take_profit'), dict):
+            take_profit_price = temp_message['take_profit'].get('price')
+
+        if isinstance(temp_message.get('stop_loss'), dict):
+            stop_loss_price = temp_message['stop_loss'].get('price')
+
+        if not await self.validate_tp_sl(
+            take_profit_price=take_profit_price,
+            stop_loss_price=stop_loss_price,
+            ticker=temp_message.get('ticker')
+        ): return
+        
+        
         current_price = self.ticker_quotes[message.limit_order.ticker]
         boundary = current_price * 0.5
         
@@ -204,11 +255,9 @@ class ClientManager:
             }))
             return
         
-        order: dict = await self.create_order_in_db(message)
-        if order:
-            return order
-        
-        print('Error creating order')
+        temp_message: dict = await self.create_order_in_db(message)
+        if temp_message:
+            return temp_message
     
     
     async def close_orders_handler(self, message: OrderRequest) -> None:
@@ -251,7 +300,15 @@ class ClientManager:
         """    
         while True:
             message = await self.socket.receive_text()
-            message = OrderRequest(**json.loads(message))
+            try:
+                message = OrderRequest(**json.loads(message))
+            except ValidationError as e:
+                await self.socket.send_text(json.dumps({
+                    'status': ConsumerStatusType.ERROR,
+                    'message': str(e.errors()[0]['ctx']['error'])
+                }))
+                continue
+            
             additional_fields = {'type': message.type}
             
             options = {
@@ -278,7 +335,41 @@ class ClientManager:
             result.update(additional_fields)
             asyncio.create_task(self.send_order_to_engine(result))
             await asyncio.sleep(0.1)
+            
+            
+    @websocket_exception_handler
+    async def validate_tp_sl(
+        self, 
+        ticker: str,
+        take_profit_price: float = None, 
+        stop_loss_price: float = None, 
+    ) -> bool:
+        """
+
+        Args:
+            take_profit_price (float):
+            stop_loss_price (float): 
+            ticker (str):
+
+        Returns:
+            bool: 
+                - False:
+                    - Stop loss price is greater than or equal to current market price
+                    - Take Profit price is less than or equal to current market price
+                - Else True
+        """        
+        current_price = self.ticker_quotes.get(ticker, None)
+        
+        if take_profit_price:
+            if current_price >= take_profit_price:
+                raise UnauthorisedError('Invalid TP')        
+        if stop_loss_price:
+            if current_price <= stop_loss_price:                
+                raise UnauthorisedError('Invalid SL')        
+        return True
+        
     
+    @websocket_exception_handler
     async def create_order_in_db(self, message: OrderRequest) -> dict:
         """
         Creates a record of the order within the databse
@@ -290,11 +381,8 @@ class ClientManager:
             dict: A dictionary representation of the order without the _sa_instance_state key
         """
         try:
-            message_dict = message.limit_order if message.limit_order else message.market_order
-            message_dict = message_dict.model_dump()
+            message_dict = message.limit_order.model_dump() if message.limit_order else message.market_order.model_dump()
             
-            # while message_dict['ticker'] not in self.ticker_quotes:
-            #     await asyncio.sleep(0.1)
             amount = self.ticker_quotes[message_dict['ticker']] * message_dict['quantity']
             if amount > self.user.balance:
                 await self.socket.send_text(json.dumps({'status': ConsumerStatusType.ERROR, 'message': 'Insufficient balance'}))
@@ -342,7 +430,7 @@ class ClientManager:
         """
         Fetches all orders where the quantity adds up to the
         quantity being requested and the ticker is the ticker in
-        question
+        question. Used by close order handler
         
         :param: quantity[int]
         :param: user_id[str]
@@ -354,11 +442,14 @@ class ClientManager:
                 .where(
                     (Orders.user_id == self.user.user_id) 
                     & (Orders.ticker == ticker) 
-                    & (Orders.order_status != OrderStatus.CLOSED)
-                    & (Orders.order_status != OrderStatus.PARTIALLY_CLOSED)
+                    & (
+                        (Orders.order_status == OrderStatus.FILLED)
+                        | (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
+                    )
+                    # & (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
                 )
             )
-            all_orders = r.all()        
+            all_orders = r.all() 
             
         order_ids = []
         for order in all_orders:

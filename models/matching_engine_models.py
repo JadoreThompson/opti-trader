@@ -40,6 +40,11 @@ class BaseOrder(Base):
     take_profit: Optional[TakeProfitOrder] = Field(None)
     stop_loss: Optional[StopLossOrder] = Field(None)
 
+
+
+class MarketOrder(BaseOrder):
+    """Represents a market order, inheriting from BaseOrder."""
+    
     @field_validator('take_profit', check_fields=False)
     def take_profit_validator(cls, take_profit, values) -> float:
         """
@@ -52,15 +57,15 @@ class BaseOrder(Base):
             float: The validated take-profit value.
         """
         stop_loss = values.data.get('stop_loss', None)
-        if stop_loss:
-            if stop_loss >= take_profit:
-                raise ValueError('Stop loss must be less than take profit')
-        return take_profit
-
-
-class MarketOrder(BaseOrder):
-    """Represents a market order, inheriting from BaseOrder."""
-    pass
+        
+        try:    
+            if stop_loss and take_profit:
+                if take_profit.price <= stop_loss.price:
+                    raise ValueError('Take profit price must be greater than stop loss price')
+        except AttributeError:
+            pass
+        finally:
+            return take_profit
 
 
 class LimitOrder(BaseOrder):
@@ -71,6 +76,30 @@ class LimitOrder(BaseOrder):
     """
 
     limit_price: float = Field(gt=0)
+    
+    @field_validator('limit_price', check_fields=False)
+    def limit_price_validator(cls, limit_price: float, values):
+        """
+        Args:
+            take_profit (float): The take-profit price.
+            values (dict): The field values of the model.
+        
+        Raises:
+            ValueError: If stop_loss is greater than or equal to take_profit.
+        
+        Returns:
+            float: The validated take-profit value.
+        """
+        stop_loss = values.data.get('stop_loss', None)
+        take_profit = values.data.get('take_profit', None)
+        print(stop_loss, take_profit)
+        if stop_loss:
+            if stop_loss.price >= limit_price:
+                raise ValueError('Stop Loss must be greater than limit price')
+        if take_profit:
+            if take_profit.price <= limit_price:
+                raise ValueError('Take profit must be greater than limit price')
+        return limit_price
 
 
 class CloseOrder(Base):

@@ -21,7 +21,7 @@ class OrderManager:
         SL = 2
     
     async def _append(self, order: _Order, key: "OrderManager._Keys") -> None:
-        self._orders[order.data['order_id']][key] = order
+        self._orders[order.data['order_id']] = order
         
     async def append_entry(self, order: _Order):
         await self._append(order=order, key="OrderManager._Keys.ENTRY")
@@ -34,7 +34,7 @@ class OrderManager:
     
     def _retrieve(self, order_id: str, key: "OrderManager._Keys") -> _Order:
         try:
-            return self._orders[order_id][key]
+            return self._orders[order_id]
         except KeyError:
             raise DoesNotExist('Order')
     
