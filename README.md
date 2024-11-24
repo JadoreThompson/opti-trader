@@ -1,17 +1,26 @@
 ## **Description**
 
-Websocket API and matching engine built in Python. This is designed to be an evolution of the trading portfolio application you can see on my github
+FIFO matching Engine built in Python with order closing embodying pro-rata allocation, served through a websocket endpoint.
+
+`ws://127.0.0.1:8000/stream/trade`
+
+Also Provides HTTP Endpoints for some statistics and data to serve the [frontend application](https://github.com/JadoreThompson/order-matcher-frontend.git)
+
+The application runs on port 8000 however mutable, within [app.py](http://app.py) in the uvicorn_wrapper function
 
 ## Prerequisites
+
+- Python 3.12
 
 ## **Installation**
 
 ```powershell
-git clone https://github.com/JadoreThompson/opti-trader.git
+git clone <https://github.com/JadoreThompson/opti-trader.git>
 
 pip install -r requirements.txt
 
 python app.py
+
 ```
 
 ## **Contact**
