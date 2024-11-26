@@ -92,6 +92,7 @@ class Order(Base):
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
     realised_pnl: Optional[float] = None
+    order_id: UUID
 
 
 class TickerData(BaseModel):

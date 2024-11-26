@@ -255,9 +255,9 @@ class ClientManager:
             }))
             return
         
-        temp_message: dict = await self.create_order_in_db(message)
-        if temp_message:
-            return temp_message
+        payload: dict = await self.create_order_in_db(message)
+        if payload:
+            return payload
     
     
     async def close_orders_handler(self, message: OrderRequest) -> None:
@@ -289,7 +289,29 @@ class ClientManager:
             'price': self.ticker_quotes.get(payload['ticker'])
         })
         
-        asyncio.create_task(self.send_order_to_engine(payload))
+        return payload
+
+
+    async def modify_order_handler(self, message: OrderRequest) -> dict:
+        async with get_db_session() as session:
+            result = await session.execute(
+                select(Orders.order_status)
+                .where(
+                    (Orders.user_id == self.user.user_id)
+                    & (Orders.order_id == message.modify_order.order_id)
+                    & (Orders.order_status != OrderStatus.CLOSED)
+                )
+            )
+            
+            order = result.scalars().first()
+        
+        payload: dict = message.modify_order.model_dump()
+        payload.update({'order_status': order})
+        payload['order_id'] = str(payload['order_id'])
+        
+        if order: 
+            return payload
+        
 
 
     @websocket_exception_handler
@@ -300,41 +322,38 @@ class ClientManager:
         """    
         while True:
             message = await self.socket.receive_text()
+            
             try:
                 message = OrderRequest(**json.loads(message))
-            except ValidationError as e:
+            except ValidationError as e:                
                 await self.socket.send_text(json.dumps({
                     'status': ConsumerStatusType.ERROR,
-                    'message': str(e.errors()[0]['ctx']['error'])
+                    'message': e.errors()
                 }))
                 continue
             
-            additional_fields = {'type': message.type}
-            
-            options = {
+            payload = await {
                 OrderType.MARKET: self.create_market_order_handler,
                 OrderType.LIMIT: self.create_limit_order_handler,
                 OrderType.CLOSE: self.close_orders_handler,
-            }
+                OrderType.MODIFY: self.modify_order_handler
+            }.get(message.type)(message)
             
-            result = await options.get(message.type)(message)
-            
-            if not isinstance(result, dict):
+            if not isinstance(payload, dict):
                 continue
             
             # Can't edit a closed order
-            if result['order_status'] == OrderStatus.CLOSED:
+            if payload['order_status'] == OrderStatus.CLOSED:
                 await self.socket.send_text(json.dumps({
                     'status': 'error',
-                    'message': 'Order already closed',
-                    'order_id': result['order_id']
+                    'message': 'Cannot perform actions on closed orders',
+                    'order_id': payload['order_id']
                 }))
                 return
                     
             # Shipping off to the engine for computation
-            result.update(additional_fields)
-            asyncio.create_task(self.send_order_to_engine(result))
-            await asyncio.sleep(0.1)
+            payload.update({'type': message.type, 'user_id': str(self.user.user_id)})
+            asyncio.create_task(self.send_order_to_engine(payload))
             
             
     @websocket_exception_handler
@@ -444,9 +463,9 @@ class ClientManager:
                     & (Orders.ticker == ticker) 
                     & (
                         (Orders.order_status == OrderStatus.FILLED)
-                        | (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
+                        |
+                        (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
                     )
-                    # & (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
                 )
             )
             all_orders = r.all() 
@@ -460,7 +479,6 @@ class ClientManager:
                 return order_ids
             
         return []
- 
     
     async def send_order_to_engine(self, order: dict) -> None:
         """

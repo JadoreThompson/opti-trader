@@ -27,7 +27,6 @@ class DBListener:
         
         
     async def process_notifications(self) -> None:
-        print('Waiting for DB Notifications...')
         while True:
             user_id = await self.queue.get()
             await delete_from_internal_cache(user_id, list(self.channels))
@@ -38,7 +37,7 @@ class DBListener:
         
         try:
             self.conn = await asyncpg.connect(dsn=db_url)
-            await self.conn.add_listener('order_change', self.handler)
+            await self.conn.add_listener('orders_update', self.handler)
             await self.process_notifications()
         except Exception as e:
             print(f"[DB Listener][Start Function] Error: {e}")

@@ -87,12 +87,12 @@ class BidOrder(_Order):
         super().__init__(data, order_type, **kwargs)
         
     @property
-    def stop_loss(self):
-        return self._stop_loss
+    def stop_loss(self) -> None | _Order:
+        return self._stop_loss_order
 
     @property
-    def take_profit(self):
-        return self._take_profit
+    def take_profit(self) -> None | _Order:
+        return self._take_profit_order
 
     def place_tp_sl(
         self, 
@@ -115,14 +115,14 @@ class BidOrder(_Order):
             pass
         
         if take_profit_price:
-            self._take_profit = AskOrder(self.data, _OrderType.TAKE_PROFIT_ORDER, parent=self)
+            self._take_profit_order = AskOrder(self.data, _OrderType.TAKE_PROFIT_ORDER, parent=self)
             ASKS[ticker].setdefault(take_profit_price, [])
-            ASKS[ticker][take_profit_price].append(self._take_profit)
+            ASKS[ticker][take_profit_price].append(self._take_profit_order)
         
         if stop_loss_price:
-            self._stop_loss = AskOrder(self.data, _OrderType.STOP_LOSS_ORDER, parent=self)            
+            self._stop_loss_order = AskOrder(self.data, _OrderType.STOP_LOSS_ORDER, parent=self)            
             ASKS[ticker].setdefault(stop_loss_price, [])
-            ASKS[ticker][stop_loss_price].append(self._stop_loss)
+            ASKS[ticker][stop_loss_price].append(self._stop_loss_order)
         
 
     @property
@@ -148,13 +148,13 @@ class BidOrder(_Order):
         """        
         if self.data['take_profit']:
             try:
-                ASKS[self.data['ticker']][self.data['take_profit']].remove(self._take_profit)
+                ASKS[self.data['ticker']][self.data['take_profit']].remove(self._take_profit_order)
             except ValueError:
                 pass
         
         if self.data['stop_loss']:
             try:
-                ASKS[self.data['ticker']][self.data['stop_loss']].remove(self._stop_loss)
+                ASKS[self.data['ticker']][self.data['stop_loss']].remove(self._stop_loss_order)
             except ValueError:
                 pass
 

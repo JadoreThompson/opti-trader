@@ -107,12 +107,17 @@ class CloseOrder(Base):
     quantity: Optional[float] = Field(None, gt=0)
 
 
-class TakeProfitChange(TakeProfitOrder):
-    order_id: UUID
+# class TakeProfitChange(TakeProfitOrder):
+#     order_id: UUID
 
 
-class StopLossChange(StopLossOrder):
+# class StopLossChange(StopLossOrder):
+#     order_id: UUID
+
+class ModifyOrder(Base):
     order_id: UUID
+    take_profit: Optional[float] = None
+    stop_loss: Optional[float] = None
 
 
 class EntryPriceChange(Base):
@@ -132,7 +137,4 @@ class OrderRequest(Base):
     market_order: Optional[MarketOrder] = None
     limit_order: Optional[LimitOrder] = None
     close_order: Optional[CloseOrder] = None
-    
-    entry_price_change: Optional[EntryPriceChange] = None
-    take_profit_change: Optional[TakeProfitChange] = None
-    stop_loss_change: Optional[StopLossChange] = None
+    modify_order: Optional[ModifyOrder] = None
