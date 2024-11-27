@@ -23,4 +23,4 @@ async def trade(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print("[STREAM TRADE][ERROR] >> ", type(e), str(e))
+        print("[TRADE STREAM ENDPOINT][ERROR] >> ", type(e), str(e))

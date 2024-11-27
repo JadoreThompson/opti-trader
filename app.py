@@ -28,11 +28,9 @@ app.add_middleware(
 )
 app.add_middleware(RateLimitMiddleware)
 
-app.mount("/static", StaticFiles(directory='static'), name="static")
-templates = Jinja2Templates(directory='templates')
-
 
 # Routers
+# ^^^^^^^
 app.include_router(accounts)
 app.include_router(portfolio)
 app.include_router(stream)
@@ -57,24 +55,15 @@ async def does_not_exist_handler(r: Request, e: DuplicateError):
 @app.exception_handler(InvalidAction)
 async def invalid_action_handler(r: Request, e: InvalidAction):
     return JSONResponse(status_code=401, content={'error': e.message})
-    
 
-
-@app.get("/")
-async def index(request: Request):
-    return templates.TemplateResponse(
-        request=request, name='index.html'
-    )
     
-import os
-from dotenv import load_dotenv
 import asyncio
-
-load_dotenv()
-print("The current postgres user is: ", os.getenv("DB_USER"))
-
+import logging
 from engine.db_listener import main as db_listener
 from engine.matching_engine import run as matching_engine
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename="app.log", level=logging.INFO)
 
 def db_listener_wrapper() -> None:
     asyncio.run(db_listener())
@@ -96,6 +85,7 @@ if __name__ == "__main__":
         ]
         
         for thread in threads:
+            logger.info(f'{thread.name} started')
             thread.start()
             
         while True:

@@ -39,7 +39,7 @@ def upgrade() -> None:
     op.create_table('orders',
     sa.Column('order_id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
-    sa.Column('order_status', sa.Enum('FILLED', 'PARTIALLY_FILLED', 'NOT_FILLED', 'CLOSED', 'PARTIALLY_CLOSED', name='order_status'), nullable=True),
+    sa.Column('order_status', sa.Enum('FILLED', 'PARTIALLY_FILLED', 'NOT_FILLED', 'CLOSED', 'PARTIALLY_CLOSED', 'PARTIALLY_CLOSED_ACTIVE', name='order_status'), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('closed_at', sa.DateTime(), nullable=True),
     sa.Column('ticker', sa.String(), nullable=False),
@@ -55,7 +55,7 @@ def upgrade() -> None:
     sa.CheckConstraint('quantity > 0', name='quantity_minimum_value'),
     sa.CheckConstraint('stop_loss > 0', name='stop_loss_minimum_value'),
     sa.CheckConstraint('take_profit > 0', name='take_profit_minimum_value'),
-    sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('order_id'),
     sa.UniqueConstraint('order_id')
     )

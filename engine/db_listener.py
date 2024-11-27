@@ -1,11 +1,10 @@
-import asyncpg
-import asyncio
-import json
+import asyncpg, asyncio, json, logging
 
 # Local
 from config import DB_URL
 from utils.db import delete_from_internal_cache
 
+logger = logging.getLogger(__name__)
 
 class DBListener:
     def __init__(self, dsn: str, cache_channels: list = None) -> None:
@@ -27,6 +26,7 @@ class DBListener:
         
         
     async def process_notifications(self) -> None:
+        logger.info('Waiting for messages')
         while True:
             user_id = await self.queue.get()
             await delete_from_internal_cache(user_id, list(self.channels))
@@ -40,7 +40,7 @@ class DBListener:
             await self.conn.add_listener('orders_update', self.handler)
             await self.process_notifications()
         except Exception as e:
-            print(f"[DB Listener][Start Function] Error: {e}")
+            logger.error(f'{e}')
         finally:
             # Cleanup
             if hasattr(self, 'conn'):

@@ -1,4 +1,4 @@
-import asyncio, json, redis
+import asyncio, json, redis, time, logging
 from datetime import datetime
 from functools import wraps
 from uuid import UUID
@@ -6,6 +6,7 @@ from uuid import UUID
 # FA
 from fastapi import WebSocket
 from pydantic import ValidationError
+from starlette.websockets import WebSocketDisconnect
 
 # SA
 import redis.asyncio.connection
@@ -21,6 +22,8 @@ from utils.connection import RedisConnection
 from utils.db import get_db_session
 from .config import REDIS_HOST
 
+
+logger = logging.getLogger(__name__)
 
 REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
     connection_class=RedisConnection, 
@@ -52,20 +55,28 @@ def websocket_exception_handler(func):
                 'status': ConsumerStatusType.ERROR,
                 'message': str(e)
             }))
-
+        
+        except WebSocketDisconnect:
+            self._active = False
+        
         except Exception as e:
-            print('WebSocket Error:')
-            print(type(e), str(e))
-            print('-' * 10)           
+            logger.error(str(e))
             
     return handle_exceptions
 
 
 class ClientManager:
     def __init__(self, websocket: WebSocket):
+        self._active = False
         self.socket: WebSocket = websocket
         self.ticker_quotes: dict[str, float] = {'APPL': 110}
         self._balance: float =  None
+        self._message_handlers: dict = {
+            OrderType.MARKET: self.create_market_order_handler,
+            OrderType.LIMIT: self.create_limit_order_handler,
+            OrderType.CLOSE: self.close_orders_handler,
+            OrderType.MODIFY: self.modify_order_handler
+        }
     
             
     @property
@@ -79,6 +90,19 @@ class ClientManager:
             self._balance = value
             asyncio.create_task(self.save_changes_db())
     
+    @property
+    def active(self):
+        return self._active
+
+    
+    async def set_active(self, value: bool):
+        if value:
+            await self.startup()
+        else:
+            for task in self.tasks:
+                task.cancel()
+        self._active = value
+        
     
     async def save_changes_db(self) -> None:
         async with get_db_session() as session:
@@ -93,7 +117,6 @@ class ClientManager:
     @websocket_exception_handler
     async def connect(self) -> None:
         await self.socket.accept()
-    
     
     @websocket_exception_handler
     async def receive(self) -> None:
@@ -115,13 +138,15 @@ class ClientManager:
         }))
         
         
-        # Starting up functions
-        await asyncio.gather(*[
-            self.listen_to_prices(),
-            self.handle_incoming_requests(),
-            self.listen_to_order_updates(),
-        ])
-        
+        self._active = True
+        try:
+            await asyncio.gather(*[
+                self.listen_to_prices(),
+                self.handle_incoming_requests(),
+                self.listen_to_order_updates(),
+            ])
+        except Exception:
+            pass
 
     async def check_user_exists(self, user_id: str) -> bool:
         """
@@ -147,8 +172,7 @@ class ClientManager:
                 self.balance = self.user.balance
                 return True
         except Exception as e:
-            print(type(e), str(e))
-            print('-' * 10)
+            logger.error(str(e))
 
 
     async def listen_to_prices(self) -> None:
@@ -158,14 +182,15 @@ class ClientManager:
         """        
         
         async with REDIS_CLIENT.pubsub() as pubsub:
-            await asyncio.sleep(0.1)
             await pubsub.subscribe('prices')
             
             async for message in pubsub.listen():
                 if message.get('type', None) == 'message':
                     data = json.loads(message['data'].decode())
                     self.ticker_quotes[data['ticker']] = data['price']
-                    
+
+                    if not self._active:
+                        raise Exception
                     await self.socket.send_text(json.dumps({
                         "status": ConsumerStatusType.PRICE_UPDATE,
                         "message": data,
@@ -173,47 +198,20 @@ class ClientManager:
 
 
     async def create_market_order_handler(self, message: OrderRequest) -> dict:
-        """
-        Creates order in the DB, returns the order as a (dict)
-        
-        Args:
-            message (OrderRequest):
+        try:
+            message_dict = message.market_order.model_dump()
 
-        Returns:
-            dict: Created Order
-        """        
-        # current_price = self.ticker_quotes[message.market_order.ticker]
-        # boundary = current_price * 0.5
-        
-        # if boundary >= message.limit_order.limit_price or message.limit_order.limit_price >= (boundary + current_price):
-        #     await self.socket.send_text(json.dumps({
-        #         'status': ConsumerStatusType.ERROR,
-        #         'message': "Can't place order on specified  price"
-        #     }))
-        #     return
-        
-        temp_message = message.market_order.model_dump()
-        
-        take_profit_price = None
-        stop_loss_price = None
-
-        if isinstance(temp_message.get('take_profit'), dict):
-            take_profit_price = temp_message['take_profit'].get('price')
-
-        if isinstance(temp_message.get('stop_loss'), dict):
-            stop_loss_price = temp_message['stop_loss'].get('price')
-
-        if not await self.validate_tp_sl(
-            take_profit_price=take_profit_price,
-            stop_loss_price=stop_loss_price,
-            ticker=temp_message['ticker']
-        ): return
-        
-        
-        order: dict = await self.create_order_in_db(message)
-        if order:
-            return order
-        
+            if not await self.validate_tp_sl(
+                take_profit_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
+                stop_loss_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
+                ticker=message_dict['ticker']
+            ): 
+                return
+            
+            return await self.create_order_in_db(message_dict, message.type)
+        except Exception as e:
+            logger.error(str(e))
+            
     
     async def create_limit_order_handler(self, message: OrderRequest) -> dict | None:
         """
@@ -227,37 +225,27 @@ class ClientManager:
             None: Price was outside of the boundary
         """        
         
-        temp_message = message.limit_order.model_dump()
-        
-        take_profit_price = None
-        stop_loss_price = None
-
-        if isinstance(temp_message.get('take_profit'), dict):
-            take_profit_price = temp_message['take_profit'].get('price')
-
-        if isinstance(temp_message.get('stop_loss'), dict):
-            stop_loss_price = temp_message['stop_loss'].get('price')
+        message_dict = message.limit_order.model_dump()
 
         if not await self.validate_tp_sl(
-            take_profit_price=take_profit_price,
-            stop_loss_price=stop_loss_price,
-            ticker=temp_message.get('ticker')
-        ): return
+            take_profit_price=message_dict['take_profit']['price'] if message_dict['take_profit'] else None,
+            stop_loss_price=message_dict['stop_loss']['price'] if message_dict['stop_loss'] else None,
+            ticker=message_dict['ticker']
+        ): 
+            return
         
         
         current_price = self.ticker_quotes[message.limit_order.ticker]
         boundary = current_price * 0.5
         
-        if boundary >= message.limit_order.limit_price or message.limit_order.limit_price >= (boundary + current_price):
+        if boundary >= message_dict['limit_price'] or message_dict['limit_price'] >= (boundary + current_price):
             await self.socket.send_text(json.dumps({
                 'status': ConsumerStatusType.ERROR,
                 'message': "Can't place order on specified  price"
             }))
             return
         
-        payload: dict = await self.create_order_in_db(message)
-        if payload:
-            return payload
+        return await self.create_order_in_db(message_dict, OrderType.LIMIT)
     
     
     async def close_orders_handler(self, message: OrderRequest) -> None:
@@ -283,16 +271,14 @@ class ClientManager:
     
         payload = vars(message.close_order)
         payload.update({
-            'type': message.type,
             'order_ids': order_ids,
-            'user_id': str(self.user.user_id),
             'price': self.ticker_quotes.get(payload['ticker'])
         })
         
         return payload
 
 
-    async def modify_order_handler(self, message: OrderRequest) -> dict:
+    async def modify_order_handler(self, message: OrderRequest) -> dict | None:
         async with get_db_session() as session:
             result = await session.execute(
                 select(Orders.order_status)
@@ -303,14 +289,15 @@ class ClientManager:
                 )
             )
             
-            order = result.scalars().first()
+            order_status = result.scalars().first()
         
+        if not order_status:
+            return
+                
         payload: dict = message.modify_order.model_dump()
-        payload.update({'order_status': order})
+        payload.update({'order_status': order_status})
         payload['order_id'] = str(payload['order_id'])
-        
-        if order: 
-            return payload
+        return payload
         
 
 
@@ -320,9 +307,9 @@ class ClientManager:
         Handles the different types of requests
         the user sends. Acts as the funneler
         """    
-        while True:
+        while self._active:
             message = await self.socket.receive_text()
-            
+
             try:
                 message = OrderRequest(**json.loads(message))
             except ValidationError as e:                
@@ -332,28 +319,24 @@ class ClientManager:
                 }))
                 continue
             
-            payload = await {
-                OrderType.MARKET: self.create_market_order_handler,
-                OrderType.LIMIT: self.create_limit_order_handler,
-                OrderType.CLOSE: self.close_orders_handler,
-                OrderType.MODIFY: self.modify_order_handler
-            }.get(message.type)(message)
-            
+            payload = await self._message_handlers[message.type](message)
             if not isinstance(payload, dict):
                 continue
             
             # Can't edit a closed order
-            if payload['order_status'] == OrderStatus.CLOSED:
-                await self.socket.send_text(json.dumps({
-                    'status': 'error',
-                    'message': 'Cannot perform actions on closed orders',
-                    'order_id': payload['order_id']
-                }))
-                return
+            if 'order_status' in payload:
+                if payload['order_status'] == OrderStatus.CLOSED:
+                    await self.socket.send_text(json.dumps({
+                        'status': 'error',
+                        'message': 'Cannot perform actions on closed orders',
+                        'order_id': payload['order_id']
+                    }))
+                    return
                     
             # Shipping off to the engine for computation
             payload.update({'type': message.type, 'user_id': str(self.user.user_id)})
             asyncio.create_task(self.send_order_to_engine(payload))
+            await asyncio.sleep(0.1)
             
             
     @websocket_exception_handler
@@ -389,7 +372,7 @@ class ClientManager:
         
     
     @websocket_exception_handler
-    async def create_order_in_db(self, message: OrderRequest) -> dict:
+    async def create_order_in_db(self, data: dict, order_type: OrderType) -> dict:
         """
         Creates a record of the order within the databse
 
@@ -400,43 +383,35 @@ class ClientManager:
             dict: A dictionary representation of the order without the _sa_instance_state key
         """
         try:
-            message_dict = message.limit_order.model_dump() if message.limit_order else message.market_order.model_dump()
+            amount = self.ticker_quotes[data['ticker']] * data['quantity']
             
-            amount = self.ticker_quotes[message_dict['ticker']] * message_dict['quantity']
-            if amount > self.user.balance:
+            if amount > self.balance:
                 await self.socket.send_text(json.dumps({'status': ConsumerStatusType.ERROR, 'message': 'Insufficient balance'}))
                 return
             
             self.balance -= amount
                                     
             for field in ['stop_loss', 'take_profit']:
-                if isinstance(message_dict.get(field, None), dict):
-                    message_dict[field] = message_dict.get(field, {}).get('price', None)
+                if isinstance(data.get(field, None), dict):
+                    data[field] = data.get(field, {}).get('price', None)
             
-            message_dict['user_id'] = self.user.user_id
-            message_dict['order_type'] = message.type
-            message_dict['standing_quantity'] = message_dict['quantity']
+            if order_type == OrderType.MARKET:
+                data['price'] = self.ticker_quotes[data['ticker']]
             
-            # Getting the price
-            message_dict['price'] = message_dict.get('limit_price', None)\
-                if message_dict.get('limit_price', None) else self.ticker_quotes['APPL']
+            data['user_id'] = self.user.user_id
+            data['order_type'] = order_type
 
             # Inserting
             async with get_db_session() as session:
-                result = await session.execute(
-                    insert(Orders)
-                    .values(message_dict)
-                    .returning(Orders)
-                )
-                    
-                order = {
-                    key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
-                    for key, value in vars(result.scalar()).items()
-                    if key != '_sa_instance_state'
-                }
-                
+                order = Orders(**data)
+                session.add(order)
                 await session.commit()
-                return order
+                
+            return {
+                key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
+                for key, value in vars(order).items()
+                if key != '_sa_instance_state'
+            }
         except InvalidAction:
             raise
     
@@ -502,9 +477,18 @@ class ClientManager:
             await pubsub.subscribe(f"trades_{self.user.user_id}")
             
             async for message in pubsub.listen():
-                await asyncio.sleep(0.1)
-                
                 if message.get('type', None) == 'message':
-                    message = json.loads(message['data'])
-                    await self.socket.send_text(json.dumps(message))
+                    data = json.loads(message['data'])
+                    asyncio.create_task(self.handle_update(data))
                     
+                    if not self._active:
+                        raise Exception
+                    
+                    await self.socket.send_text(json.dumps(data))
+                    logger.info(f'[{datetime.now()}] User: {self.user.user_id} {f"Order: {data['details']['order_id']}" if 'details' in data else ''} - {data['message']}')
+    
+    
+    async def handle_update(self, data: dict) -> None:
+        if data.get('internal', None) == OrderType.CLOSE:
+            self.balance += data['details']['realised_pnl']
+    

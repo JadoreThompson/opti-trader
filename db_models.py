@@ -30,7 +30,7 @@ class Users(Base):
     api_key: Mapped[str] = mapped_column(String, default=generate_api_key)
 
     # Relationships
-    orders = relationship("Orders", back_populates='users')
+    orders = relationship("Orders", back_populates='users', cascade="all, delete-orphan")
 
 
 class Orders(Base):
@@ -68,6 +68,8 @@ class Orders(Base):
 
     def __init__(self, **kwargs: Any):
         kwargs['standing_quantity'] = kwargs['quantity']
+        if kwargs['order_type'] == OrderType.LIMIT:
+            kwargs['price'] = kwargs['limit_price']
         super().__init__(**kwargs)
 
 

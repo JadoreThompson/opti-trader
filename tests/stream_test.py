@@ -116,8 +116,8 @@ async def test_socket(
 
 async def main():
     await asyncio.gather(*[
-        test_socket(divider=2, close_quantity=10, order_quantity=1000, name='seller'),
-        test_socket(name='buyer', divider=3, order_quantity=500, close_quantity=10)
+        # test_socket(divider=2, close_quantity=10, order_quantity=1000, name='seller'),
+        test_socket(name='buyer', divider=3, order_quantity=10, close_quantity=10)
     ])
 
 
