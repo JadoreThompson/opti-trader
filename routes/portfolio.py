@@ -348,13 +348,14 @@ async def growth(
         all_orders_with_gain.append({'date': order.created_at, 'gain': order.realised_pnl})
 
     for order in all_orders_with_gain:
-        return_list.append(GrowthModel(**{
+        return_list.append({
             'time': int(order['date'].timestamp()),
             'value': round((order['gain'] / starting_period_balance) * 100, 2)
-        }))    
+        })
     
+    return_list.sort(key= lambda item: item['time'])
+    return_list = [GrowthModel(**item) for item in return_list if return_list.count(item) == 1]
     asyncio.create_task(add_to_internal_cache(user_id, 'growth', {interval: return_list}))
-    return_list.sort(key= lambda item: item.time)
     return return_list
     
 

@@ -79,4 +79,6 @@ async def get_data(
         }    
         candle_data_list.append(new_item)
     
+    candle_data_list.sort(key=lambda item: item['time'])
+    
     return [TickerData(**item) for item in candle_data_list]
