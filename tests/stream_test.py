@@ -40,11 +40,11 @@ async def generate_order_requests(quantity: int = 10) -> list:
                 quantity=random.randint(1, 5),
             ),
             
-            # matching_engine_models.LimitOrder(
-            #     ticker='APPL',
-            #     quantity=random.randint(20, 50),
-            #     limit_price=random.choice([n for n in range(100, 160, 10)])
-            # )
+            matching_engine_models.LimitOrder(
+                ticker='APPL',
+                quantity=random.randint(20, 50),
+                limit_price=random.choice([n for n in range(100, 160, 10)])
+            )
         ])
         
         if isinstance(order_obj, matching_engine_models.MarketOrder):
@@ -68,11 +68,18 @@ import json
 
 async def test_create_user():
     async with get_db_session() as sess:
+        pw = faker.pystr()
+        creds = {'email': faker.email(), 'password': PH.hash(pw)}
+        with open('myfile.txt', 'w') as f:
+            f.write(f'Password: {pw}\n')
+            f.write(f'{creds}')
+        
         user = await sess.execute(
             sa.insert(Users)
-            .values(**{'email': faker.email(), 'password': PH.hash(faker.pystr())})
+            .values(**creds)
             .returning(Users)
         )
+        print(creds)
         await sess.commit()
         user = user.scalar()
         return user, create_jwt_token({'sub': str(user.user_id)})
@@ -116,8 +123,8 @@ async def test_socket(
 
 async def main():
     await asyncio.gather(*[
-        test_socket(divider=2, close_quantity=10, order_quantity=1000, name='seller'),
-        test_socket(name='buyer', divider=3, order_quantity=500, close_quantity=10)
+        # test_socket(divider=2, close_quantity=10, order_quantity=1000, name='seller'),
+        test_socket(name='buyer', divider=3, order_quantity=1000, close_quantity=10)
     ])
 
 

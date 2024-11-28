@@ -14,18 +14,18 @@ from .config import ASKS, BIDS
 
 class OrderManager:
     def __init__(self):
-        self._orders: dict[str, dict] = defaultdict(dict)
+        self._orders: dict[str, _Order] = {}
     
     class _Keys(int, Enum):
         ENTRY = 0
         TP = 1
         SL = 2
     
-    async def _append(self, order: _Order, key: "OrderManager._Keys") -> None:
+    async def _append(self, order: _Order) -> None:
         self._orders[order.data['order_id']] = order
         
-    async def append_entry(self, order: _Order):
-        await self._append(order=order, key="OrderManager._Keys.ENTRY")
+    async def append_entry(self, order: _Order):        
+        await self._append(order=order)
     
     async def append_tp(self, order: _Order):
         await self._append(order, "OrderManager._Keys.TP")

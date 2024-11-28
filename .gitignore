@@ -2,6 +2,7 @@
 __pycache__/
 **.pyc
 **.env
+myfile.txt
 **venv
 
 gc_client_secret.json
@@ -11,6 +12,7 @@ rec.py
 alembic.ini
 docker-compose.yaml
 entrypoint.sh
+**.log
 
 Yahoo Ticker Symbols - September 2017.xlsx
 .pytest_cache

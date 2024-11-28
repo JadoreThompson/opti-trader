@@ -216,15 +216,6 @@ async def orders(
     user_id: str = Depends(verify_jwt_token_http),
     order_status: Optional[OrderStatus] = None
 ) -> list[dict]:
-    """
-    Returns all trades based on the constraints
-    Args:
-        user_id (UUID)
-        order_status (OrderStatus)
-
-    Returns:
-        list[dict]: all orders based on the constraints
-    """
     return [Order(**order) for order in await get_orders(**locals())]
 
 
@@ -352,23 +343,19 @@ async def growth(
     all_orders_with_gain = []
     return_list = []
         
-    # Getting the starting balance for the peiod
     for order in all_orders:
-        # quantity = order.quantity
-        # monetary_gain = -1 * ((order.filled_price * quantity) - (order.close_price * quantity))
         starting_period_balance += -1 * order.realised_pnl
-        print({'date': order.created_at, 'gain': order.realised_pnl})
-        print('Balance ', starting_period_balance)
         all_orders_with_gain.append({'date': order.created_at, 'gain': order.realised_pnl})
 
     for order in all_orders_with_gain:
-        return_list.append(GrowthModel(**{
+        return_list.append({
             'time': int(order['date'].timestamp()),
             'value': round((order['gain'] / starting_period_balance) * 100, 2)
-        }))    
+        })
     
+    return_list.sort(key= lambda item: item['time'])
+    return_list = [GrowthModel(**item) for item in return_list if return_list.count(item) == 1]
     asyncio.create_task(add_to_internal_cache(user_id, 'growth', {interval: return_list}))
-    return_list.sort(key= lambda item: item.time)
     return return_list
     
 

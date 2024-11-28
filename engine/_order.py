@@ -123,7 +123,7 @@ class BidOrder(_Order):
             self._stop_loss_order = AskOrder(self.data, _OrderType.STOP_LOSS_ORDER, parent=self)            
             ASKS[ticker].setdefault(stop_loss_price, [])
             ASKS[ticker][stop_loss_price].append(self._stop_loss_order)
-        
+
 
     @property
     def order_status(self):
@@ -157,6 +157,7 @@ class BidOrder(_Order):
                 ASKS[self.data['ticker']][self.data['stop_loss']].remove(self._stop_loss_order)
             except ValueError:
                 pass
+            
 
 class AskOrder(_Order):
     def __init__(self, data: dict, order_type: _OrderType, **kwargs) -> None:
