@@ -2,6 +2,7 @@
 __pycache__/
 **.pyc
 **.env
+myfile.txt
 **venv
 
 gc_client_secret.json
