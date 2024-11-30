@@ -30,6 +30,7 @@ class DBListener:
         while True:
             user_id = await self.queue.get()
             await delete_from_internal_cache(user_id, list(self.channels))
+            await asyncio.sleep(0.1)
 
 
     async def start(self):

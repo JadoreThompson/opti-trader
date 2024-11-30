@@ -1,4 +1,4 @@
-import asyncio, json, random, redis, faker, time, logging
+import asyncio, json, random, redis, faker, logging
 from uuid import UUID
 
 from datetime import datetime
@@ -8,13 +8,13 @@ from sqlalchemy import insert
 # Local
 from db_models import MarketData
 from models.models import Order
-from ._order import _Order, BidOrder
+from .order import _Order, BidOrder
 from engine.order_manager import OrderManager
 from utils.connection import RedisConnection
 from utils.db import get_db_session
-from enums import ConsumerStatusType, OrderType, OrderStatus, _OrderType
+from enums import ConsumerMessageStatus, OrderType, OrderStatus, _OrderType
 from exceptions import DoesNotExist, InvalidAction
-from .config import ASK_LEVELS, ASKS, BIDS, BIDS_LEVELS, REDIS_HOST
+from .config import ASK_LEVELS, ASKS, BIDS, BIDS_LEVELS, QUEUE, REDIS_HOST
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class MatchingEngine:
                 random.choice([_OrderType.LIMIT_ORDER, _OrderType.MARKET_ORDER])
             )
             
-            bid_price = random.choice([i for i in range(90, 170, 5)])
+            bid_price = random.choice([i for i in range(20, 170, 5)])
             if order.order_type == _OrderType.LIMIT_ORDER:
                 order.data['limit_price'] = bid_price
             else:
@@ -66,7 +66,7 @@ class MatchingEngine:
             order.data['take_profit'] = random.choice(tp)
             
             sl = [None]
-            sl.extend([i for i  in range(60, 105, 5)])
+            sl.extend([i for i  in range(20, 105, 5)])
             order.data['stop_loss'] = random.choice(sl)
             
             BIDS[order.data['ticker']].setdefault(bid_price, [])
@@ -84,8 +84,10 @@ class MatchingEngine:
 
     @current_price.setter
     def current_price(self, value: float):
-        asyncio.create_task(self.on_price_change(value))
         self._current_price = value
+        asyncio.create_task(self.on_price_change(value))
+        
+        
     
     async def on_price_change(self, new_price: float):
         await self.redis.publish(
@@ -94,24 +96,20 @@ class MatchingEngine:
         )
         
         
-    async def listen_to_client_events(self):
+    async def listen_to_client_messages(self):
         """
             Listens to messages from the to_order_book channel
             and relays to the handler
         """
-        await self.configure_bids_asks()
-        
-        async with self.redis.pubsub() as pubsub:
-            await pubsub.subscribe("to_order_book")
-            logger.info('Waiting for messages')
-    
-            async for message in pubsub.listen():
-                if message.get("type", None) == "message":
-                    asyncio.create_task(self.handle_incoming_message(message))
+        await self.configure_bids_asks(quantity=500, divider=5)
+
+        while True:
+            message: dict = await QUEUE.get()
+            asyncio.create_task(self.handle_incoming_message(message)) 
+            await asyncio.sleep(0.1)                      
                     
 
-    async def handle_incoming_message(self, message: bytes):        
-        message = json.loads(message['data'])
+    async def handle_incoming_message(self, message: dict):        
         await self.handlers[message['type']](message, f"trades_{message['user_id']}")
         
                    
@@ -129,6 +127,7 @@ class MatchingEngine:
             
             if isinstance(message, str):
                 await self.redis.publish(channel=channel, message=message)
+
         except Exception as e:
             logger.error(str(e))
             
@@ -176,7 +175,8 @@ class MatchingEngine:
                 logger.error(str(e))
                 
         # Sending to the order manager for future reference
-        await {0: not_filled, 1: partial_fill, 2: filled}.get(result[0])(result=result, target_order=order, data=data)
+        await {0: not_filled, 1: partial_fill, 2: filled}[result[0]]\
+            (result=result, target_order=order, data=data)
         
         await asyncio.gather(*[
             self.order_manager.append_entry(order),
@@ -184,7 +184,7 @@ class MatchingEngine:
                 0: {
                     "channel": channel,
                     "message": {
-                        'status': ConsumerStatusType.ERROR,
+                        'status': ConsumerMessageStatus.ERROR,
                         'message': 'Isufficient asks to fiullfill bid order',
                         'details': {
                             'order_id': data['order_id']
@@ -194,7 +194,7 @@ class MatchingEngine:
                 1: {
                     "channel": channel,
                     "message": json.dumps({
-                        "status": ConsumerStatusType.UPDATE, 
+                        "status": ConsumerMessageStatus.UPDATE, 
                         "message": "Order partially filled",
                         'details': {
                             "order_id": data["order_id"]
@@ -204,7 +204,7 @@ class MatchingEngine:
                 2: {
                     "channel": channel,
                     "message": json.dumps({
-                        "status": ConsumerStatusType.SUCCESS,
+                        "status": ConsumerMessageStatus.SUCCESS,
                         "message": "Order successfully placed",
                         "details": {
                             k: (str(v) if isinstance(v, (datetime, UUID)) else v) for k, v in Order(**data).model_dump().items()
@@ -468,7 +468,7 @@ class MatchingEngine:
             0: {
                 'channel': channel,
                 'message': json.dumps({
-                    "status": ConsumerStatusType.ERROR,
+                    "status": ConsumerMessageStatus.ERROR,
                     "message": "Insufficient bids to fulfill sell order",
                     "order_id": order_obj.data['order_id'],
                 })
@@ -476,7 +476,7 @@ class MatchingEngine:
             1: {
                 "channel": channel,
                 "message": json.dumps({
-                    "status": ConsumerStatusType.UPDATE, 
+                    "status": ConsumerMessageStatus.UPDATE, 
                     "message": "Order partially closed",
                     "order_id": order_obj.data['order_id']
                 })
@@ -485,7 +485,7 @@ class MatchingEngine:
             2: {
                 "channel": channel,
                 "message": json.dumps({
-                    "status": ConsumerStatusType.SUCCESS,
+                    "status": ConsumerMessageStatus.SUCCESS,
                     'internal': OrderType.CLOSE,
                     "message": "Order successfully closed",
                     "order_id": order_obj.data['order_id'],
@@ -622,7 +622,7 @@ class MatchingEngine:
         BIDS[data['ticker']][data['limit_price']].append(BidOrder(data, _OrderType.LIMIT_ORDER))
         await self.publish_update_to_client(
             channel,
-            {'status': ConsumerStatusType.SUCCESS, 'message': 'Limit Order placed successfully'}
+            {'status': ConsumerMessageStatus.SUCCESS, 'message': 'Limit Order placed successfully'}
         )
         
     async def handle_modify_order(self, data: dict, channel: str) -> None:
@@ -630,7 +630,7 @@ class MatchingEngine:
         await self.publish_update_to_client(**{
             'channel': channel,
             'message': {
-                'status': ConsumerStatusType.SUCCESS,
+                'status': ConsumerMessageStatus.SUCCESS,
                 'message': 'Updated TP & SL'
             }
         })
@@ -658,4 +658,4 @@ class MatchingEngine:
 
 def run():
     engine = MatchingEngine()
-    asyncio.run(engine.listen_to_client_events())
+    asyncio.run(engine.listen_to_client_messages())

@@ -32,7 +32,7 @@ class _OrderType(int, Enum):
     TAKE_PROFIT_ORDER = 3
     CLOSE_ORDER = 4
 
-class ConsumerStatusType(str, Enum):
+class ConsumerMessageStatus(str, Enum):
     """
     All types of consumer message topics sent by the matching
     engine
