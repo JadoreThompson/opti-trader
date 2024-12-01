@@ -40,13 +40,13 @@ async def generate_order_requests(quantity: int = 10) -> list:
                 quantity=random.randint(1, 15),
             ),
             
-            # socket_models.LimitOrder(
-            #     ticker='APPL',
-            #     quantity=random.randint(20, 50),
-            #     limit_price=random.choice([n for n in range(100, 160, 10)])
-            # )
+            socket_models.LimitOrder(
+                ticker='APPL',
+                quantity=random.randint(20, 50),
+                limit_price=random.choice([n for n in range(100, 160, 10)])
+            )
         ])
-            
+
         order_type = {
             socket_models.MarketOrder: OrderType.MARKET,
             socket_models.LimitOrder: OrderType.LIMIT
@@ -114,16 +114,16 @@ async def test_socket(
             
             await socket.send(json.dumps(orders[i].model_dump()))
             
-            # if divider and i > 0:
-            #     if i % divider == 0:
-            #         print('Sending a close order')
-            #         await socket.send(json.dumps({
-            #             'type': OrderType.CLOSE,
-            #             'close_order': {
-            #                 'quantity': close_quantity,
-            #                 'ticker': 'APPL'
-            #             }
-            #         }))
+            if divider and i > 0:
+                if i % divider == 0:
+                    print('Sending a close order')
+                    await socket.send(json.dumps({
+                        'type': OrderType.CLOSE,
+                        'close_order': {
+                            'quantity': close_quantity,
+                            'ticker': 'APPL'
+                        }
+                    }))
             await asyncio.sleep(1)
 
 
@@ -136,11 +136,11 @@ async def main():
         test_socket(
             name=fkr.first_name(), 
             divider=randint(2, 5), 
-            num_orders=randint(100, 250), 
+            num_orders=randint(100, 150), 
             close_quantity=randint(1, 5)
         ) for _ in range(TEST_SIZE)
     ])
 
-
-TEST_SIZE = 1
+# Begins to throw issues above 2
+TEST_SIZE = 2
 asyncio.run(main())

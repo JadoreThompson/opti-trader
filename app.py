@@ -6,7 +6,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 # Local
-import config
 from exceptions import DoesNotExist, InvalidError, DuplicateError, InvalidAction
 from middleware import RateLimitMiddleware
 from routes.portfolio import portfolio
@@ -35,6 +34,7 @@ app.include_router(accounts)
 app.include_router(portfolio)
 app.include_router(stream)
 app.include_router(instrument)
+
 
 """Exception handlers"""
 @app.exception_handler(DoesNotExist)
@@ -73,6 +73,7 @@ def uvicorn_wrapper() -> None:
     
 
 if __name__ == "__main__":
+    import config, engine
     import uvicorn
     import threading
     import sys

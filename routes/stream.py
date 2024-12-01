@@ -31,10 +31,9 @@ async def trade(websocket: WebSocket):
         # Receive
         while True:
             await MANAGER.receive(websocket, user_id)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)
             
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as e:
         await MANAGER.cleanup(user_id)
-    
     except Exception as e:
         print("[TRADE STREAM ENDPOINT][ERROR] >> ", type(e), str(e))
