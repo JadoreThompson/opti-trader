@@ -33,7 +33,6 @@ class MatchingEngine:
     def __init__(self) -> None:
         self._redis = REDIS_CLIENT
         self._order_manager = OrderManager()
-        # self._current_price: float = None
         self._current_price = deque()
         
         self._handlers: dict = {
@@ -86,7 +85,7 @@ class MatchingEngine:
         """
         try:
             await asyncio.sleep(0.1)
-            await self._configure_bids_asks(quantity=2_000, divider=5)
+            await self._configure_bids_asks(quantity=500, divider=5)
             
             await asyncio.sleep(0)
             logger.info('Listening!')
@@ -94,8 +93,6 @@ class MatchingEngine:
         except Exception as e:
             print('engine main', type(e), str(e))
         
-        # -------------------------------------------------------------
-
     async def _listen(self) -> None:
         try:
             while True:
@@ -157,9 +154,6 @@ class MatchingEngine:
         try:       
             order = BidOrder(data, _OrderType.MARKET_ORDER)
             result: tuple = await self.match_bid_order(main_order=order, ticker=order.data['ticker'])        
-            # print("Handle market order:")
-            # print("Result: ", result)
-            # print("Order: ", order)
 
             async def not_filled(**kwargs):
                 return
@@ -186,15 +180,7 @@ class MatchingEngine:
                     order.order_status = OrderStatus.FILLED
                     order.standing_quantity = data['quantity']
                                         
-                    tasks = [
-                        asyncio.create_task(self._order_manager.batch_update([data])),
-                        asyncio.create_task(self.add_new_price_to_db(
-                            result[1], 
-                            data['ticker'], 
-                            int(datetime.now().timestamp())
-                        ))
-                    ]
-                    # await self._set_price(result[1])
+                    asyncio.create_task(self._order_manager.batch_update([data]))
                     self._current_price.append(result[1])                    
                 except Exception as e:
                     print('fill func, handle market', type(e), str(e))
@@ -428,21 +414,14 @@ class MatchingEngine:
                 target_quantity = quantity
             
             quantity -= order.standing_quantity
-            
-            await self.fill_ask_order(
+                
+            if not await self.fill_ask_order(
                 order_obj=order, 
                 channel=channel, 
                 price=data['price'],
                 quantity=target_quantity
-            )
-                
-            # if not await self.fill_ask_order(
-            #     order_obj=order, 
-            #     channel=channel, 
-            #     price=data['price'],
-            #     quantity=target_quantity
-            # ):
-            #     break
+            ):
+                break
             
     async def fill_ask_order(
         self, 
@@ -486,23 +465,9 @@ class MatchingEngine:
                     order.order_status = OrderStatus.CLOSED
                 else:
                     order.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
-                
-                # tasks = [
-                #     asyncio.create_task(self._order_manager.batch_update([order.data])),
-                #     asyncio.create_task(self.add_new_price_to_db(
-                #         result[1], 
-                #         order.data['ticker'], 
-                #         int(datetime.now().timestamp())
-                #     ))
-                # ]
-                # await asyncio.sleep(0.1)
-                
-                # await self._set_price(result[1])
+
                 self._current_price.append(result[1])
-                # await asyncio.gather(*[
-                #     self._order_manager.batch_update([order.data]),
-                #     # self._set_price(result[1]),
-                # ])
+                await self._order_manager.batch_update([order.data])
 
             except Exception as e:
                 print('fill ask order -- fill -> ', type(e), str(e))
@@ -514,42 +479,41 @@ class MatchingEngine:
             1: partial_fill,
             2: fill
         }[result[0]](result=result, order=order_obj)
-
         
-        # await self._publish_update_to_client(**{
-        #     0: {
-        #         'channel': channel,
-        #         'message': json.dumps({
-        #             "status": ConsumerMessageStatus.ERROR,
-        #             "message": "Insufficient bids to fulfill sell order",
-        #             "order_id": order_obj.data['order_id'],
-        #         })
-        #     },
-        #     1: {
-        #         "channel": channel,
-        #         "message": json.dumps({
-        #             "status": ConsumerMessageStatus.UPDATE, 
-        #             "message": "Order partially closed",
-        #             "order_id": order_obj.data['order_id']
-        #         })
-        #     },
+        await self._publish_update_to_client(**{
+            0: {
+                'channel': channel,
+                'message': json.dumps({
+                    "status": ConsumerMessageStatus.ERROR,
+                    "message": "Insufficient bids to fulfill sell order",
+                    "order_id": order_obj.data['order_id'],
+                })
+            },
+            1: {
+                "channel": channel,
+                "message": json.dumps({
+                    "status": ConsumerMessageStatus.UPDATE, 
+                    "message": "Order partially closed",
+                    "order_id": order_obj.data['order_id']
+                })
+            },
             
-        #     2: {
-        #         "channel": channel,
-        #         "message": json.dumps({
-        #             "status": ConsumerMessageStatus.SUCCESS,
-        #             'internal': OrderType.CLOSE,
-        #             "message": "Order successfully closed",
-        #             "order_id": order_obj.data['order_id'],
-        #             'details': {
-        #                 k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
-        #                 for k, v in order_obj.data.items()
-        #             }
-        #         })
-        #     }
-        # }[result[0]])
+            2: {
+                "channel": channel,
+                "message": json.dumps({
+                    "status": ConsumerMessageStatus.SUCCESS,
+                    'internal': OrderType.CLOSE,
+                    "message": "Order successfully closed",
+                    "order_id": order_obj.data['order_id'],
+                    'details': {
+                        k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
+                        for k, v in order_obj.data.items()
+                    }
+                })
+            }
+        }[result[0]])
 
-        # return return_value
+        return return_value
     
     async def find_bid_price_level(
       self,
@@ -709,12 +673,7 @@ class MatchingEngine:
 
         async def _broadcast_price_change(new_price: float):
             try:
-                # print('* Broadcasting price: ', new_price)
                 QUEUE.put_nowait(new_price)
-                # await self._redis.publish(
-                #     channel='prices', 
-                #     message=json.dumps({'ticker': 'APPL', 'price': new_price, 'time': int(datetime.now().timestamp())})
-                # )
                 await asyncio.sleep(0)
             except Exception as e:
                 print('broadcast price change -> ', type(e), str(e))
@@ -726,11 +685,16 @@ class MatchingEngine:
             while True:
                 try:
                     item = self._current_price.popleft()
-                    # print(item)
-                    # print('Loop: ', asyncio.get_running_loop())
                     await _broadcast_price_change(item)
+                    await self.add_new_price_to_db(
+                        new_price=item, 
+                        ticker='APPL', 
+                        new_time=int(datetime.now().timestamp())
+                    )
                 except IndexError:
                     pass
+                except Exception as e:
+                    print('watch price: ', type(e), str(e))
                 finally:
                     await asyncio.sleep(0.1)
         except Exception as e:

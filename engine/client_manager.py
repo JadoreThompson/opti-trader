@@ -45,9 +45,7 @@ class ClientManager:
             OrderType.LIMIT: self._limit_order_handler,
             OrderType.CLOSE: self._close_order_handler
         }
-    
-        # asyncio.get_running_loop().create_task(self._listen_to_prices())
-    
+        
     async def _listen_to_prices(self) -> None:
         try:
             last_price = None
@@ -57,8 +55,7 @@ class ClientManager:
                     if isinstance(item, (float, int)):
                         if item != last_price:
                             last_price = item
-                            print('^ Received queue item: ', last_price)
-                            asyncio.get_running_loop().create_task(self._process_price(last_price))
+                            await self._process_price(last_price)
                             
                         QUEUE.task_done()    
                 except asyncio.queues.QueueEmpty as e:
@@ -89,12 +86,54 @@ class ClientManager:
             except Exception as e:
                 print('process price: ', type(e), str(e))
             finally: 
-                print('Sent out price upate')
+                await asyncio.sleep(0.01)
+                
+    async def _listen_to_order_updates(self, user_id: str) -> None:
+        await asyncio.sleep(0.01)
+        try:
+            async with REDIS_CLIENT.pubsub() as ps:
+                await ps.subscribe(f'trades_{user_id}')
                 await asyncio.sleep(0)
-
+                while True:
+                    try:
+                        message = await ps.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                        if message:
+                            if user_id in self._active_connections:
+                                socket: WebSocket = self._active_connections[user_id]['socket']
+                                message: str = json.dumps(json.loads(message['data']))
+                                await socket.send_text(message)
+                    except Exception as e:
+                        print('listen to order update inner: ', type(e), str(e))
+                    finally:
+                        await asyncio.sleep(0.1)
+                # -----------------------------------------------
+                
+                # async for message in ps.listen():
+                #     try:
+                #         if message.get('type', None) == 'message':
+                #             await self._active_connections[user_id]['socket'].send_text(json.dumps(json.loads(message['data'])))
+                #     except Exception as e:
+                #         print('listen to order update inner: ', type(e), str(e))
+                #     finally:
+                #         await asyncio.sleep(0.01)
+        except Exception as e:
+            print('listen to order update: ', type(e), str(e))
+            
     async def cleanup(self, user_id: str) -> None: 
         if user_id in self._active_connections:
+            self._active_connections[user_id]['listen_order_task'].cancel()
             del self._active_connections[user_id]
+        
+    # redundant
+    # async def _ping(self, socket: WebSocket) -> None:
+    #     try:
+    #         while True:
+    #             try:
+    #                 await socket.ping
+    #             except Exception as e:
+    #                 print('ping inner', type(e), str(e))
+    #     except Exception as e:
+    #         print('ping: ', type(e), str(e))
         
     async def connect(self, socket: WebSocket) -> None:
         try:
@@ -103,6 +142,7 @@ class ClientManager:
                 asyncio.create_task(self._listen_to_prices())
                 await asyncio.sleep(0.01)
                 self._initialised = True
+            socket.application_state.keepalive_ping_interval = 30
         except Exception as e:
             print('connect: ', type(e), str(e))
             
@@ -118,8 +158,10 @@ class ClientManager:
             self._active_connections[user_id] = {
                 'socket': socket,
                 'user': user,
+                'listen_order_task': asyncio.create_task(self._listen_to_order_updates(user_id=user_id)),
+                # 'ping_task': asyncio.create_task(self._ping())
             }
-            
+            await asyncio.sleep(0.01)
             await socket.send_text(json.dumps({
                 'status': ConsumerMessageStatus.SUCCESS,
                 'message': 'Successfully connected',                
@@ -137,11 +179,16 @@ class ClientManager:
                 raise WebSocketDisconnect
             
             message: str = await socket.receive_text()
+            
+            # asyncio.create_task(self._message_handler(
+            #     message=OrderRequest(**json.loads(message)), 
+            #     user_id=user_id
+            # ))
 
-            asyncio.create_task(self._message_handler(
+            await self._message_handler(
                 message=OrderRequest(**json.loads(message)), 
                 user_id=user_id
-            ))
+            )
         
         except ValidationError as e:
             await socket.send_text(json.dumps({
@@ -169,7 +216,6 @@ class ClientManager:
                     raise InvalidAction("Cannot perform operations on closed orders")
 
             order.update({'type': message.type, 'user_id': user_id})
-            # await QUEUE.put(order)
             QUEUE.put_nowait(order)
             
         except (InvalidAction, UnauthorisedError) as e:
