@@ -37,13 +37,13 @@ async def generate_order_requests(quantity: int = 10) -> list:
         order_obj = random.choice([
             socket_models.MarketOrder(
                 ticker='APPL',
-                quantity=random.randint(1, 15),
+                quantity=random.randint(1, 50),
             ),
             
             socket_models.LimitOrder(
                 ticker='APPL',
-                quantity=random.randint(20, 50),
-                limit_price=random.choice([n for n in range(100, 160, 10)])
+                quantity=random.randint(1, 50),
+                limit_price=random.choice([n for n in range(20, 1000, 10)])
             )
         ])
 
@@ -104,28 +104,31 @@ async def test_socket(
     if kwargs.get('name', None):
         print(f'{num_orders} orders in queue for {kwargs['name']}')
     
-    async with websockets.connect(SOCKET_URL) as socket:
-        await socket.send(json.dumps({'token': token}))
-        m = await socket.recv()
-        print('Signing Message: ', m)
-        
-        for i in range(len(orders)):
-            print(f'{f"{kwargs['name']} - {i}"  if 'name' in kwargs else ''}')
-            
-            await socket.send(json.dumps(orders[i].model_dump()))
-            
-            if divider and i > 0:
-                if i % divider == 0:
-                    print('Sending a close order')
-                    await socket.send(json.dumps({
-                        'type': OrderType.CLOSE,
-                        'close_order': {
-                            'quantity': close_quantity,
-                            'ticker': 'APPL'
-                        }
-                    }))
-            await asyncio.sleep(1)
-
+    i = 0
+    while i < len(orders):
+        try:
+            async with websockets.connect(SOCKET_URL) as socket:
+                await socket.send(json.dumps({'token': token}))
+                m = await socket.recv()
+                print('Signing Message: ', m)
+                
+                while i < len(orders):
+                    await socket.send(json.dumps(orders[i].model_dump()))
+                    
+                    if divider and i > 0:
+                        if i % divider == 0:
+                            await socket.send(json.dumps({
+                                'type': OrderType.CLOSE,
+                                'close_order': {
+                                    'quantity': close_quantity,
+                                    'ticker': 'APPL'
+                                }
+                            }))
+                    await asyncio.sleep(1)
+                    i += 1
+        except websockets.exceptions.ConnectionClosedError:
+                    if kwargs.get('name', None):
+                        print(f'[{kwargs['name']}] Disconnect - {i}')
 
 from random import randint
 
@@ -136,11 +139,11 @@ async def main():
         test_socket(
             name=fkr.first_name(), 
             divider=randint(2, 5), 
-            num_orders=randint(100, 150), 
-            close_quantity=randint(1, 5)
+            num_orders=randint(10_000, 30_000), 
+            close_quantity=randint(10, 50)
         ) for _ in range(TEST_SIZE)
     ])
 
 # Begins to throw issues above 2
-TEST_SIZE = 2
+TEST_SIZE = 5
 asyncio.run(main())
