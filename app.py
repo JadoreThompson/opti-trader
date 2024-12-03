@@ -69,7 +69,7 @@ def db_listener_wrapper() -> None:
     asyncio.run(db_listener())
 
 def uvicorn_wrapper() -> None:
-    uvicorn.run("app:app", port=8000, host='0.0.0.0', ws_ping_interval=3000, ws_ping_timeout=10_000)
+    uvicorn.run("app:app", port=8000, host='0.0.0.0', ws_ping_interval=3000.0, ws_ping_timeout=100.0)
     
 
 if __name__ == "__main__":

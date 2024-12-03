@@ -56,7 +56,8 @@ class ClientManager:
                     if isinstance(item, (float, int)):
                         if item != last_price:
                             last_price = item
-                            await self._process_price(last_price)
+                            print('^ Received queue item: ', last_price)
+                            asyncio.get_running_loop().create_task(self._process_price(last_price))
                             
                         QUEUE.task_done()    
                 except asyncio.queues.QueueEmpty as e:
@@ -113,7 +114,19 @@ class ClientManager:
             
     async def cleanup(self, user_id: str) -> None: 
         if user_id in self._active_connections:
+            self._active_connections[user_id]['listen_order_task'].cancel()
             del self._active_connections[user_id]
+        
+    # redundant
+    # async def _ping(self, socket: WebSocket) -> None:
+    #     try:
+    #         while True:
+    #             try:
+    #                 await socket.ping
+    #             except Exception as e:
+    #                 print('ping inner', type(e), str(e))
+    #     except Exception as e:
+    #         print('ping: ', type(e), str(e))
         
     async def connect(self, socket: WebSocket) -> None:
         try:
@@ -126,7 +139,7 @@ class ClientManager:
         except Exception as e:
             print('connect: ', type(e), str(e))
             
-    async def receive_token(self, socket: WebSocket) -> bool:
+    async def receive_token(self, socket: WebSocket) -> bool | str:
         try:
             message = await socket.receive_text()
             user_id: str = verify_jwt_token_ws(json.loads(message)['token'])
@@ -138,6 +151,8 @@ class ClientManager:
             self._active_connections[user_id] = {
                 'socket': socket,
                 'user': user,
+                'listen_order_task': asyncio.create_task(self._listen_to_order_updates(user_id=user_id)),
+                # 'ping_task': asyncio.create_task(self._ping())
             }
 
             await socket.send_text(json.dumps({
@@ -151,7 +166,7 @@ class ClientManager:
         except Exception as e:
             print('receive token: ', type(e), str(e))
     
-    async def receive(self, socket: WebSocket, user_id: str):
+    async def receive(self, socket: WebSocket, user_id: str) -> None:
         try:
             if user_id not in self._active_connections:
                 raise WebSocketDisconnect
