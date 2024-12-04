@@ -4,6 +4,7 @@ __pycache__/
 **.env
 myfile.txt
 **venv
+ai/datasets/
 
 gc_client_secret.json
 gc_client.json

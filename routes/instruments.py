@@ -1,9 +1,13 @@
+import csv
+
 from datetime import datetime, timedelta
+from io import BytesIO
 from typing import List
 from sqlalchemy import asc, select
 
 # FA
 from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse, StreamingResponse
 
 # Local
 from enums import IntervalTypes
@@ -85,13 +89,26 @@ async def get_data(
 
 
 @instruments.get('/csv')
-async def csv(
+async def to_csv(
     ticker: str,
     interval: IntervalTypes,
     user_id: str = Depends(verify_jwt_token_http),
 ):
     try:
-        data: TickerData = await get_data(ticker=ticker, interval=interval, user_id=user_id)
-        print(data)
+        data: list[TickerData] = await get_data(ticker=ticker, interval=interval, user_id=user_id)
+        
+        filename = f'csvs/{user_id}_{ticker}_{interval.value}_{datetime.now().timestamp()}.csv'
+        # wr = csv.writer(file)
+        
+        with open(filename, 'w', newline='') as f:
+            wr = csv.writer(f, delimiter=',')            
+            wr.writerow(list(vars(data[0]).keys()))
+            
+            for item in data:
+                wr.writerow(list(vars(item).values()))
+            
+        return FileResponse(filename)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print('instrument - csv >> ', type(e), str(e))
