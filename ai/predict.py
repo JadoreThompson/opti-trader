@@ -11,7 +11,7 @@ from sklearn.metrics import mean_squared_error
 
 
 def plot_price():
-    plt.plot(df['price'])
+    plt.plot(new_df['price'])
     plt.show()
 
 
@@ -50,18 +50,19 @@ filename = 'appl.csv'
 
 df = pd.read_csv(os.path.dirname(__file__) + f'/{filename}')
 df['price'] = df['price'].astype(float)
-df = df[['price']]
+new_df = df[['price']]
 
 scaler = MinMaxScaler(feature_range=(0, 1))
-df = scaler.fit_transform(df)
+new_df = scaler.fit_transform(new_df)
 
-train_size = int(len(df) * 0.8)
-train, test = df[:train_size], df[train_size: ]
+train_size = int(len(new_df) * 0.8)
+train, test = new_df[:train_size], new_df[train_size: ]
 
 # - 100: Correct predictions, slightly too early
 # - 35: decent
 look_back = 80
 trainX, trainY = build_dataset(train, look_back)
+
 testX, testY = build_dataset(test, look_back)
 
 # LSTM
@@ -73,13 +74,13 @@ with tf.device('/GPU:0'):
     model.add(Dense(1))
     
     model.compile(loss='mean_squared_error', optimizer='adam')
-    model.fit(trainX, trainY, epochs=200, batch_size=64, verbose=2)
+    model.fit(trainX, trainY, epochs=500, batch_size=64, verbose=2)
     
     train_preds = model.predict(trainX)
     test_preds = model.predict(testX)    
     
-    eval_preds = model.evaluate(trainX, trainY, batch_size=64)
-    print("Eval Preds: ", eval_preds)
+    eval_pred = model.evaluate(trainX, trainY, batch_size=64, verbose=2)
+    print("Eval Preds: ", (np.sqrt(eval_pred) / (max(df['price']) - min(df['price']))) * 100)
 
 
-plot_train_test(look_back, df, train_preds, test_preds) 
+plot_train_test(look_back, new_df, train_preds, test_preds) 
