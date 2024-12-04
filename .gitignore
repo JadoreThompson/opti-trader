@@ -5,6 +5,8 @@ __pycache__/
 myfile.txt
 **venv
 ai/datasets/
+csvs/
+.vscode/
 
 gc_client_secret.json
 gc_client.json
