@@ -81,6 +81,8 @@ with tf.device('/GPU:0'):
     
     eval_pred = model.evaluate(trainX, trainY, batch_size=64, verbose=2)
     print("Eval Preds: ", (np.sqrt(eval_pred) / (max(df['price']) - min(df['price']))) * 100)
-
+    print('Saving Model')
+    model.save('pred.h5')
+    print('Model saved')
 
 plot_train_test(look_back, new_df, train_preds, test_preds) 
