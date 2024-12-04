@@ -13,10 +13,10 @@ from utils.auth import verify_jwt_token_http
 from utils.db import get_db_session
 
 
-instrument = APIRouter(prefix="/instruments", tags=["instrument"])
+instruments = APIRouter(prefix="/instruments", tags=["instrument"])
 
 
-@instrument.get("/", response_model=List[TickerData])
+@instruments.get("/", response_model=List[TickerData])
 async def get_data(
     ticker: str,
     interval: IntervalTypes,
@@ -82,3 +82,16 @@ async def get_data(
     candle_data_list.sort(key=lambda item: item['time'])
     
     return [TickerData(**item) for item in candle_data_list]
+
+
+@instruments.get('/csv')
+async def csv(
+    ticker: str,
+    interval: IntervalTypes,
+    user_id: str = Depends(verify_jwt_token_http),
+):
+    try:
+        data: TickerData = await get_data(ticker=ticker, interval=interval, user_id=user_id)
+        print(data)
+    except Exception as e:
+        print('instrument - csv >> ', type(e), str(e))

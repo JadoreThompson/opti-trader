@@ -1,7 +1,8 @@
 import os
-import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
@@ -9,27 +10,13 @@ from tensorflow.keras.layers import LSTM
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 
+# Local
+from .utils import build_dataset, LOOK_BACK
+
 
 def plot_price():
     plt.plot(new_df['price'])
     plt.show()
-
-
-def build_dataset(dataset, look_back=1):
-    if look_back < 1:
-        raise Exception('Look back must be a positive integer')
-    
-    x, y = [], []
-    l = len(dataset)
-    for i in range(len(dataset)):
-        x.append(dataset[i: i + look_back])
-        
-        next = i + look_back
-        if next < l:
-            y.append(dataset[next])
-    
-    diff = len(x) - abs(len(x) - len(y))
-    return np.array(x[:diff]), np.array(y)
 
 
 def plot_train_test(time_steps, dataset, train_preds, test_preds):
@@ -44,9 +31,8 @@ def plot_train_test(time_steps, dataset, train_preds, test_preds):
     
 
 tf.random.set_seed(7)
-# tf.debugging.set_log_device_placement(True)
 
-filename = 'appl.csv'
+filename = 'datasets/market_data.csv'
 
 df = pd.read_csv(os.path.dirname(__file__) + f'/{filename}')
 df['price'] = df['price'].astype(float)
@@ -58,18 +44,15 @@ new_df = scaler.fit_transform(new_df)
 train_size = int(len(new_df) * 0.8)
 train, test = new_df[:train_size], new_df[train_size: ]
 
-# - 100: Correct predictions, slightly too early
-# - 35: decent
-look_back = 80
-trainX, trainY = build_dataset(train, look_back)
+trainX, trainY = build_dataset(train, LOOK_BACK)
+testX, testY = build_dataset(test, LOOK_BACK)
 
-testX, testY = build_dataset(test, look_back)
 
 # LSTM
 with tf.device('/GPU:0'):
     model = Sequential()
-    model.add(LSTM(50, input_shape=(look_back, 1), return_sequences=True))
-    model.add(LSTM(50))
+    model.add(LSTM(25, input_shape=(LOOK_BACK, 1), return_sequences=True))
+    model.add(LSTM(25))
     model.add(Dense(32))
     model.add(Dense(1))
     
@@ -80,9 +63,11 @@ with tf.device('/GPU:0'):
     test_preds = model.predict(testX)    
     
     eval_pred = model.evaluate(trainX, trainY, batch_size=64, verbose=2)
-    print("Eval Preds: ", (np.sqrt(eval_pred) / (max(df['price']) - min(df['price']))) * 100)
-    print('Saving Model')
-    model.save('pred.h5')
-    print('Model saved')
+    print("Normalised RMSE: ", round((np.sqrt(eval_pred) / (max(df['price']) - min(df['price']))) * 100), 4)
+    
+    print('Saving Model...')
+    model.save('./pred.keras')
+    print('Model saved -_-')
 
-plot_train_test(look_back, new_df, train_preds, test_preds) 
+
+plot_train_test(LOOK_BACK, new_df, train_preds, test_preds) 
