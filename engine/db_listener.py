@@ -22,27 +22,31 @@ class DBListener:
         if isinstance(payload, str):
             payload = json.loads(payload)
         
-        await self.queue.put(payload['user_id'])
-        await asyncio.sleep(0.01)
+        self.queue.put_nowait(payload['user_id'])
         
         
     async def process_notifications(self) -> None:
         logger.info('Waiting for messages')
         while True:
-            print('entered')
-            user_id = await self.queue.get()
-            print('apsssed')
-            await delete_from_internal_cache(user_id, list(self.channels))
-            await asyncio.sleep(0.1)
-            print('Received message')
-
+            try:
+                user_id = self.queue.get_nowait()            
+                if user_id:
+                    await delete_from_internal_cache(user_id, list(self.channels))
+                    self.queue.task_done()
+            except asyncio.queues.QueueEmpty:
+                pass
+            except Exception as e:
+                print('db_listener - process notifications: ', type(e), str(e))
+                pass
+            finally:
+                await asyncio.sleep(0.01)
 
     async def start(self):
         db_url = self.dsn.replace('+asyncpg', '')
         
         try:
             self.conn = await asyncpg.connect(dsn=db_url)
-            await self.conn.add_listener('orders_update', self.handler)
+            await self.conn.add_listener('order_change', self.handler)
             await self.process_notifications()
         except Exception as e:
             logger.error(f'{e}')
@@ -57,3 +61,7 @@ async def main():
     global DB_URL
     listener = DBListener(DB_URL)
     await listener.start()
+
+
+if __name__ == '__main__':
+    asyncio.run(main()) 
