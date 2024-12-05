@@ -18,6 +18,50 @@ def plot_price():
     plt.plot(new_df['price'])
     plt.show()
 
+tf.random.set_seed(7)
+print(tf.config.list_physical_devices('GPU'))
+print('^^^^^')
+dataset = 'datasets/market_data.csv'
+scaler = MinMaxScaler(feature_range=(0, 1))
+PRICE_COL = 'price'
+
+df = pd.read_csv(os.path.dirname(__file__) + f'/{dataset}')
+df[PRICE_COL] = df[PRICE_COL].astype(float)
+new_df = scaler.fit_transform(df[[PRICE_COL]])
+
+train_size = int(len(new_df) * 0.8)
+train, test = new_df[:train_size], new_df[train_size: ]
+
+trainX, trainY = build_dataset(train, LOOK_BACK)
+testX, testY = build_dataset(test, LOOK_BACK)
+
+
+# Model
+with tf.device('/GPU:0'):
+    model = Sequential()
+    model.add(LSTM(LOOK_BACK, input_shape=(LOOK_BACK, 1), return_sequences=True))
+    model.add(LSTM(int(LOOK_BACK * 1.2)))
+    model.add(Dense(1))
+    
+    model.compile(loss='mean_squared_error', optimizer='adam')
+    model.fit(trainX, trainY, epochs=1, batch_size=64, verbose=2)
+    
+    train_preds = model.predict(trainX)
+    test_preds = model.predict(testX)
+    
+    eval_pred = model.evaluate(trainX, trainY, batch_size=64, verbose=2)
+    print("Normalised RMSE: ", round((np.sqrt(eval_pred) / (max(df[PRICE_COL]) - min(df[PRICE_COL]))) * 100), 4)
+    
+    print('Saving Model...')
+    model.save('./models/pred_3.keras')
+    print('Model saved (+_+)')
+    
+    
+print(test_preds.shape)
+print(train_preds.shape)
+    
+
+
 
 def plot_train_test(time_steps, dataset, train_preds, test_preds):
     plt.plot(dataset, label='Actual Price')
@@ -28,46 +72,5 @@ def plot_train_test(time_steps, dataset, train_preds, test_preds):
     plt.xlabel("Time")
     plt.legend()
     plt.show()
-    
 
-tf.random.set_seed(7)
-
-filename = 'datasets/market_data.csv'
-
-df = pd.read_csv(os.path.dirname(__file__) + f'/{filename}')
-df['price'] = df['price'].astype(float)
-new_df = df[['price']]
-
-scaler = MinMaxScaler(feature_range=(0, 1))
-new_df = scaler.fit_transform(new_df)
-
-train_size = int(len(new_df) * 0.8)
-train, test = new_df[:train_size], new_df[train_size: ]
-
-trainX, trainY = build_dataset(train, LOOK_BACK)
-testX, testY = build_dataset(test, LOOK_BACK)
-
-
-# LSTM
-with tf.device('/GPU:0'):
-    model = Sequential()
-    model.add(LSTM(25, input_shape=(LOOK_BACK, 1), return_sequences=True))
-    model.add(LSTM(25))
-    model.add(Dense(32))
-    model.add(Dense(1))
-    
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    model.fit(trainX, trainY, epochs=500, batch_size=64, verbose=2)
-    
-    train_preds = model.predict(trainX)
-    test_preds = model.predict(testX)    
-    
-    eval_pred = model.evaluate(trainX, trainY, batch_size=64, verbose=2)
-    print("Normalised RMSE: ", round((np.sqrt(eval_pred) / (max(df['price']) - min(df['price']))) * 100), 4)
-    
-    print('Saving Model...')
-    model.save('./pred.keras')
-    print('Model saved -_-')
-
-
-plot_train_test(LOOK_BACK, new_df, train_preds, test_preds) 
+plot_train_test(LOOK_BACK, new_df, train_preds, test_preds)

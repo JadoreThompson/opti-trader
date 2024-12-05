@@ -85,7 +85,7 @@ class MatchingEngine:
         """
         try:
             await asyncio.sleep(0.1)
-            await self._configure_bids_asks(quantity=500, divider=5)
+            await self._configure_bids_asks(quantity=100, divider=5)
             
             await asyncio.sleep(0)
             logger.info('Listening!')

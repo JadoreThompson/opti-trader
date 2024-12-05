@@ -40,37 +40,37 @@ async def get_data(
         all_data = [vars(item) for item in result.scalars().all()]
     
     if not all_data:
-        m = (int(now.timestamp()) - target_time) // 60
+        m = (int(now.timestamp()) - target_time) // interval.value
         nt = (m * 60) + target_time
         return [TickerData(time=nt)]
     
-    candle_data_list = []
+    ticker_data_list: list[dict] = []
     
     for i in range(len(all_data)):
-        dp = all_data[i]
+        data_point = all_data[i]
         
-        time_passed = (dp['date'] - target_time) // chosen_interval_seconds
-        price = dp['price']
+        time_passed = (data_point['date'] - target_time) // chosen_interval_seconds
+        price = data_point['price']
         
         if time_passed >= 1:
             for _ in range(time_passed):
                 new_item = {
                     'time': target_time + chosen_interval_seconds,
-                    'open': all_data[i - 1]['price'] if i > 0 else price,
+                    'open': ticker_data_list[-1]['close'] if ticker_data_list else price,
                     'high': price,
                     'low': price,
                     'close': price
                 }
-                candle_data_list.append(new_item)
+                ticker_data_list.append(new_item)
                 target_time += chosen_interval_seconds            
                         
-        existing = candle_data_list[-1]
+        existing = ticker_data_list[-1]
         existing['high'] = max(existing['high'], price)
         existing['low'] = min(existing['low'], price)
         existing['close'] = price
     
     time_passed = (int(now.timestamp()) - target_time) // chosen_interval_seconds
-    last_price = candle_data_list[-1]['close']
+    last_price = ticker_data_list[-1]['close']
     
     for _ in range(time_passed):
         target_time += chosen_interval_seconds
@@ -81,11 +81,11 @@ async def get_data(
             'low': last_price,
             'close': last_price
         }    
-        candle_data_list.append(new_item)
+        ticker_data_list.append(new_item)
     
-    candle_data_list.sort(key=lambda item: item['time'])
+    ticker_data_list.sort(key=lambda item: item['time'])
     
-    return [TickerData(**item) for item in candle_data_list]
+    return [TickerData(**item) for item in ticker_data_list]
 
 
 @instruments.get('/csv')

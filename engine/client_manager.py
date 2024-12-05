@@ -117,17 +117,6 @@ class ClientManager:
             self._active_connections[user_id]['listen_order_task'].cancel()
             del self._active_connections[user_id]
         
-    # redundant
-    # async def _ping(self, socket: WebSocket) -> None:
-    #     try:
-    #         while True:
-    #             try:
-    #                 await socket.ping
-    #             except Exception as e:
-    #                 print('ping inner', type(e), str(e))
-    #     except Exception as e:
-    #         print('ping: ', type(e), str(e))
-        
     async def connect(self, socket: WebSocket) -> None:
         try:
             await socket.accept()
@@ -135,7 +124,7 @@ class ClientManager:
                 asyncio.create_task(self._listen_to_prices())
                 await asyncio.sleep(0.01)
                 self._initialised = True
-            # socket.application_state.keepalive_ping_interval = 30
+            
         except Exception as e:
             print('connect: ', type(e), str(e))
             
@@ -178,12 +167,7 @@ class ClientManager:
                 user_id=user_id
             ))
             await asyncio.sleep(0.1)
-
-            # await self._message_handler(
-            #     message=OrderRequest(**json.loads(message)), 
-            #     user_id=user_id
-            # )
-        
+            print('Handling request')
         except ValidationError as e:
             await socket.send_text(json.dumps({
                 'status': ConsumerMessageStatus.ERROR,
