@@ -40,6 +40,7 @@ class ClientManager:
         self._initialised: bool = False
         self._active_connections: dict[str, dict[str, any]] = {}
         self._ticker_quotes: dict[str, float] = {'APPL': randint(10, 1000)}
+        print(self._ticker_quotes['APPL'])
         
         self._message_handlers = {
             OrderType.MARKET: self._market_order_handler,
@@ -104,6 +105,8 @@ class ClientManager:
                             if user_id in self._active_connections:
                                 socket: WebSocket = self._active_connections[user_id]['socket']
                                 message: str = json.dumps(json.loads(message['data']))
+                                await socket.send_text(message)
+                                
                     except Exception as e:
                         print('listen to order update inner: ', type(e), str(e))
                     finally:
@@ -167,7 +170,7 @@ class ClientManager:
                 user_id=user_id
             ))
             await asyncio.sleep(0.1)
-            print('Handling request')
+            
         except ValidationError as e:
             await socket.send_text(json.dumps({
                 'status': ConsumerMessageStatus.ERROR,
@@ -283,9 +286,9 @@ class ClientManager:
                 return
             
             current_price = self._ticker_quotes[message_dict['ticker']]
-            boundary = current_price * 0.5
+            lower_boundary = current_price * 0.5
         
-            if boundary >= message_dict['limit_price'] or message_dict['limit_price'] >= (boundary + current_price):
+            if lower_boundary >= message_dict['limit_price'] or message_dict['limit_price'] >= (lower_boundary + current_price):
                 raise InvalidAction("Limit price is outside of liquidity zone")
             
             

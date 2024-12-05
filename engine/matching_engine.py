@@ -196,6 +196,7 @@ class MatchingEngine:
                         "channel": channel,
                         "message": {
                             'status': ConsumerMessageStatus.ERROR,
+                            'internal': OrderType.MARKET,
                             'message': 'Isufficient asks to fiullfill bid order',
                             'details': {
                                 'order_id': data['order_id']
@@ -206,6 +207,7 @@ class MatchingEngine:
                         "channel": channel,
                         "message": json.dumps({
                             "status": ConsumerMessageStatus.UPDATE, 
+                            'internal': OrderType.MARKET,
                             "message": "Order partially filled",
                             'details': {
                                 "order_id": data["order_id"]
@@ -216,6 +218,7 @@ class MatchingEngine:
                         "channel": channel,
                         "message": json.dumps({
                             "status": ConsumerMessageStatus.SUCCESS,
+                            'internal': OrderType.MARKET,
                             "message": "Order successfully placed",
                             "details": {
                                 k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
@@ -508,6 +511,7 @@ class MatchingEngine:
                     'details': {
                         k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
                         for k, v in order_obj.data.items()
+                        if k != 'user_id'
                     }
                 })
             }

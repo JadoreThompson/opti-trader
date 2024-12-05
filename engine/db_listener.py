@@ -6,6 +6,7 @@ from utils.db import delete_from_internal_cache
 
 logger = logging.getLogger(__name__)
 
+
 class DBListener:
     def __init__(self, dsn: str, cache_channels: list = None) -> None:
         self.dsn = dsn
@@ -28,9 +29,12 @@ class DBListener:
     async def process_notifications(self) -> None:
         logger.info('Waiting for messages')
         while True:
+            print('entered')
             user_id = await self.queue.get()
+            print('apsssed')
             await delete_from_internal_cache(user_id, list(self.channels))
             await asyncio.sleep(0.1)
+            print('Received message')
 
 
     async def start(self):
