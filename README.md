@@ -1,12 +1,10 @@
 ## **Description**
 
-FIFO matching Engine built in Python with order closing embodying pro-rata allocation, served through a websocket endpoint.
+A FIFO matching engine built in Python with order closing based on pro-rata allocation. WebSocket and HTTP endpoints are served via a Uvicorn server using FastAPI as the framework of choice.
 
-`ws://127.0.0.1:8000/stream/trade`
+Postgres functions power the `db_listener` module, updating an in-memory cache of user orders upon INSERT or UPDATE queries. Preventing stale data while simultaneously optimizing performance. Originally, each request triggered a database query, but with this module, queries only occur when the database changes. Thus approach improves efficiency, especially since the platform isn't designed for high-frequency trading (HFT). As a result, order-related endpoints achieve latency as low as 9 ms.
 
-Also Provides HTTP Endpoints for some statistics and data to serve the [frontend application](https://github.com/JadoreThompson/order-matcher-frontend.git)
-
-The application runs on port 8000 however mutable, within [app.py](http://app.py) in the uvicorn_wrapper function
+Following an event-driven architecture, Redis Pub/Sub is used to broadcast updates such as order fills, closures, partial fills, and other notifications that active users need to receive.
 
 ## Prerequisites
 
