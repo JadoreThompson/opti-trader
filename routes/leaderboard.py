@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta
+from typing import List
 
 # Local
 from utils.auth import verify_jwt_token_http
@@ -15,10 +16,11 @@ from fastapi import APIRouter, Depends
 
 
 leaderboard = APIRouter(prefix='/leaderboard', tags=['leaderboard'])
+leaderboard_cache = {}
 
-# Load this once a week
-@leaderboard.get('/')
-async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)):
+
+@leaderboard.get('/', response_model=List[LeaderboardItem])
+async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List[LeaderboardItem]:
     """
     Args:
         user_id (str, optional): Defaults to Depends(verify_jwt_token_http).
@@ -28,6 +30,10 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)):
     """    
     try:
         td = datetime.now()
+        
+        if leaderboard_cache:
+            if td.weekday() != 4 or leaderboard_cache['date'] == td.date():
+                return leaderboard_cache['data']
         
         async with get_db_session() as session:
             r = await session.execute(
@@ -56,8 +62,8 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)):
         
         leaderboard_items = [(pointer, item) for pointer, item in enumerate(leaderboard.items())]
         leaderboard_items.sort(key=lambda item: item[1][1]['earnings'], reverse=True)
-                
-        return [
+        leaderboard_cache['date'] = td.date()
+        leaderboard_cache['data'] = [
             LeaderboardItem(
                 rank=i + 1, 
                 username=leaderboard_items[i][1][1]['email'], 
@@ -65,6 +71,7 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)):
             ) 
             for i in range(len(leaderboard_items[:10]))
         ]
+        return leaderboard_cache['data']
 
     except Exception as e:
         print('leaderboard >> ', type(e), str(e))
