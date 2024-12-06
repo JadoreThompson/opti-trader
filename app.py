@@ -12,6 +12,7 @@ from routes.portfolio import portfolio
 from routes.accounts import accounts
 from routes.stream import stream
 from routes.instruments import instruments
+from routes.leaderboard import leaderboard
 
 
 app = FastAPI()
@@ -34,6 +35,7 @@ app.include_router(accounts)
 app.include_router(portfolio)
 app.include_router(stream)
 app.include_router(instruments)
+app.include_router(leaderboard)
 
 
 """Exception handlers"""

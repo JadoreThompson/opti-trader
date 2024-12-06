@@ -684,7 +684,6 @@ class MatchingEngine:
 
         await asyncio.sleep(0.1)
 
-        print('started')
         try:
             while True:
                 try:

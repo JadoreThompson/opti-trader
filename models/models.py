@@ -114,3 +114,14 @@ class GrowthModel(Base):
 class TickerDistribution(Base):
     value: Optional[float] = None
     name: Optional[str] = None
+
+
+class LeaderboardItem(Base):
+    rank: int = Field(gt=0)
+    username: str
+    earnings: float | str = Field(gt=0)
+    
+    
+    @field_validator('earnings')
+    def earnings_validator(cls, earnings: float):
+        return f"${round(earnings, 2)}"
