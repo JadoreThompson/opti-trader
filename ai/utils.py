@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -5,6 +6,7 @@ import matplotlib.pyplot as plt
 # Constants
 # ------------------------------------
 LOOK_BACK = 100
+CURRENT_FOLDER = os.path.dirname(__file__)
 # ------------------------------------
 
 

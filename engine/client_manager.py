@@ -40,7 +40,6 @@ class ClientManager:
         self._initialised: bool = False
         self._active_connections: dict[str, dict[str, any]] = {}
         self._ticker_quotes: dict[str, float] = {'APPL': randint(10, 1000)}
-        print(self._ticker_quotes['APPL'])
         
         self._message_handlers = {
             OrderType.MARKET: self._market_order_handler,

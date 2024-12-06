@@ -11,7 +11,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 
 # Local
-from .utils import build_dataset, LOOK_BACK
+from .utils import CURRENT_FOLDER, LOOK_BACK, build_dataset
 
 
 def plot_price():
@@ -19,8 +19,7 @@ def plot_price():
     plt.show()
 
 tf.random.set_seed(7)
-print(tf.config.list_physical_devices('GPU'))
-print('^^^^^')
+
 dataset = 'datasets/market_data.csv'
 scaler = MinMaxScaler(feature_range=(0, 1))
 PRICE_COL = 'price'
@@ -38,14 +37,16 @@ testX, testY = build_dataset(test, LOOK_BACK)
 
 # Model
 with tf.device('/GPU:0'):
+    # Initialisation
     model = Sequential()
     model.add(LSTM(LOOK_BACK, input_shape=(LOOK_BACK, 1), return_sequences=True))
     model.add(LSTM(int(LOOK_BACK * 1.2)))
     model.add(Dense(1))
     
     model.compile(loss='mean_squared_error', optimizer='adam')
-    model.fit(trainX, trainY, epochs=1, batch_size=64, verbose=2)
+    model.fit(trainX, trainY, epochs=500, batch_size=64, verbose=2)
     
+    # Predictions
     train_preds = model.predict(trainX)
     test_preds = model.predict(testX)
     
@@ -53,15 +54,9 @@ with tf.device('/GPU:0'):
     print("Normalised RMSE: ", round((np.sqrt(eval_pred) / (max(df[PRICE_COL]) - min(df[PRICE_COL]))) * 100), 4)
     
     print('Saving Model...')
-    model.save('./models/pred_3.keras')
-    print('Model saved (+_+)')
+    model.save(CURRENT_FOLDER + '/models/pred_3.keras')
+    print('Model saved (+_+) >> ', CURRENT_FOLDER + '/models/pred_3.keras')
     
-    
-print(test_preds.shape)
-print(train_preds.shape)
-    
-
-
 
 def plot_train_test(time_steps, dataset, train_preds, test_preds):
     plt.plot(dataset, label='Actual Price')

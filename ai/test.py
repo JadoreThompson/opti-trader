@@ -13,7 +13,7 @@ import pandas as pd
 from tqdm import tqdm
 
 # Local
-from .utils import LOOK_BACK, build_dataset, normalise
+from .utils import CURRENT_FOLDER, LOOK_BACK, build_dataset, normalise
 
 tqdm.pandas()
 load_dotenv()
@@ -21,14 +21,12 @@ load_dotenv()
 # Constants
 # ^^^^^^
 JWT_TOKEN = os.getenv('JWT_TOKEN')
-
-CURRENT_FOLDER = os.path.dirname(__file__)
 DATASET_FILENAME = 'datasets/market_data.csv'
 PRICE_COL = 'price'
 
 SCALER = MinMaxScaler(feature_range=(0, 1))
-MODEL_FILENAMAE = 'models/pred_3.keras'
-MODEL = tf.keras.models.load_model(CURRENT_FOLDER + f'/{MODEL_FILENAMAE}')
+MODEL_FILENAME = 'models/pred_7.keras'
+MODEL = tf.keras.models.load_model(CURRENT_FOLDER + f'/{MODEL_FILENAME}')
 
 
 def download_data() -> None:
@@ -41,22 +39,17 @@ def download_data() -> None:
 
 # Testing
 # ^^^^^^
-
-# download_data()
-
 df = pd.read_csv(CURRENT_FOLDER + f'/{DATASET_FILENAME}')
 df[PRICE_COL] = df[PRICE_COL].astype(float)
-scaled_price, _ = build_dataset(dataset=SCALER.fit_transform(df[[PRICE_COL]]), look_back=80)
+scaled_price, _ = build_dataset(dataset=SCALER.fit_transform(df[[PRICE_COL]]), look_back=LOOK_BACK)
 
 preds = MODEL.predict(scaled_price)
 normalied_preds = normalise(arr=preds, scaler=SCALER)
 
-df = df
-preds = [None for _ in range(80)]
+preds = [None for _ in range(LOOK_BACK)]
 preds.extend(normalied_preds)
-print('Length of preds: ', len(preds))
 df['predictions'] = preds
-print(df.head())
+
 
 # Plot
 # ^^^^^^
