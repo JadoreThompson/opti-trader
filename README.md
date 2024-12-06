@@ -6,6 +6,27 @@ Postgres functions power the `db_listener` module, updating an in-memory cache o
 
 Following an event-driven architecture, Redis Pub/Sub is used to broadcast updates such as order fills, closures, partial fills, and other notifications that active users need to receive.
 
+**Postgres Function**
+
+```sql
+-- Function for publishing messages upon order update and insertion
+CREATE OR REPLACE FUNCTION notify_order_change() 
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify(
+        'order_change', 
+        json_build_object('user_id', NEW.user_id)::text
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+	
+-- Applying function as trigger
+CREATE OR REPLACE TRIGGER order_update BEFORE INSERT OR UPDATE OR DELETE ON orders
+	FOR EACH ROW EXECUTE PROCEDURE notify_order_change();
+```
+
 ## Prerequisites
 
 - Python 3.12
