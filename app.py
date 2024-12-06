@@ -6,13 +6,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 # Local
-import config
 from exceptions import DoesNotExist, InvalidError, DuplicateError, InvalidAction
 from middleware import RateLimitMiddleware
 from routes.portfolio import portfolio
 from routes.accounts import accounts
 from routes.stream import stream
-from routes.instruments import instrument
+from routes.instruments import instruments
 
 
 app = FastAPI()
@@ -34,7 +33,8 @@ app.add_middleware(RateLimitMiddleware)
 app.include_router(accounts)
 app.include_router(portfolio)
 app.include_router(stream)
-app.include_router(instrument)
+app.include_router(instruments)
+
 
 """Exception handlers"""
 @app.exception_handler(DoesNotExist)
@@ -69,10 +69,11 @@ def db_listener_wrapper() -> None:
     asyncio.run(db_listener())
 
 def uvicorn_wrapper() -> None:
-    uvicorn.run("app:app", port=8000, host='0.0.0.0')
+    uvicorn.run("app:app", port=8000, host='0.0.0.0', ws_ping_interval=3000.0, ws_ping_timeout=100.0)
     
 
 if __name__ == "__main__":
+    import config, engine
     import uvicorn
     import threading
     import sys

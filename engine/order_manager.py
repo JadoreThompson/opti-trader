@@ -6,10 +6,10 @@ from sqlalchemy import update
 
 # Local
 from db_models import Orders
-from engine._order import _Order
+from engine.order import _Order
 from exceptions import DoesNotExist
 from utils.db import get_db_session
-from .config import ASKS, BIDS
+from .config import ASKS
 
 
 class OrderManager:

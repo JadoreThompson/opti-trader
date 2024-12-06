@@ -92,7 +92,7 @@ class LimitOrder(BaseOrder):
         """
         stop_loss = values.data.get('stop_loss', None)
         take_profit = values.data.get('take_profit', None)
-        print(stop_loss, take_profit)
+        
         if stop_loss:
             if stop_loss.price >= limit_price:
                 raise ValueError('Stop Loss must be greater than limit price')

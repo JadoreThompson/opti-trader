@@ -34,7 +34,6 @@ REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
 REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=redis_host)
 
 
-# print("The DB Host ")
 # DB
 DB_URL = \
     f"postgresql+asyncpg://{os.getenv("DB_USER")}:{quote(os.getenv('DB_PASSWORD'))}\

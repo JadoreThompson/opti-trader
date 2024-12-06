@@ -4,7 +4,7 @@ from sqlalchemy import insert
 from config import PH
 from db_models import Users
 from exceptions import DuplicateError, DoesNotExist, InvalidError
-from models.matching_engine_models import User
+from models.socket_models import User
 from utils.auth import check_user_exists, create_jwt_token
 from utils.db import get_db_session
 

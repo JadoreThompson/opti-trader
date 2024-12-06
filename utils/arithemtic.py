@@ -246,7 +246,3 @@ async def get_quantitative_metrics(
         quant_metrics_map['treynor'] = 0.0
     return quant_metrics_map
     
-
-if __name__ == "__main__":
-    result = asyncio.run(sharpe([1]))
-    print(result)

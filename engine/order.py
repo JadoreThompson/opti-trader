@@ -1,3 +1,4 @@
+from collections import deque
 import json, asyncio
 from datetime import datetime
 from enums import _OrderType, OrderStatus
@@ -116,12 +117,12 @@ class BidOrder(_Order):
         
         if take_profit_price:
             self._take_profit_order = AskOrder(self.data, _OrderType.TAKE_PROFIT_ORDER, parent=self)
-            ASKS[ticker].setdefault(take_profit_price, [])
+            # ASKS[ticker].setdefault(take_profit_price, deque())
             ASKS[ticker][take_profit_price].append(self._take_profit_order)
         
         if stop_loss_price:
             self._stop_loss_order = AskOrder(self.data, _OrderType.STOP_LOSS_ORDER, parent=self)            
-            ASKS[ticker].setdefault(stop_loss_price, [])
+            # ASKS[ticker].setdefault(stop_loss_price, deque())
             ASKS[ticker][stop_loss_price].append(self._stop_loss_order)
 
 

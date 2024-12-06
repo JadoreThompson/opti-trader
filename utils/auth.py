@@ -17,7 +17,7 @@ from fastapi.security import OAuth2PasswordBearer
 from config import PH
 from db_models import Users
 from exceptions import DoesNotExist, InvalidError, InvalidAction
-from models.matching_engine_models import User
+from models.socket_models import User
 from utils.db import get_db_session
 
 
