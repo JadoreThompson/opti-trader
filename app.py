@@ -48,7 +48,7 @@ async def does_not_exist_handler(r: Request, e: DoesNotExist):
 
 @app.exception_handler(InvalidError)
 async def does_not_exist_handler(r: Request, e: InvalidError):
-    return JSONResponse(status_code=400, content={'error': e.message})
+    return JSONResponse(status_code=401, content={'error': e.message})
 
 
 @app.exception_handler(DuplicateError)

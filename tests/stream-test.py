@@ -40,11 +40,11 @@ async def generate_order_requests(quantity: int = 10) -> list:
                 quantity=random.randint(1, 50),
             ),
             
-            socket_models.LimitOrder(
-                ticker='APPL',
-                quantity=random.randint(1, 50),
-                limit_price=random.choice([n for n in range(20, 1000, 10)])
-            )
+            # socket_models.LimitOrder(
+            #     ticker='APPL',
+            #     quantity=random.randint(1, 50),
+            #     limit_price=random.choice([n for n in range(20, 1000, 10)])
+            # )
         ])
 
         order_type = {
@@ -69,7 +69,7 @@ import json
 async def test_create_user():
     async with get_db_session() as sess:
         pw = fkr.pystr()
-        creds = {'email': fkr.email(), 'password': pw, 'username': fkr.first_name(), 'visible': random.choice([True, False])}
+        creds = {'email': fkr.email(), 'password': pw, 'username': fkr.last_name(), 'visible': random.choice([True, False])}
         # with open('myfile.txt', 'w') as f:
         #     f.write(f'Password: {pw}\n')
         #     f.write(f'{creds}')
@@ -110,7 +110,9 @@ async def test_socket(
             async with websockets.connect(SOCKET_URL) as socket:
                 await socket.send(json.dumps({'token': token}))
                 m = await socket.recv()
-                print('Signing Message: ', m)
+                
+                if 'name' in kwargs:
+                    print(f'[{kwargs['name']}]: ', m)
                 
                 while i < len(orders):
                     await socket.send(json.dumps(orders[i].model_dump()))

@@ -49,8 +49,8 @@ def verify_jwt_token_http(token: str = Depends(oauth2_scheme)) -> str:
     except InvalidTokenError:
         raise InvalidAction("User unauthorised")
     
-    except Exception:
-        print('Chicken noode lsoup')
+    except Exception as e:
+        print('verify jwt http: ', type(e), str(e))
 
 
 def verify_jwt_token_ws(token: str) -> str:
@@ -80,6 +80,7 @@ async def check_user_exists(user: _User) -> Users:
             if not existing_user:
                 raise DoesNotExist("User")
 
+            print(existing_user.password, user.password)
             if PH.verify(existing_user.password, user.password):
                 return existing_user
     except argon2.exceptions.InvalidHashError:
@@ -90,23 +91,3 @@ async def check_user_exists(user: _User) -> Users:
         
     except Exception as e:
         print("Error in check user exists: ", type(e), str(e))
-
-
-async def verify_api_key(request: Request) -> Users:
-    """
-    Verifies that the user_id being passed in the path
-
-    Args:
-        request (Request): _description_
-
-    Returns:
-        UUID: _description_
-    """
-    async with get_db_session() as session:
-        result = await session.execute(
-            select(Users).where(Users.user_id == request.g)
-        )
-        if result:
-            return result.scalar()
-        raise
-    

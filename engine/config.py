@@ -1,5 +1,4 @@
 import os, asyncio, logging
-from ._queue import Queue
 from dotenv import load_dotenv
 from collections import defaultdict, deque
 
@@ -11,7 +10,6 @@ load_dotenv()
 REDIS_HOST = os.getenv('REDIS_HOST')
 
 QUEUE = asyncio.Queue()
-# QUEUE: Queue = Queue()
 
 TICKER = 'APPL'
 

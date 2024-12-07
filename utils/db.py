@@ -52,7 +52,7 @@ def constraints_to_tuple(constraints: dict) -> tuple:
 
 _CACHE = {}
 
-async def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
+def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
     try:    
         if isinstance(channel, list):
             for c in channel:
@@ -63,12 +63,12 @@ async def delete_from_internal_cache(user_id: str | UUID, channel: str | list, *
         pass
     
     
-async def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
+def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
     _CACHE.setdefault(user_id, {})    
     _CACHE[user_id][channel] = value
     
 
-async def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
+def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
     try:
         return _CACHE[user_id][channel]
     except KeyError:
@@ -83,7 +83,7 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
         constraints (dict)
     """ 
     key = kwargs.get('order_status', None) or 'all'
-    existing_data = await retrieve_from_internal_cache(user_id, 'orders')
+    existing_data = retrieve_from_internal_cache(user_id, 'orders')
     if existing_data:
         if key in existing_data:
             return existing_data[key]
@@ -98,7 +98,7 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
         results = await session.execute(query.limit(1000))
     
     order_list = [vars(order) for order in results.scalars().all()]
-    asyncio.create_task(add_to_internal_cache(user_id, 'orders', {key: order_list}))
+    add_to_internal_cache(user_id, 'orders', {key: order_list})
     return order_list
 
 
@@ -109,7 +109,7 @@ async def get_active_orders(user_id: str) -> list[dict]:
     Args:
         constraints (dict)
     """
-    existing_data = await retrieve_from_internal_cache(user_id, 'active_orders')
+    existing_data = retrieve_from_internal_cache(user_id, 'active_orders')
     if existing_data:
         return existing_data
     
@@ -129,8 +129,7 @@ async def get_active_orders(user_id: str) -> list[dict]:
             for order in results.scalars().all()
         ]
         
-        asyncio.create_task(add_to_internal_cache(user_id, 'active_orders', existing_data))
-        
+        add_to_internal_cache(user_id, 'active_orders', existing_data)
         return existing_data
 
 

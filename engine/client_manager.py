@@ -15,7 +15,7 @@ import redis.asyncio.connection
 from sqlalchemy import select
 
 # Local
-from db_models import Orders, Users
+from db_models import Orders, UserWatchlist, Users
 from exceptions import UnauthorisedError, InvalidAction
 from enums import ConsumerMessageStatus, OrderType, OrderStatus
 from models.models import TickerData
@@ -56,9 +56,8 @@ class ClientManager:
                     if isinstance(item, (float, int)):
                         if item != last_price:
                             last_price = item
-                            print('^ Received queue item: ', last_price)
                             asyncio.get_running_loop().create_task(self._process_price(last_price))
-                            
+
                         QUEUE.task_done()    
                 except asyncio.queues.QueueEmpty as e:
                     pass
@@ -83,10 +82,8 @@ class ClientManager:
                         'time': int(datetime.now().timestamp())
                     }
                 }))
-            except KeyError:
+            except (KeyError, RuntimeError, StarletteWebSocketDisconnect):
                 pass
-            except RuntimeError as e:
-                print('Client manager - process price: ', str(e))
             except Exception as e:
                 print('Client manager - ', type(e), str(e))
             finally: 
@@ -94,6 +91,7 @@ class ClientManager:
                 
     async def _listen_to_order_updates(self, user_id: str) -> None:
         try:
+            await asyncio.sleep(0.5)
             async with REDIS_CLIENT.pubsub() as ps:
                 await ps.subscribe(f'trades_{user_id}')
 
@@ -103,9 +101,11 @@ class ClientManager:
                         if message:
                             if user_id in self._active_connections:
                                 socket: WebSocket = self._active_connections[user_id]['socket']
-                                message: str = json.dumps(json.loads(message['data']))
-                                await socket.send_text(message)
-                                
+                                message: str = json.loads(message['data'])
+                                await socket.send_text(json.dumps(message))
+                                await self._send_watchlist_alerts(message=message, user_id=user_id)
+                    except StarletteWebSocketDisconnect:
+                        break
                     except Exception as e:
                         print('listen to order update inner: ', type(e), str(e))
                     finally:
@@ -114,16 +114,40 @@ class ClientManager:
         except Exception as e:
             print('listen to order update: ', type(e), str(e))
             
-    async def cleanup(self, user_id: str) -> None: 
+    async def _send_watchlist_alerts(self, message: dict, user_id: str) -> None:
+        """
+        Sends alerts to all subscribed users
+        Args:
+            message (dict): _description_
+            user_id (str): _description_
+        """        
+        if message['status'] == ConsumerMessageStatus.SUCCESS:        
+            async with get_db_session() as session:
+                r = await session.execute(
+                    select(UserWatchlist)
+                    .where(UserWatchlist.master == user_id)
+                )
+                
+                watchlist = r.all()
+                if not watchlist:
+                    return
+                
+                print(watchlist)
+            
+    def cleanup(self, user_id: str) -> None: 
         if user_id in self._active_connections:
-            self._active_connections[user_id]['listen_order_task'].cancel()
-            del self._active_connections[user_id]
+            try:
+                self._active_connections[user_id]['listen_order_task'].cancel()
+                del self._active_connections[user_id]
+            except Exception as e:
+                print('client manager cleanup: ',type(e), str(e))
         
     async def connect(self, socket: WebSocket) -> None:
         try:
             await socket.accept()
             if not self._initialised:
                 asyncio.create_task(self._listen_to_prices())
+                # self._listen_to_prices()
                 await asyncio.sleep(0.01)
                 self._initialised = True
             
@@ -143,7 +167,6 @@ class ClientManager:
                 'socket': socket,
                 'user': user,
                 'listen_order_task': asyncio.create_task(self._listen_to_order_updates(user_id=user_id)),
-                # 'ping_task': asyncio.create_task(self._ping())
             }
 
             await socket.send_text(json.dumps({
@@ -153,7 +176,9 @@ class ClientManager:
 
             return user_id
         except (KeyError, InvalidAction):
-            return False    
+            return False
+        except StarletteWebSocketDisconnect:
+            raise
         except Exception as e:
             print('receive token: ', type(e), str(e))
     
@@ -203,7 +228,7 @@ class ClientManager:
         except Exception as e:
             print('message handler: ', type(e), str(e))
     
-    async def _validate_tp_sl(self, ticker: str, tp_price: float, sl_price: float) -> bool:
+    def _validate_tp_sl(self, ticker: str, tp_price: float, sl_price: float) -> bool:
         current_price = self._ticker_quotes.get(ticker, None)
 
         try:
@@ -220,7 +245,7 @@ class ClientManager:
             print('validate tp sl: ', type(e), str(e))
         
         
-    async def _validate_balance(self, user_id: str, quantity: int, ticker: str) -> bool:
+    def _validate_balance(self, user_id: str, quantity: int, ticker: str) -> bool:
         user: Users = self._active_connections[user_id]['user']
         purchase_amount: float = self._ticker_quotes[ticker] * quantity
         
@@ -257,14 +282,14 @@ class ClientManager:
         message_dict: dict = message.market_order.model_dump()
                 
         try:
-            if not await self._validate_tp_sl(
+            if not self._validate_tp_sl(
                 tp_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
                 sl_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
                 ticker=message_dict['ticker']
             ): 
                 return
             
-            if await self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker']):
+            if self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker']):
                 return await self._create_order(message_dict, OrderType.MARKET, user_id)
             
         except (InvalidAction, UnauthorisedError):
@@ -277,7 +302,7 @@ class ClientManager:
         message_dict: dict = message.limit_order.model_dump()
         
         try:
-            if not await self._validate_tp_sl(
+            if not self._validate_tp_sl(
                 tp_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
                 sl_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
                 ticker=message_dict['ticker']
@@ -291,7 +316,7 @@ class ClientManager:
                 raise InvalidAction("Limit price is outside of liquidity zone")
             
             
-            if await self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker']):
+            if self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker']):
                 return await self._create_order(message_dict, OrderType.LIMIT, user_id)
             
         except (InvalidAction, UnauthorisedError):

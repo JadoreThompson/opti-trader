@@ -38,7 +38,7 @@ async def register(body: RegisterUser):
 
     except DoesNotExist:
         try:
-            # password = PH.hash(body.password)
+            body.password = PH.hash(body.password)
 
             async with get_db_session() as session:
                 user = await session.execute(
@@ -87,6 +87,9 @@ async def login(body: LoginUser):
             )
     except DoesNotExist as e:
         return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
+    except InvalidError as e:
+        print('Invalid error: ', type(e), str(e))
+        raise
     except Exception as e:
         print("[LOGIN][ERROR] >> ", type(e), str(e))
         raise

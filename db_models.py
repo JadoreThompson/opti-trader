@@ -56,15 +56,12 @@ class Users(Base):
     balance: Mapped[float] = mapped_column(Float, default=100000000, nullable=True)
     api_key: Mapped[str] = mapped_column(String, default=generate_api_key)
     visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     # Relationships
     orders = relationship("Orders", back_populates='users', cascade="all, delete-orphan")
     watchlist_master = relationship("UserWatchlist", back_populates="master_user", cascade="all, delete-orphan", foreign_keys=[UserWatchlist.master])
     watchlist_watcher = relationship("UserWatchlist", back_populates="watcher_user", cascade="all, delete-orphan", foreign_keys=[UserWatchlist.watcher])
-
-    def __init__(**kwargs):
-        kwargs['password'] = hash_pw(kwargs['password'])
-        super().__init__(**kwargs)
 
 
 class Orders(Base):

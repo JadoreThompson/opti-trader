@@ -59,11 +59,11 @@ async def get_quant_metrics_handler(
     if not all_dates:
         all_dates = set([order['created_at'].date() for order in all_orders])    
     
-    monthly_returns: dict = await get_monthly_returns(all_orders, all_dates)
-    _, _, winrate = await get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
-    risk_per_trade = await get_avg_risk_per_trade(all_orders, balance)
+    monthly_returns: dict = get_monthly_returns(all_orders, all_dates)
+    _, _, winrate = get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
+    risk_per_trade = get_avg_risk_per_trade(all_orders, balance)
     
-    data: dict = await get_quantitative_metrics(
+    data: dict = get_quantitative_metrics(
         risk_per_trade=risk_per_trade,
         winrate=winrate,
         monthly_returns=monthly_returns,
@@ -73,28 +73,33 @@ async def get_quant_metrics_handler(
         total_num_trades=total_trades
     )
     
-    more_metrics: dict = {
+    # more_metrics: dict = {
+    #     'ahpr': get_ahpr(all_orders, all_dates, balance),
+    #     'ghpr': get_ghpr([v for _, v in monthly_returns.items()]),
+    # }
+    
+    data.update({
         'ahpr': get_ahpr(all_orders, all_dates, balance),
         'ghpr': get_ghpr([v for _, v in monthly_returns.items()]),
-    }
+    })
     
-    data.update(dict(
-        zip([k for k in more_metrics], await asyncio.gather(*[v for _, v in more_metrics.items()]))
-    ))
+    # data.update(dict(
+    #     zip([k for k in more_metrics], await asyncio.gather(*[v for _, v in more_metrics.items()]))
+    # ))
     
     return data
 
 
 
-async def get_beta(months_ago: int, benchmark_ticker: str, portfolio_returns: list):
+def beta_wrapper(months_ago: int, benchmark_ticker: str, portfolio_returns: list):
     try:
-        benchmark_returns = await get_benchmark_returns(months_ago, benchmark_ticker)
-        return await beta(portfolio_returns, benchmark_returns)
+        benchmark_returns = get_benchmark_returns(months_ago, benchmark_ticker)
+        return beta(portfolio_returns, benchmark_returns)
     except InvalidAction:
         raise
 
 
-async def get_ahpr(
+def get_ahpr(
     orders: list[dict], 
     all_dates: list, 
     balance: float
@@ -126,10 +131,10 @@ async def get_ahpr(
         return 0.0
 
 
-async def get_average_daily_return_and_total_profit_and_winrate(
+def get_average_daily_return_and_total_profit_and_winrate(
     orders: list[dict], 
     all_dates: list
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """
     Returns the return for all orders grouped by date
     
@@ -146,11 +151,6 @@ async def get_average_daily_return_and_total_profit_and_winrate(
     
     for order in orders:        
         try:
-            # start_price = (order.get('filled_price', None) or order.get('price', None))
-            # initial_value = order['quantity'] * start_price
-            # new_value = ((order['close_price'] - start_price) / start_price) + 1
-            
-            # order_return = round((initial_value * new_value) - initial_value, 2)
             realised_pnl = order['realised_pnl']
             date_return[order['created_at'].date()] += realised_pnl
             total_return += realised_pnl
@@ -173,7 +173,7 @@ async def get_average_daily_return_and_total_profit_and_winrate(
     
     
 
-async def get_avg_risk_per_trade(
+def get_avg_risk_per_trade(
     all_orders: list[dict],
     balance: float
 ) -> float:
@@ -241,32 +241,25 @@ async def performance(user_id: str = Depends(verify_jwt_token_http)) -> Performa
         
         all_dates = set(order['created_at'].date() for order in all_orders)
 
-        tasks = [
-            (asyncio.create_task(get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)), ['daily', 'total_profit', 'winrate']),
-            (asyncio.create_task(get_quant_metrics_handler(
-                user_id=user_id, 
-                all_orders=all_orders, 
-                all_dates=all_dates,
-                balance=main_dictionary['balance']
-            )),)  
-        ]
+        quant_data: dict = await get_quant_metrics_handler(
+            user_id=user_id, 
+            all_orders=all_orders, 
+            all_dates=all_dates,
+            balance=main_dictionary['balance']
+        )
         
-        results = await asyncio.gather(*[pair[0] for pair in tasks])
+        main_dictionary.update(
+            dict(zip(
+                ['daily', 'total_profit', 'winrate'], 
+                get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
+            ))
+        )
         
-        for i in range(len(results)):
-            current_result = results[i]
-            
-            if isinstance(current_result, dict):
-                main_dictionary.update(current_result)
-            elif isinstance(current_result, tuple):
-                main_dictionary.update(dict(zip([item for item in tasks[i][1]], [item for item in current_result])))
-            elif isinstance(current_result, float):
-                main_dictionary.update({key: current_result for key in tasks[i][1]})
-            
-    except Exception:
-        traceback.print_exc()
-    finally:
+        main_dictionary.update(quant_data)
         return PerformanceMetrics(**main_dictionary)
+            
+    except Exception as e:
+        print('portfolio/performance/: ', type(e), str(e))
 
 
 @portfolio.get("/quantitative", response_model=QuantitativeMetrics)
@@ -303,7 +296,7 @@ async def growth(
         list
     """    
     
-    existing_data = await retrieve_from_internal_cache(user_id, 'growth')
+    existing_data = retrieve_from_internal_cache(user_id, 'growth')
     try:
         if interval in existing_data:
             return existing_data[interval]
@@ -357,7 +350,7 @@ async def growth(
     
     return_list.sort(key= lambda item: item['time'])
     return_list = [GrowthModel(**item) for item in return_list if return_list.count(item) == 1]
-    asyncio.create_task(add_to_internal_cache(user_id, 'growth', {interval: return_list}))
+    add_to_internal_cache(user_id, 'growth', {interval: return_list})
     return return_list
     
 

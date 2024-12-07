@@ -18,7 +18,7 @@ class DBListener:
                 self.channels.add(channel)
                 
         
-    async def handler(self, conn, pid, channel, payload) -> None:
+    def handler(self, conn, pid, channel, payload) -> None:
         if isinstance(payload, str):
             payload = json.loads(payload)
         
@@ -31,7 +31,7 @@ class DBListener:
             try:
                 user_id = self.queue.get_nowait()            
                 if user_id:
-                    await delete_from_internal_cache(user_id, list(self.channels))
+                    delete_from_internal_cache(user_id, list(self.channels))
                     self.queue.task_done()
             except asyncio.queues.QueueEmpty:
                 pass

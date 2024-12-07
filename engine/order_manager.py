@@ -21,17 +21,17 @@ class OrderManager:
         TP = 1
         SL = 2
     
-    async def _append(self, order: _Order) -> None:
+    def _append(self, order: _Order) -> None:
         self._orders[order.data['order_id']] = order
         
-    async def append_entry(self, order: _Order):        
-        await self._append(order=order)
+    def append_entry(self, order: _Order):        
+        self._append(order=order)
     
-    async def append_tp(self, order: _Order):
-        await self._append(order, "OrderManager._Keys.TP")
+    def append_tp(self, order: _Order):
+        self._append(order, "OrderManager._Keys.TP")
         
-    async def append_sl(self, order: _Order):
-        await self._append(order, "OrderManager._Keys.SL")
+    def append_sl(self, order: _Order):
+        self._append(order, "OrderManager._Keys.SL")
     
     def _retrieve(self, order_id: str) -> _Order:
         try:
@@ -62,7 +62,7 @@ class OrderManager:
                 finally:
                     await asyncio.sleep(0.1)
     
-    async def alter_tp_sl(
+    def alter_tp_sl(
         self, 
         order_id: str, 
         new_take_profit: float = None, 

@@ -1,5 +1,5 @@
+import asyncio, json, random, redis, faker, logging, time
 from collections import deque
-import asyncio, json, random, redis, faker, logging
 from uuid import UUID
 
 from datetime import datetime
@@ -43,7 +43,7 @@ class MatchingEngine:
         }
         
 
-    async def _configure_bids_asks(self, quantity: int = 100, divider: int = 5) -> None:
+    def _configure_bids_asks(self, quantity: int = 100, divider: int = 5) -> None:
         for i in range(quantity):
             order = BidOrder(
                 {
@@ -85,15 +85,17 @@ class MatchingEngine:
         """
         try:
             await asyncio.sleep(0.1)
-            await self._configure_bids_asks(quantity=100, divider=5)
+            self._configure_bids_asks(quantity=1000, divider=5)
             
-            await asyncio.sleep(0)
-            logger.info('Listening!')
+            logger.info('Matching Engine booted up successfully!')
             await asyncio.gather(*[self._listen(), self._watch_price()])
         except Exception as e:
             print('engine main', type(e), str(e))
         
     async def _listen(self) -> None:
+        """
+        Perpetually queries the queue for any incoming orders
+        """        
         try:
             while True:
                 try:
@@ -104,7 +106,6 @@ class MatchingEngine:
                         await asyncio.sleep(0.01)
                         QUEUE.task_done()
                     
-                    await asyncio.sleep(0.01)
                 except asyncio.queues.QueueEmpty:
                     pass
                 except Exception as e:
@@ -118,7 +119,9 @@ class MatchingEngine:
 
     async def _handle_incoming_message(self, message: dict):        
         try:
+            start = time.time()
             await self._handlers[message['type']](data=message, channel=f"trades_{message['user_id']}")
+            print('Time take: ', time.time() - start)
         except Exception as e:
             logger.error(f'handle ncomign message {type(e)} - {str(e)}')
         
@@ -153,7 +156,7 @@ class MatchingEngine:
         await asyncio.sleep(0.01)
         try:       
             order = BidOrder(data, _OrderType.MARKET_ORDER)
-            result: tuple = await self.match_bid_order(main_order=order, ticker=order.data['ticker'])        
+            result: tuple = self.match_bid_order(main_order=order, ticker=order.data['ticker'])        
 
             async def not_filled(**kwargs):
                 return
@@ -181,6 +184,7 @@ class MatchingEngine:
                     order.standing_quantity = data['quantity']
                                         
                     asyncio.create_task(self._order_manager.batch_update([data]))
+                    await asyncio.sleep(0)
                     self._current_price.append(result[1])                    
                 except Exception as e:
                     print('fill func, handle market', type(e), str(e))
@@ -189,9 +193,8 @@ class MatchingEngine:
             # Sending to the order manager for future reference
             await {0: not_filled, 1: partial_fill, 2: filled}[result[0]](result=result, data=data, order=order)
      
-            await asyncio.gather(*[
-                self._order_manager.append_entry(order),
-                self._publish_update_to_client(**{
+            self._order_manager.append_entry(order),
+            await self._publish_update_to_client(**{
                     0: {
                         "channel": channel,
                         "message": {
@@ -227,12 +230,11 @@ class MatchingEngine:
                         })
                     }
                 }[result[0]])
-            ]) 
         except Exception as e:
             print(f'handle markt order -> {type(e)} - {str(e)}')
             logger.error(f'{type(e)} - {str(e)}')
     
-    async def find_ask_price_level(
+    def find_ask_price_level(
         self,
         bid_price: float,
         ticker: str,
@@ -273,7 +275,7 @@ class MatchingEngine:
                 return None
         return None
     
-    async def match_bid_order(
+    def match_bid_order(
         self, 
         ticker: str,
         main_order: _Order = None,
@@ -298,7 +300,7 @@ class MatchingEngine:
             if not bid_price:
                 bid_price = main_order.data["price"]
                 
-            ask_price = await self.find_ask_price_level(bid_price, ticker=ticker)
+            ask_price = self.find_ask_price_level(bid_price, ticker=ticker)
             if not ask_price:
                 return (0, )
 
@@ -345,7 +347,7 @@ class MatchingEngine:
 
             if attempts < 20:
                 attempts += 1
-                return await self.match_bid_order(
+                return self.match_bid_order(
                     ticker,
                     main_order,
                     bid_price,
@@ -370,21 +372,19 @@ class MatchingEngine:
             order = BidOrder(data, _OrderType.LIMIT_ORDER)
             BIDS[data['ticker']][data['limit_price']].append(order)
             
-            await asyncio.gather(*[
-                self._order_manager.append_entry(order),
-                self._publish_update_to_client(
-                    channel=channel,
-                    message=json.dumps({
-                        'status': 'success',
-                        'message': 'Limit order created successfully',
-                        'order_id': data['order_id'],
-                        "details": {
-                            k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
-                            for k, v in Order(**data).model_dump().items()
-                        }
-                    })
-                )
-            ])
+            self._order_manager.append_entry(order)
+            await self._publish_update_to_client(
+                channel=channel,
+                message=json.dumps({
+                    'status': 'success',
+                    'message': 'Limit order created successfully',
+                    'order_id': data['order_id'],
+                    "details": {
+                        k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
+                        for k, v in Order(**data).model_dump().items()
+                    }
+                })
+            )
         except Exception as e:
             print('Limit handler => ', type(e), str(e))
             logger.error(str(e))
@@ -440,7 +440,7 @@ class MatchingEngine:
             data (dict): 
             channel (str): 
         """      
-        result: tuple = await self.match_ask_order(
+        result: tuple = self.match_ask_order(
             ticker=order_obj.data['ticker'],
             main_order=order_obj,
             ask_price=price,
@@ -519,7 +519,7 @@ class MatchingEngine:
 
         return return_value
     
-    async def find_bid_price_level(
+    def find_bid_price_level(
       self,
       ask_price: float,
       ticker: str,
@@ -559,7 +559,7 @@ class MatchingEngine:
                 return None
         return None
     
-    async def match_ask_order(
+    def match_ask_order(
         self, 
         ticker: str,
         main_order: Order = None,
@@ -585,7 +585,7 @@ class MatchingEngine:
             (2, bid_price): Order was successfully filled
         """        
         
-        bid_price = await self.find_bid_price_level(ask_price, ticker=ticker)
+        bid_price = self.find_bid_price_level(ask_price, ticker=ticker)
         if not bid_price:
             return (0, )
         
@@ -620,7 +620,7 @@ class MatchingEngine:
 
         if attempts < 20:
             attempts += 1
-            return await self.match_ask_order(
+            return self.match_ask_order(
                 ticker,
                 main_order,
                 bid_price,
@@ -644,7 +644,7 @@ class MatchingEngine:
         )
         
     async def _handle_modify_order(self, data: dict, channel: str) -> None:
-        await self._order_manager.alter_tp_sl(data['order_id'], data['take_profit'], data['stop_loss'])
+        self._order_manager.alter_tp_sl(data['order_id'], data['take_profit'], data['stop_loss'])
         await self._publish_update_to_client(**{
             'channel': channel,
             'message': {
@@ -674,7 +674,6 @@ class MatchingEngine:
             await session.commit()
 
     async def _watch_price(self) -> None:
-
         async def _broadcast_price_change(new_price: float):
             try:
                 QUEUE.put_nowait(new_price)
