@@ -103,7 +103,8 @@ class ClientManager:
                                 socket: WebSocket = self._active_connections[user_id]['socket']
                                 message: str = json.loads(message['data'])
                                 await socket.send_text(json.dumps(message))
-                                await self._send_watchlist_alerts(message=message, user_id=user_id)
+                                asyncio.create_task(self._send_watchlist_alerts(message=message, user_id=user_id))
+                                await asyncio.sleep(0.1)
                     except StarletteWebSocketDisconnect:
                         break
                     except Exception as e:
@@ -122,16 +123,31 @@ class ClientManager:
             user_id (str): _description_
         """        
         if message['status'] == ConsumerMessageStatus.SUCCESS:        
+            query = select(UserWatchlist.watcher).where(UserWatchlist.master == user_id)
+            
+            if message['internal'] == OrderType.LIMIT:
+                query = query.where(UserWatchlist.limit_orders == True)
+            elif message['internal'] == OrderType.MARKET:
+                query = query.where(UserWatchlist.market_orders == True)
+            
             async with get_db_session() as session:
-                r = await session.execute(
-                    select(UserWatchlist)
-                    .where(UserWatchlist.master == user_id)
-                )
-                
+                r = await session.execute(query)
                 watchlist = r.all()
+                
                 if not watchlist:
                     return
-                print(watchlist)
+                
+                # In production send out email notifcations too
+                for item in watchlist:
+                    try:
+                        await self._active_connections[str(item[0])]['socket'].send_text(json.dumps({
+                            'status': ConsumerMessageStatus.NOTIFICATION,
+                            'message': f'{self._active_connections[str(item[0])]['user'].username} opened an order at {message['details']['filled_price']}'
+                        }))
+                    except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
+                        print('send watchlist alert', type(e), str(e))
+                        continue
+                
             
     def cleanup(self, user_id: str) -> None: 
         if user_id in self._active_connections:
@@ -146,7 +162,6 @@ class ClientManager:
             await socket.accept()
             if not self._initialised:
                 asyncio.create_task(self._listen_to_prices())
-                # self._listen_to_prices()
                 await asyncio.sleep(0.01)
                 self._initialised = True
             

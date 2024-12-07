@@ -423,24 +423,24 @@ async def copy_trades(body: CopyTradeRequest, user_id: str = Depends(verify_jwt_
                 )
             )
             
-            try:
-                m_user = r.first()[0]
-            except TypeError:
+            m_user = r.first()
+            if m_user is None:
                 raise InvalidAction("User doesn't exist")
             
             existing_entry = await session.execute(
                 select(UserWatchlist)
                 .where(
-                    (UserWatchlist.master == m_user)
+                    (UserWatchlist.master == m_user[0])
                     & (UserWatchlist.watcher == user_id)
                 )
             )
             
-            try:
-                existing_entry = existing_entry.first()[0]
+            existing_entry = existing_entry.first()
+            if existing_entry is not None:
+                existing_entry = existing_entry[0]
                 existing_entry.limit_orders = body.limit_orders
                 existing_entry.market_orders = body.market_orders
-            except TypeError:
+            else:
                 await session.execute(
                     insert(UserWatchlist)
                     .values(
@@ -451,6 +451,25 @@ async def copy_trades(body: CopyTradeRequest, user_id: str = Depends(verify_jwt_
                     )
                 )
             
+            # try:
+            #     existing_entry = existing_entry.first()[0]
+            #     existing_entry.limit_orders = body.limit_orders
+            #     existing_entry.market_orders = body.market_orders
+            # except TypeError:
+            #     await session.execute(
+            #         insert(UserWatchlist)
+            #         .values(
+            #             master=m_user[0], 
+            #             watcher=UUID(f'{{{user_id}}}'),
+            #             limit_orders=body.limit_orders,
+            #             market_orders=body.market_orders 
+            #         )
+            #     )
+            #     print('in here')
+            #     pass
+            # except Exception as e:
+            #     print(type(e), str(e))
+                
             await session.commit()
     except InvalidAction:
         raise

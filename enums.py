@@ -41,6 +41,7 @@ class ConsumerMessageStatus(str, Enum):
     UPDATE = 'update'
     ERROR = 'error'
     PRICE_UPDATE = 'price'
+    NOTIFICATION = 'notification'
     
     
 class IntervalTypes(str, Enum):

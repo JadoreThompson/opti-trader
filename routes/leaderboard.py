@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import List
 
 # Local
+from enums import OrderStatus
 from utils.auth import verify_jwt_token_http
 from utils.db import get_db_session
 from db_models import Orders, Users
@@ -33,7 +34,8 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List
         
         if leaderboard_cache:
             if td.weekday() != 4 or leaderboard_cache['date'] == td.date():
-                return leaderboard_cache['data']
+                if leaderboard_cache['data']:
+                    return leaderboard_cache['data']
         
         async with get_db_session() as session:
             r = await session.execute(
@@ -44,10 +46,12 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List
                 )
             )
             all_orders: list[Orders] = r.scalars().all()
-
             users = await session.execute(
                 select(Users.user_id, Users.username)
-                .where(Users.user_id.in_(set([order.user_id for order in all_orders])))
+                .where(
+                    (Users.user_id.in_(set([order.user_id for order in all_orders])))
+                    & (Users.visible == True)
+                )
             )
 
             leaderboard: dict = {
@@ -71,6 +75,7 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List
             ) 
             for i in range(len(leaderboard_items[:10]))
         ]
+        print(leaderboard_cache['data'])
         return leaderboard_cache['data']
 
     except Exception as e:
