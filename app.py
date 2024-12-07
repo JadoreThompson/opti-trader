@@ -4,6 +4,8 @@ from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 # Local
 from exceptions import DoesNotExist, InvalidError, DuplicateError, InvalidAction
@@ -57,6 +59,11 @@ async def does_not_exist_handler(r: Request, e: DuplicateError):
 @app.exception_handler(InvalidAction)
 async def invalid_action_handler(r: Request, e: InvalidAction):
     return JSONResponse(status_code=401, content={'error': e.message})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_handler(r: Request, e: RequestValidationError):
+    return JSONResponse(status_code=400, content={'error': e._errors[0]['msg']})
 
     
 import asyncio

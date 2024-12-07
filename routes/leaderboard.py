@@ -46,7 +46,7 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List
             all_orders: list[Orders] = r.scalars().all()
 
             users = await session.execute(
-                select(Users.user_id, Users.email)
+                select(Users.user_id, Users.username)
                 .where(Users.user_id.in_(set([order.user_id for order in all_orders])))
             )
 

@@ -13,12 +13,6 @@ class Base(BaseModel):
         use_enum_values = True
 
 
-class User(Base):
-    """Represents a user with email and password attributes."""
-    email: str
-    password: str
-
-
 class TakeProfitOrder(Base):
     price: float = Field(gt=0)
 

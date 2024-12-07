@@ -1,11 +1,12 @@
 import  traceback
 import asyncio
-from collections import defaultdict
 from datetime import datetime, timedelta
 from uuid import UUID
 from typing import List, Optional
-from fastapi.responses import JSONResponse
-from sqlalchemy import select
+
+# SA
+from sqlalchemy import select, insert
+from sqlalchemy.exc import IntegrityError
 
 # Local
 from utils.arithemtic import get_quantitative_metrics, beta, get_benchmark_returns, get_ghpr
@@ -13,12 +14,13 @@ from utils.db import add_to_internal_cache, get_active_orders, get_orders, get_d
 from utils.auth import verify_jwt_token_http
 from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus, GrowthInterval
-from exceptions import InvalidAction
-from db_models import Users, Orders
-from models.models import GrowthModel, Order, OrderRequest, PerformanceMetrics, QuantitativeMetrics, TickerDistribution
+from exceptions import DuplicateError, InvalidAction
+from db_models import UserWatchlist, Users, Orders
+from models.models import CopyTradeRequest, GrowthModel, Order, PerformanceMetrics, QuantitativeMetrics, TickerDistribution
 
 # FA
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 
 async def get_quant_metrics_handler(
@@ -399,3 +401,68 @@ async def wins_losses_weekday(user_id: str = Depends(verify_jwt_token_http)):
             wins[order['created_at'].weekday()] += 1
     
     return JSONResponse(status_code=200, content={'wins': wins, 'losses': losses})
+
+
+@portfolio.post("/copy")
+async def copy_trades(body: CopyTradeRequest, user_id: str = Depends(verify_jwt_token_http)):
+    """
+    Enters a record into DB
+    
+    Args:
+        body (CopyTradeRequest):
+        user_id (str, optional): Defaults to Depends(verify_jwt_token_http).
+
+    Raises:
+        InvalidAction: _description_
+        DuplicateError: _description_
+    
+    Returns:
+        None: body.username is invalid. This may be due to the user not existing or more than likely
+        the target user has visible set to False
+    """    
+    try:
+        async with get_db_session() as session:
+            r = await session.execute(
+                select(Users.user_id)
+                .where(
+                    (Users.username == body.username)
+                    & (Users.visible == True)
+                )
+            )
+            
+            try:
+                m_user = r.first()[0]
+            except TypeError:
+                raise InvalidAction("User doesn't exist")
+            
+            existing_entry = await session.execute(
+                select(UserWatchlist)
+                .where(
+                    (UserWatchlist.master == m_user)
+                    & (UserWatchlist.watcher == user_id)
+                )
+            )
+            
+            try:
+                existing_entry = existing_entry.first()[0]
+                existing_entry.limit_orders = body.limit_orders
+                existing_entry.market_orders = body.market_orders
+            except TypeError:
+                await session.execute(
+                    insert(UserWatchlist)
+                    .values(
+                        master=m_user[0], 
+                        watcher=UUID(f'{{{user_id}}}'),
+                        limit_orders=body.limit_orders,
+                        market_orders=body.market_orders 
+                    )
+                )
+            
+            await session.commit()
+    except InvalidAction:
+        raise
+    except IntegrityError:
+        raise DuplicateError(f"Already subcribed to {body.username}")
+    except Exception as e:
+        print('copy trades: ', type(e), str(e))
+        

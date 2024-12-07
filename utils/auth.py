@@ -17,7 +17,7 @@ from fastapi.security import OAuth2PasswordBearer
 from config import PH
 from db_models import Users
 from exceptions import DoesNotExist, InvalidError, InvalidAction
-from models.socket_models import User
+from models.models import _User
 from utils.db import get_db_session
 
 
@@ -61,7 +61,7 @@ def verify_jwt_token_ws(token: str) -> str:
         raise InvalidAction("User unauthorised")
     
 
-async def check_user_exists(user: User) -> Users:
+async def check_user_exists(user: _User) -> Users:
     """
     Checks if the user exists in the database and verifies their credentials.
 
@@ -88,7 +88,7 @@ async def check_user_exists(user: User) -> Users:
     except (DoesNotExist, InvalidError) as e:
         raise
         
-    except Exception:
+    except Exception as e:
         print("Error in check user exists: ", type(e), str(e))
 
 

@@ -359,5 +359,3 @@ class ClientManager:
         })
         return message_dict
     
-
-    

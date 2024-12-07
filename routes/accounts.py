@@ -1,10 +1,11 @@
 from sqlalchemy import insert
+from sqlalchemy.exc import IntegrityError
 
 # Local
 from config import PH
 from db_models import Users
 from exceptions import DuplicateError, DoesNotExist, InvalidError
-from models.socket_models import User
+from models.models import LoginUser, RegisterUser
 from utils.auth import check_user_exists, create_jwt_token
 from utils.db import get_db_session
 
@@ -17,7 +18,7 @@ accounts = APIRouter(prefix="/accounts", tags=['accounts'])
 
 
 @accounts.post("/register")
-async def register(body: User):
+async def register(body: RegisterUser):
     """
     Registers a new user account.
     If the user already exists, raises DuplicateError.
@@ -36,30 +37,36 @@ async def register(body: User):
             raise DuplicateError("An account already exists")
 
     except DoesNotExist:
-        password = PH.hash(body.password)
-        async with get_db_session() as session:
-            user = await session.execute(
-                insert(Users).values(email=body.email, password=password)
-                .returning(Users)
-            )
-            
-            await session.commit()
-            return JSONResponse(
-                status_code=200,
-                content={'token': create_jwt_token({'sub': str(user.scalar().user_id)})}
-            )
+        try:
+            # password = PH.hash(body.password)
 
+            async with get_db_session() as session:
+                user = await session.execute(
+                    insert(Users).values(**vars(body))
+                    .returning(Users)
+                )
+                
+                await session.commit()
+                return JSONResponse(
+                    status_code=200,
+                    content={'token': create_jwt_token({'sub': str(user.scalar().user_id)})}
+                )
+        except IntegrityError as e:
+            raise DuplicateError('User already exists')
+        except Exception as e:
+            print('register inner error: ', type(e), str(e))
+            
     except InvalidError:
         raise InvalidError("User already exists")
-    
+    except DuplicateError:
+        raise
     except Exception as e:
-        print("Register", type(e), str(e))
-        print("-" * 10)
+        print('register outer: ', type(e), str(e))
         raise
 
 
 @accounts.post("/login")
-async def login(body: User):
+async def login(body: LoginUser):
     """
     Authenticates a user account.
     Checks if the user exists and provides access if valid.

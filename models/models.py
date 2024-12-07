@@ -14,13 +14,28 @@ class Base(BaseModel):
         use_enum_values = True
         
 
-class User(Base):
+class UserID(Base):
     user_id: UUID
 
 
-class OrderRequest(User):
+class _User(Base):
+    """Represents a user with email and password attributes."""
+    email: str
+    password: str
+    
+
+class LoginUser(_User):
+    pass
+
+
+class RegisterUser(_User):
+    username: str
+    visible: bool = Field(False, description="Is the user's account visible to other user's for the leaderboard")
+
+
+class OrderRequest(UserID):
     order_status: Optional[OrderStatus] = Field(None, 
-                                                description="The specific order status you want the trades to have")
+                    description="The specific order status you want the trades to have")
     
 
 class QuantitativeMetrics(BaseModel):
@@ -119,9 +134,14 @@ class TickerDistribution(Base):
 class LeaderboardItem(Base):
     rank: int = Field(gt=0)
     username: str
-    earnings: float | str = Field(gt=0)
-    
+    earnings: float | str = Field(gt=0)    
     
     @field_validator('earnings')
     def earnings_validator(cls, earnings: float):
         return f"${round(earnings, 2)}"
+
+
+class CopyTradeRequest(Base):
+    username: str
+    limit_orders: bool = False
+    market_orders: bool = False

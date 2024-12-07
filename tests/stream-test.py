@@ -69,7 +69,7 @@ import json
 async def test_create_user():
     async with get_db_session() as sess:
         pw = fkr.pystr()
-        creds = {'email': fkr.email(), 'password': PH.hash(pw)}
+        creds = {'email': fkr.email(), 'password': pw, 'username': fkr.first_name(), 'visible': random.choice([True, False])}
         # with open('myfile.txt', 'w') as f:
         #     f.write(f'Password: {pw}\n')
         #     f.write(f'{creds}')
