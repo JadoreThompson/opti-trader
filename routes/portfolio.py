@@ -2,7 +2,7 @@ import  traceback
 import asyncio
 from datetime import datetime, timedelta
 from uuid import UUID
-from typing import List, Optional
+from typing import List, Optional, Annotated
 
 # SA
 from sqlalchemy import select, insert
@@ -19,7 +19,7 @@ from db_models import UserWatchlist, Users, Orders
 from models.models import CopyTradeRequest, GrowthModel, Order, PerformanceMetrics, QuantitativeMetrics, TickerDistribution
 
 # FA
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 
@@ -73,20 +73,10 @@ async def get_quant_metrics_handler(
         total_num_trades=total_trades
     )
     
-    # more_metrics: dict = {
-    #     'ahpr': get_ahpr(all_orders, all_dates, balance),
-    #     'ghpr': get_ghpr([v for _, v in monthly_returns.items()]),
-    # }
-    
     data.update({
         'ahpr': get_ahpr(all_orders, all_dates, balance),
         'ghpr': get_ghpr([v for _, v in monthly_returns.items()]),
     })
-    
-    # data.update(dict(
-    #     zip([k for k in more_metrics], await asyncio.gather(*[v for _, v in more_metrics.items()]))
-    # ))
-    
     return data
 
 
@@ -213,13 +203,32 @@ def get_avg_risk_per_trade(
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
 
-@portfolio.get('/orders', response_model=List[Order])
+@portfolio.get('/orders')# , response_model=List[Order]
 async def orders(
+    order_status: Annotated[list[OrderStatus], Query()],
     user_id: str = Depends(verify_jwt_token_http),
-    order_status: Optional[OrderStatus] = None
-) -> list[dict]:
-    return [Order(**order) for order in await get_orders(**locals())]
-
+):
+    existing_data: dict | None = retrieve_from_internal_cache(user_id, 'orders')
+    
+    if existing_data:
+        if tuple(order_status) in existing_data:
+            return existing_data[tuple(order_status)]
+    
+    try:    
+        async with get_db_session() as session:
+            r = await session.execute(
+                select(Orders)
+                .where(
+                    (Orders.user_id == user_id) &
+                    (Orders.order_status.in_(order_status))
+                )
+            )
+            
+            all_orders = [Order(**vars(item)) for item in r.scalars().all()]
+            add_to_internal_cache(user_id=user_id, channel='orders', value={tuple(order_status): all_orders})
+            return all_orders
+    except Exception as e:
+        print('orders: ', type(e), str(e))
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
 async def performance(user_id: str = Depends(verify_jwt_token_http)) -> PerformanceMetrics:
@@ -450,25 +459,6 @@ async def copy_trades(body: CopyTradeRequest, user_id: str = Depends(verify_jwt_
                         market_orders=body.market_orders 
                     )
                 )
-            
-            # try:
-            #     existing_entry = existing_entry.first()[0]
-            #     existing_entry.limit_orders = body.limit_orders
-            #     existing_entry.market_orders = body.market_orders
-            # except TypeError:
-            #     await session.execute(
-            #         insert(UserWatchlist)
-            #         .values(
-            #             master=m_user[0], 
-            #             watcher=UUID(f'{{{user_id}}}'),
-            #             limit_orders=body.limit_orders,
-            #             market_orders=body.market_orders 
-            #         )
-            #     )
-            #     print('in here')
-            #     pass
-            # except Exception as e:
-            #     print(type(e), str(e))
                 
             await session.commit()
     except InvalidAction:
