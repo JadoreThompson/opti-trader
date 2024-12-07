@@ -44,7 +44,8 @@ class ClientManager:
         self._message_handlers = {
             OrderType.MARKET: self._market_order_handler,
             OrderType.LIMIT: self._limit_order_handler,
-            OrderType.CLOSE: self._close_order_handler
+            OrderType.CLOSE: self._close_order_handler,
+            OrderType.MODIFY: self._modify_order_handler,
         }
         
     async def _listen_to_prices(self) -> None:
@@ -145,8 +146,9 @@ class ClientManager:
                             'message': f'{self._active_connections[str(item[0])]['user'].username} opened an order at {message['details']['filled_price']}'
                         }))
                     except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
-                        print('send watchlist alert', type(e), str(e))
                         continue
+                    except Exception as e:
+                        print('send watchlist alert: ', type(e), str(e))
                 
             
     def cleanup(self, user_id: str) -> None: 
