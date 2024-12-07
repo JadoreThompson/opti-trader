@@ -86,7 +86,7 @@ class MatchingEngine:
         """
         try:
             await asyncio.sleep(0.1)
-            self._configure_bids_asks(quantity=1000, divider=5)
+            self._configure_bids_asks(quantity=10000, divider=5)
             
             logger.info('Matching Engine booted up successfully!')
             await asyncio.gather(*[self._listen(), self._watch_price()])
@@ -156,7 +156,8 @@ class MatchingEngine:
         try:       
             order = BidOrder(data, _OrderType.MARKET_ORDER)
             result: tuple = self.match_bid_order(main_order=order, ticker=order.data['ticker'])        
-
+            print(result)
+            
             async def not_filled(**kwargs):
                 return
             
@@ -173,9 +174,9 @@ class MatchingEngine:
                     logger.error(str(e))
         
             async def filled(**kwargs):
-                data = kwargs['data']
-                order = kwargs['order']
-                result = kwargs['result']
+                data: dict = kwargs['data']
+                order: BidOrder = kwargs['order']
+                result: tuple = kwargs['result']
                 
                 try:
                     data["filled_price"] = result[1]

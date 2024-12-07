@@ -51,13 +51,23 @@ class OrderManager:
         """        
         
         # During testing due to the orders only being declared 
-        # in memory this throws a DBAPIError,
+        # in memory this throws a DBAPIError
         async with get_db_session() as session:
             for order in orders:
                 try:
-                    await session.execute(update(Orders),[order])      
+                    # if order['user_id'] == 'b75d3c8f-7459-4456-a195-d3e5d95f74bb':
+                    #     print(order)
+                    # print('^^^^^^^')
+                    if 'type' in order:
+                        del order['type']
+                    await session.execute(update(Orders),[order])
                     await session.commit()
+                    print(order['order_status'])
                 except Exception as e:
+                    print('-' * 10)
+                    print(order['user_id'])
+                    print(order)
+                    print('batch update',type(e), str(e))
                     await session.rollback()
                 finally:
                     await asyncio.sleep(0.1)

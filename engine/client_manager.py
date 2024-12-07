@@ -348,8 +348,7 @@ class ClientManager:
                     (Orders.user_id == user_id) 
                     & (Orders.ticker == message_dict['ticker']) 
                     & (
-                        (Orders.order_status == OrderStatus.FILLED)
-                        |
+                        (Orders.order_status == OrderStatus.FILLED) |
                         (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
                     )
                 )
