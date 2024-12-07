@@ -1,4 +1,5 @@
 import asyncio, json, random, redis, faker, logging, time
+from typing import Optional
 from collections import deque
 from uuid import UUID
 
@@ -119,9 +120,7 @@ class MatchingEngine:
 
     async def _handle_incoming_message(self, message: dict):        
         try:
-            start = time.time()
             await self._handlers[message['type']](data=message, channel=f"trades_{message['user_id']}")
-            print('Time take: ', time.time() - start)
         except Exception as e:
             logger.error(f'handle ncomign message {type(e)} - {str(e)}')
         
@@ -432,13 +431,20 @@ class MatchingEngine:
         channel: str,
         price: float,
         quantity: int
-    ):
+    ) -> bool:
         """
         Handles the creation, submission and calling for the ask order
         to be filled
+        
         Args:
-            data (dict): 
-            channel (str): 
+            order_obj (_Order)
+            channel (str): Channel name for pub/sub publishing
+            price (float) : The requested close price
+            quantity (int): Desired close quantity
+        
+        Returns:
+            True: Order was fully filled
+            False: Order was partially or not filled     
         """      
         result: tuple = self.match_ask_order(
             ticker=order_obj.data['ticker'],
@@ -454,13 +460,13 @@ class MatchingEngine:
             return False
         
         async def fill(**kwargs) -> bool:
-            order: _Order = kwargs['order']
+            order: BidOrder = kwargs['order']
             result: tuple = kwargs['result']
             
             try:
                 open_price = order.data['filled_price']
-                pnl = (price / open_price) * (quantity * open_price)
-                order.data['realised_pnl'] += round(pnl, 2)
+                pnl = (result[1] / open_price) * (quantity * open_price)
+                order.data['realised_pnl'] +=  -1 * (order.position_size - round(pnl, 2))
                 
                 if order.standing_quantity == 0:
                     order.data['close_price'] = result[1]
@@ -566,7 +572,7 @@ class MatchingEngine:
         ask_price: float = None,
         quantity: float = None,
         attempts: float = 0
-    ) -> tuple:
+    ) -> tuple[int, Optional[float]]:
         """
         Recursively calls itself if the quantity
         for the order is partially filled ( > 0). 

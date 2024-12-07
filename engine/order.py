@@ -135,7 +135,8 @@ class BidOrder(_Order):
         self._order_status = self.data['order_status'] = value
         
         if value == OrderStatus.FILLED:
-            self._open_price = self.data['filled_price']            
+            self._open_price = self.data['filled_price']
+            self.position_size = self.data['quantity'] * self.data['filled_price']
             self.place_tp_sl(
                 take_profit_price=self.data['take_profit'], 
                 stop_loss_price=self.data['stop_loss'],

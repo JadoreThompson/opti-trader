@@ -131,7 +131,6 @@ class ClientManager:
                 watchlist = r.all()
                 if not watchlist:
                     return
-                
                 print(watchlist)
             
     def cleanup(self, user_id: str) -> None: 
