@@ -381,25 +381,43 @@ async def growth(
     return return_list
     
 
-@portfolio.get("/distribution", response_model=List[TickerDistribution])
-async def distribution(user_id: str = Depends(verify_jwt_token_http)) -> List[TickerDistribution]:
-        all_orders = await get_active_orders(user_id)
-        ticker_map = {
-            ticker: 0
-            for ticker in 
-            set(order['ticker'] for order in all_orders)
-        }
-        
-        for order in all_orders:
-            price = order['price'] or order['filled_price']
-            ticker_map[order['ticker']] += price * order['quantity']
-        total = sum(ticker_map.values())
-        ticker_map = {
-            k: (v / total)
-            for k, v in ticker_map.items()
-        }
-        
-        return [TickerDistribution(name=key, value=value) for key, value in ticker_map.items()]
+@portfolio.post("/distribution", response_model=List[TickerDistribution])
+async def distribution(
+    user_id: str = Depends(verify_jwt_token_http),
+    body: Optional[Username] = None
+) -> List[TickerDistribution]:
+    
+    if body:
+        try:
+            async with get_db_session() as session:
+                r = await session.execute(
+                    select(Users.user_id)
+                    .where(
+                        (Users.username == body.username) &
+                        (Users.visible == True)
+                    )
+                )
+                user_id = r.first()[0]
+        except TypeError:
+            raise InvalidAction("Account is private")
+    
+    all_orders = await get_active_orders(user_id)
+    ticker_map = {
+        ticker: 0
+        for ticker in 
+        set(order['ticker'] for order in all_orders)
+    }
+    
+    for order in all_orders:
+        price = order['price'] or order['filled_price']
+        ticker_map[order['ticker']] += price * order['quantity']
+    total = sum(ticker_map.values())
+    ticker_map = {
+        k: (v / total)
+        for k, v in ticker_map.items()
+    }
+    
+    return [TickerDistribution(name=key, value=value) for key, value in ticker_map.items()]
     
     
 @portfolio.post('/weekday-results')
