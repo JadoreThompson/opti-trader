@@ -48,6 +48,12 @@ class GrowthBody(Username):
 class OrderRequest(UserID):
     order_status: Optional[OrderStatus] = Field(None, 
                     description="The specific order status you want the trades to have")
+
+
+class QuantitativeMetricsBody(Username):
+    benchmark_ticker: Optional[str] = "^GSPC",
+    months_ago: Optional[int] = 6,
+    total_trades: Optional[int] = 100
     
 
 class QuantitativeMetrics(BaseModel):

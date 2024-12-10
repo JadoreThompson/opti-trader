@@ -16,7 +16,7 @@ from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus, GrowthInterval
 from exceptions import DuplicateError, InvalidAction
 from db_models import UserWatchlist, Users, Orders
-from models.models import CopyTradeRequest, GrowthBody, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetrics, TickerDistribution, Username
+from models.models import CopyTradeRequest, GrowthBody, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetricsBody, QuantitativeMetrics, TickerDistribution, Username
 
 # FA
 from fastapi import APIRouter, Depends, Query
@@ -30,7 +30,8 @@ async def get_quant_metrics_handler(
     total_trades: int = 100,
     all_orders: list[dict] = None,
     balance: float = None,
-    all_dates: set = None
+    all_dates: set = None,
+    **kwargs
 ) -> dict:
     """
     Handles the retrieval of common quantitative metrics
@@ -307,12 +308,10 @@ async def performance(
         print('portfolio/performance/: ', type(e), str(e))
 
 
-@portfolio.get("/quantitative", response_model=QuantitativeMetrics)
+@portfolio.post("/quantitative", response_model=QuantitativeMetrics)
 async def quantitative_metrics(
+    body: Optional[QuantitativeMetricsBody] = None,
     user_id: str = Depends(verify_jwt_token_http),
-    benchmark_ticker: Optional[str] = "^GSPC",
-    months_ago: Optional[int] = 6,
-    total_trades: Optional[int] = 100
 ) -> QuantitativeMetrics:
     """
     Args:
@@ -321,8 +320,27 @@ async def quantitative_metrics(
 
     Returns:
         QuantitativeMetrics()
-    """    
-    data: dict = await get_quant_metrics_handler(**locals())
+    """ 
+    data = {}
+    
+    if body:
+        try:
+            async with get_db_session() as session:
+                r = await session.execute(
+                    select(Users.user_id)
+                    .where(
+                        (Users.username == body.username) &
+                        (Users.visible == True)
+                    )
+                )
+                data['user_id'] = r.first()[0]
+                data.update(body.model_dump())
+        except TypeError:
+            raise InvalidAction("Account is private")
+    else:
+        data.update(QuantitativeMetricsBody().model_dump())
+    
+    data.update(await get_quant_metrics_handler(**locals()))
     return QuantitativeMetrics(**data)
 
 
