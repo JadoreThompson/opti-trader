@@ -16,7 +16,7 @@ from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus, GrowthInterval
 from exceptions import DuplicateError, InvalidAction
 from db_models import UserWatchlist, Users, Orders
-from models.models import CopyTradeRequest, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetrics, TickerDistribution, Username
+from models.models import CopyTradeRequest, GrowthBody, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetrics, TickerDistribution, Username
 
 # FA
 from fastapi import APIRouter, Depends, Query
@@ -248,8 +248,11 @@ async def orders(
         print('orders: ', type(e), str(e))
 
 
-@portfolio.get("/performance", response_model=PerformanceMetrics)
-async def performance(user_id: str = Depends(verify_jwt_token_http)) -> PerformanceMetrics:
+@portfolio.post("/performance", response_model=PerformanceMetrics)
+async def performance(
+    user_id: str = Depends(verify_jwt_token_http),
+    body: Optional[Username] = None,
+) -> PerformanceMetrics:
     """
     Returns performance metrics for the account
 
@@ -259,6 +262,21 @@ async def performance(user_id: str = Depends(verify_jwt_token_http)) -> Performa
     Returns:
         PerformanceMetrics()
     """
+    
+    if body:
+        try:
+            async with get_db_session() as session:
+                r = await session.execute(
+                    select(Users.user_id)
+                    .where(
+                        (Users.username == body.username) &
+                        (Users.visible == True)
+                    )
+                )
+                user_id = r.first()[0]
+        except TypeError:
+            raise InvalidAction("Account is private")
+    
     main_dictionary = {}
     try:
         main_dictionary['balance'], all_orders = await asyncio.gather(*[
@@ -308,11 +326,11 @@ async def quantitative_metrics(
     return QuantitativeMetrics(**data)
 
 
-@portfolio.get("/growth")
+@portfolio.post("/growth", response_model=List[GrowthModel])
 async def growth(
-    interval: GrowthInterval,
     user_id: str = Depends(verify_jwt_token_http),
-):    
+    body: Optional[GrowthBody] = None
+) -> List[GrowthModel]:    
     """
     Returns growth list for the tradingview chart frontend
     Args:
@@ -321,9 +339,24 @@ async def growth(
 
     Returns:
         list
-    """    
+    """ 
+    if body.username:
+        try:
+            async with get_db_session() as session:
+                r = await session.execute(
+                    select(Users.user_id)
+                    .where(
+                        (Users.username == body.username) &
+                        (Users.visible == True)
+                    )
+                )
+                user_id = r.first()[0]
+        except TypeError:
+            raise InvalidAction("Account is private")
     
-    existing_data = retrieve_from_internal_cache(user_id, 'growth')
+    existing_data: dict | None = retrieve_from_internal_cache(user_id, 'growth')
+    interval = body.interval
+    
     try:
         if interval in existing_data:
             return existing_data[interval]

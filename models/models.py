@@ -2,7 +2,7 @@ from typing import Any, Optional
 from datetime import datetime
 
 # Local
-from enums import OrderStatus, OrderType
+from enums import GrowthInterval, OrderStatus, OrderType
 
 # Pydantic
 from uuid import UUID
@@ -39,6 +39,10 @@ class Username(Base):
 
 class OrderStatusBody(Username):
     order_status: list[OrderStatus]
+    
+
+class GrowthBody(Username):
+    interval: GrowthInterval
 
 
 class OrderRequest(UserID):
