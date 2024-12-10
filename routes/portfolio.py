@@ -208,36 +208,42 @@ async def orders(
     body: OrderStatusBody,
     user_id: str = Depends(verify_jwt_token_http),
 ):    
+    
+    if body.username:
+        async with get_db_session() as session:
+            try:
+                user_id = await session.execute(
+                    select(Users.user_id)
+                    .where(
+                        (Users.username == body.username) &
+                        (Users.visible == True)
+                    )
+                )
+                user_id = user_id.first()[0]
+            except TypeError:
+                raise InvalidAction("Account is private")
+        
     existing_data: dict | None = retrieve_from_internal_cache(user_id, 'orders')
     tupled_order_status = tuple(body.order_status)
     
     if existing_data:
-        if not body.username:
-            if tupled_order_status in existing_data:
-                return existing_data[tupled_order_status]
-        else:
-            if body.username in existing_data:
-                if tupled_order_status in existing_data[body.username]:
-                    return existing_data[body.username][tupled_order_status]
+        if tupled_order_status in existing_data:
+            return existing_data[tupled_order_status]
                 
     try:    
-        all_orders = []
-        async with get_db_session() as session:
-            query = select(Orders).where(Orders.order_status.in_(body.order_status))
+        async with get_db_session() as session:                
+            r = await session.execute(
+                select(Orders)
+                .where(
+                    (Orders.order_status.in_(tupled_order_status)) &
+                    (Orders.user_id == user_id))
+            )
             
-            if not body.username:
-                query = query.where(Orders.user_id == user_id)
-                param = {tupled_order_status: all_orders}
-            else:
-                query = query.where(
-                    Orders.user_id == (select(Users.user_id).where(Users.username == body.username)))
-                param = {body.username: {tupled_order_status: all_orders }}
-                
-            r = await session.execute(query)
-            all_orders.extend([Order(**vars(item)) for item in r.scalars().all()])
-            add_to_internal_cache(user_id=user_id, channel='orders', value=param)
-                
-            return all_orders
+            all_orders = [Order(**vars(item)) for item in r.scalars().all()]
+        add_to_internal_cache(user_id=user_id, channel='orders', value={tupled_order_status: all_orders})
+        return all_orders
+    except InvalidAction:
+        raise
     except Exception as e:
         print('orders: ', type(e), str(e))
 
@@ -396,11 +402,28 @@ async def distribution(user_id: str = Depends(verify_jwt_token_http)) -> List[Ti
         return [TickerDistribution(name=key, value=value) for key, value in ticker_map.items()]
     
     
-@portfolio.get('/weekday-results')
-async def wins_losses_weekday(user_id: str = Depends(verify_jwt_token_http)):
-    constraints = locals()
-    constraints.update({'order_status': OrderStatus.CLOSED})
+@portfolio.post('/weekday-results')
+async def wins_losses_weekday(
+    user_id: str = Depends(verify_jwt_token_http),
+    body: Optional[Username] = None
+):
+    constraints = {'user_id': user_id, 'order_status': OrderStatus.CLOSED}
+
     
+    if body:
+        try:
+            async with get_db_session() as session:
+                r = await session.execute(
+                    select(Users.user_id)
+                    .where(
+                        (Users.username == body.username) &
+                        (Users.visible == True)
+                    )
+                )
+                constraints.update({'user_id': r.first()[0]})
+        except TypeError:
+            raise InvalidAction("Account is private")
+            
     all_orders = await get_orders(**constraints)
     
     num_range = range(7)
