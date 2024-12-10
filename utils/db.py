@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from collections import defaultdict
 from uuid import UUID
 import asyncio
 
@@ -55,8 +56,8 @@ _CACHE = {}
 def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
     try:    
         if isinstance(channel, list):
-            for c in channel:
-                _CACHE[user_id].pop(c, None)
+            for item in channel:
+                _CACHE[user_id].pop(item, None)
         else:
             _CACHE[user_id].pop(channel, None)
     except KeyError:
@@ -64,8 +65,21 @@ def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwarg
     
     
 def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
-    _CACHE.setdefault(user_id, {})    
-    _CACHE[user_id][channel] = value
+    _CACHE.setdefault(user_id, {})  
+    # print(value.keys())
+    
+    if isinstance(value, dict):
+        if channel not in _CACHE[user_id]:
+            _CACHE[user_id][channel] = defaultdict(dict)
+        
+        for k, v in value.items():
+            if isinstance(v, dict):
+                for _k, _v in v.items():
+                    _CACHE[user_id][channel][k][_k] = _v
+            else:        
+                _CACHE[user_id][channel][k] = v         
+    else:
+        _CACHE[user_id][channel] = value
     
 
 def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:

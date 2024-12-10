@@ -86,7 +86,7 @@ class MatchingEngine:
         """
         try:
             await asyncio.sleep(0.1)
-            self._configure_bids_asks(quantity=10000, divider=5)
+            self._configure_bids_asks(quantity=1000, divider=10)
             
             logger.info('Matching Engine booted up successfully!')
             await asyncio.gather(*[self._listen(), self._watch_price()])

@@ -16,7 +16,7 @@ from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus, GrowthInterval
 from exceptions import DuplicateError, InvalidAction
 from db_models import UserWatchlist, Users, Orders
-from models.models import CopyTradeRequest, GrowthModel, Order, PerformanceMetrics, QuantitativeMetrics, TickerDistribution
+from models.models import CopyTradeRequest, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetrics, TickerDistribution, Username
 
 # FA
 from fastapi import APIRouter, Depends, Query
@@ -203,32 +203,44 @@ def get_avg_risk_per_trade(
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
 
-@portfolio.get('/orders')# , response_model=List[Order]
+@portfolio.post('/orders', response_model=List[Order])
 async def orders(
-    order_status: Annotated[list[OrderStatus], Query()],
+    body: OrderStatusBody,
     user_id: str = Depends(verify_jwt_token_http),
-):
+):    
     existing_data: dict | None = retrieve_from_internal_cache(user_id, 'orders')
+    tupled_order_status = tuple(body.order_status)
     
     if existing_data:
-        if tuple(order_status) in existing_data:
-            return existing_data[tuple(order_status)]
-    
+        if not body.username:
+            if tupled_order_status in existing_data:
+                return existing_data[tupled_order_status]
+        else:
+            if body.username in existing_data:
+                if tupled_order_status in existing_data[body.username]:
+                    return existing_data[body.username][tupled_order_status]
+                
     try:    
+        all_orders = []
         async with get_db_session() as session:
-            r = await session.execute(
-                select(Orders)
-                .where(
-                    (Orders.user_id == user_id) &
-                    (Orders.order_status.in_(order_status))
-                )
-            )
+            query = select(Orders).where(Orders.order_status.in_(body.order_status))
             
-            all_orders = [Order(**vars(item)) for item in r.scalars().all()]
-            add_to_internal_cache(user_id=user_id, channel='orders', value={tuple(order_status): all_orders})
+            if not body.username:
+                query = query.where(Orders.user_id == user_id)
+                param = {tupled_order_status: all_orders}
+            else:
+                query = query.where(
+                    Orders.user_id == (select(Users.user_id).where(Users.username == body.username)))
+                param = {body.username: {tupled_order_status: all_orders }}
+                
+            r = await session.execute(query)
+            all_orders.extend([Order(**vars(item)) for item in r.scalars().all()])
+            add_to_internal_cache(user_id=user_id, channel='orders', value=param)
+                
             return all_orders
     except Exception as e:
         print('orders: ', type(e), str(e))
+
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
 async def performance(user_id: str = Depends(verify_jwt_token_http)) -> PerformanceMetrics:

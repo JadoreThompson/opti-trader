@@ -33,6 +33,14 @@ class RegisterUser(_User):
     visible: bool = Field(False, description="Is the user's account visible to other user's for the leaderboard")
 
 
+class Username(Base):
+    username: Optional[str] = None
+    
+
+class OrderStatusBody(Username):
+    order_status: list[OrderStatus]
+
+
 class OrderRequest(UserID):
     order_status: Optional[OrderStatus] = Field(None, 
                     description="The specific order status you want the trades to have")
