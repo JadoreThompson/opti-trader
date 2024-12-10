@@ -425,7 +425,6 @@ async def wins_losses_weekday(
             raise InvalidAction("Account is private")
             
     all_orders = await get_orders(**constraints)
-    
     num_range = range(7)
     wins = [0 for _ in num_range]    
     losses = [0 for _ in num_range]
