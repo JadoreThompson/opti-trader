@@ -543,7 +543,7 @@ async def copy_trades(
             
             m_user = r.first()
             if m_user is None:
-                raise InvalidAction("User doesn't exist")
+                raise HTTPException(status_code=403)
             
             existing_entry = await session.execute(
                 select(UserWatchlist)
@@ -572,8 +572,6 @@ async def copy_trades(
             await session.commit()
     except InvalidAction:
         raise
-    except IntegrityError:
-        raise DuplicateError(f"Already subcribed to {body.username}")
     except Exception as e:
         print('copy trades: ', type(e), str(e))
         

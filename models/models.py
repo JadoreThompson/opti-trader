@@ -172,7 +172,7 @@ class LeaderboardItem(Base):
     earnings: float | str = Field(gt=0)    
     
     @field_validator('earnings')
-    def earnings_validator(cls, earnings: float):
+    def earnings_validator(cls, earnings: float) -> str:
         return f"${round(earnings, 2)}"
 
 
@@ -180,3 +180,17 @@ class CopyTradeRequest(Base):
     username: str
     limit_orders: bool = False
     market_orders: bool = False
+    
+    # @classmethod
+    # @field_validator('limit_orders')
+    # def minimum_entry_validation(cls, limit_orders, values) -> bool:
+    #     print(values)
+    #     if not limit_orders and not values.get('market_orders', None):
+    #         raise ValueError("Must specifiy either limit_orders or market_orders")
+    #     return limit_orders
+    
+    def __init__(self, **kw):
+        if not kw.get('limit_orders', None) and not kw.get('market_orders', None):
+            raise ValueError("Must specifiy either limit_orders or market_orders")
+        super().__init__(**kw)
+    
