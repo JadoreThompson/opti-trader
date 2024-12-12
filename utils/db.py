@@ -156,3 +156,26 @@ async def check_user_exists(user_id: str):
             return user            
     except Exception:
         raise
+
+
+async def check_visible_user(username: str) -> str:
+    """
+    Returns the user_id for the username passsed in param
+    if the user exists and has visible set to True.
+    
+    Args:
+        username (str):
+
+    Returns:
+        str: UserId
+    """    
+    async with get_db_session() as session:
+        res = await session.execute(
+            select(Users.user_id)
+            .where(
+                (Users.username == username) &
+                (Users.visible == True)
+            )
+        )
+        return res.first()[0]
+        

@@ -204,19 +204,20 @@ def get_avg_risk_per_trade(
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
 
-@portfolio.post('/orders', response_model=List[Order])
+@portfolio.get('/orders', response_model=List[Order])
 async def orders(
-    body: OrderStatusBody,
+    order_status: Annotated[list[OrderStatus], Query()],
+    username: Optional[str] = None,
     user_id: str = Depends(verify_jwt_token_http),
 ):    
     
-    if body.username:
+    if username:
         async with get_db_session() as session:
             try:
                 user_id = await session.execute(
                     select(Users.user_id)
                     .where(
-                        (Users.username == body.username) &
+                        (Users.username == username) &
                         (Users.visible == True)
                     )
                 )
@@ -225,7 +226,7 @@ async def orders(
                 raise HTTPException(status_code=403)
         
     existing_data: dict | None = retrieve_from_internal_cache(user_id, 'orders')
-    tupled_order_status = tuple(body.order_status)
+    tupled_order_status = tuple(order_status)
     
     if existing_data:
         if tupled_order_status in existing_data:
@@ -249,10 +250,10 @@ async def orders(
         print('orders: ', type(e), str(e))
 
 
-@portfolio.post("/performance", response_model=PerformanceMetrics)
+@portfolio.get("/performance", response_model=PerformanceMetrics)
 async def performance(
     user_id: str = Depends(verify_jwt_token_http),
-    body: Optional[Username] = None,
+    username: Optional[str] = None,
 ) -> PerformanceMetrics:
     """
     Returns performance metrics for the account
@@ -264,13 +265,13 @@ async def performance(
         PerformanceMetrics()
     """
     
-    if body:
+    if username:
         try:
             async with get_db_session() as session:
                 r = await session.execute(
                     select(Users.user_id)
                     .where(
-                        (Users.username == body.username) &
+                        (Users.username == username) &
                         (Users.visible == True)
                     )
                 )
@@ -310,9 +311,9 @@ async def performance(
         print('portfolio/performance/: ', type(e), str(e))
 
 
-@portfolio.post("/quantitative", response_model=QuantitativeMetrics)
+@portfolio.get("/quantitative", response_model=QuantitativeMetrics)
 async def quantitative_metrics(
-    body: Optional[QuantitativeMetricsBody] = None,
+    username: Optional[str] = None,
     user_id: str = Depends(verify_jwt_token_http),
 ) -> QuantitativeMetrics:
     """
@@ -323,32 +324,33 @@ async def quantitative_metrics(
     Returns:
         QuantitativeMetrics()
     """ 
-    data = {}
+    data = {'user_id': user_id}
     
-    if body:
+    if username is not None:
         try:
             async with get_db_session() as session:
                 r = await session.execute(
                     select(Users.user_id)
                     .where(
-                        (Users.username == body.username) &
+                        (Users.username == username) &
                         (Users.visible == True)
                     )
                 )
-                data['user_id'] = r.first()[0]
-                data.update(body.model_dump())
+                data['user_id'] = str(r.first()[0])
         except TypeError:
             raise HTTPException(status_code=403)
-    else:
-        data.update(QuantitativeMetricsBody().model_dump())
     
-    data.update(await get_quant_metrics_handler(**locals()))
+    data.update(QuantitativeMetricsBody().model_dump())    
+    data['benchmark_ticker'] = str(data['benchmark_ticker'][0])
+    data['months_ago'] = int(data['months_ago'][0])
+    data.update(await get_quant_metrics_handler(**data))
     return QuantitativeMetrics(**data)
 
 
-@portfolio.post("/growth", response_model=List[GrowthModel])
+@portfolio.get("/growth", response_model=List[GrowthModel])
 async def growth(
-    body: GrowthBody,
+    interval: GrowthInterval,
+    username: Optional[str] = None,
     user_id: str = Depends(verify_jwt_token_http),
 ) -> List[GrowthModel]:    
     """
@@ -360,13 +362,13 @@ async def growth(
     Returns:
         list
     """ 
-    if body.username is not None:
+    if username is not None:
         try:
             async with get_db_session() as session:
                 r = await session.execute(
                     select(Users.user_id)
                     .where(
-                        (Users.username == body.username) &
+                        (Users.username == username) &
                         (Users.visible == True)
                     )
                 )
@@ -375,7 +377,6 @@ async def growth(
             raise HTTPException(status_code=403)
     
     existing_data: dict | None = retrieve_from_internal_cache(user_id, 'growth')
-    interval = body.interval
     
     try:
         if interval in existing_data:
@@ -434,19 +435,19 @@ async def growth(
     return return_list
     
 
-@portfolio.post("/distribution", response_model=List[TickerDistribution])
+@portfolio.get("/distribution", response_model=List[TickerDistribution])
 async def distribution(
     user_id: str = Depends(verify_jwt_token_http),
-    body: Optional[Username] = None
+    username: Optional[str] = None,
 ) -> List[TickerDistribution]:
     
-    if body:
+    if username:
         try:
             async with get_db_session() as session:
                 r = await session.execute(
                     select(Users.user_id)
                     .where(
-                        (Users.username == body.username) &
+                        (Users.username == username) &
                         (Users.visible == True)
                     )
                 )
@@ -473,21 +474,21 @@ async def distribution(
     return [TickerDistribution(name=key, value=value) for key, value in ticker_map.items()]
     
     
-@portfolio.post('/weekday-results')
+@portfolio.get('/weekday-results')
 async def weekday_results(
     user_id: str = Depends(verify_jwt_token_http),
-    body: Optional[Username] = None
+    username: Optional[Username] = None,
 ):
     constraints = {'user_id': user_id, 'order_status': OrderStatus.CLOSED}
 
     
-    if body:
+    if username:
         try:
             async with get_db_session() as session:
                 r = await session.execute(
                     select(Users.user_id)
                     .where(
-                        (Users.username == body.username) &
+                        (Users.username == username) &
                         (Users.visible == True)
                     )
                 )

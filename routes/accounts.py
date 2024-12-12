@@ -7,7 +7,7 @@ from db_models import UserWatchlist, Users
 from exceptions import DuplicateError, DoesNotExist, InvalidError
 from models.models import AuthResponse, LoginUser, RegisterUser, UserMetrics
 from utils.auth import check_user_exists, create_jwt_token, verify_jwt_token_http
-from utils.db import get_db_session
+from utils.db import check_visible_user, get_db_session
 
 # SA
 from sqlalchemy import insert, select, func, text
@@ -99,15 +99,21 @@ async def login(body: LoginUser):
         raise
 
 
-@accounts.get("/metrics")
+@accounts.get("/metrics", response_model=UserMetrics)
 async def metrics(
     user_id: str = Depends(verify_jwt_token_http),
+    username: Optional[str] = None,
     page: Optional[int] = 0,
-):
+) -> UserMetrics:
     PAGE_SIZE = 10
     
     try:
-        async def get_follwers(user_id):
+        if username:
+            user_id = await check_visible_user(username)            
+            if not user_id:
+                raise HTTPException(status_code=403)
+        
+        async def get_follwers(user_id: str, page_num: int):
             async with get_db_session() as session:
                 count = await session.execute(
                     select(func.count(UserWatchlist.watcher))
@@ -119,10 +125,11 @@ async def metrics(
                         select(UserWatchlist.watcher)
                         .where(UserWatchlist.master == user_id)
                     ))
+                    .offset(page * PAGE_SIZE)
                 )
                 return count.scalar(), entities.all()
             
-        async def get_following(user_id):
+        async def get_following(user_id: str, page_num: int):
             async with get_db_session() as session:
                 count = await session.execute(
                     select(func.count(UserWatchlist.master))
@@ -133,14 +140,15 @@ async def metrics(
                     .where(Users.user_id.in_(
                         select(UserWatchlist.master)
                         .where(UserWatchlist.watcher == user_id)
+                        .offset(page * PAGE_SIZE)
                     ))
                 )
                 return count.scalar(), entities.all()
             
         follower_result, following_result = await asyncio.gather(
             *[
-                get_follwers(user_id), 
-                get_following(user_id)
+                get_follwers(user_id, page), 
+                get_following(user_id, page)
             ]
         )
         
