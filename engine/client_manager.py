@@ -92,9 +92,10 @@ class ClientManager:
                 
     async def _listen_to_order_updates(self, user_id: str) -> None:
         try:
+            channel = f'trades_{user_id}'
             await asyncio.sleep(0.5)
             async with REDIS_CLIENT.pubsub() as ps:
-                await ps.subscribe(f'trades_{user_id}')
+                await ps.subscribe(channel)
 
                 while True:
                     try:
@@ -107,6 +108,7 @@ class ClientManager:
                                 asyncio.create_task(self._send_watchlist_alerts(message=message, user_id=user_id))
                                 await asyncio.sleep(0.1)
                     except StarletteWebSocketDisconnect:
+                        await ps.unsubscribe(channel)
                         break
                     except Exception as e:
                         print('listen to order update inner: ', type(e), str(e))

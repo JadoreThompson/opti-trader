@@ -65,22 +65,25 @@ async def check_user_exists(user: _User) -> Users:
     """
     Checks if the user exists in the database and verifies their credentials.
 
-    :param user: User object containing email and password.
-    :return: True if the user exists and credentials are valid, otherwise raises an exception.
-
-    :raises DoesNotExist: If the user does not exist in the database.
-    :raises InvalidError: If the provided credentials are invalid.
-    :raises Exception: For any other errors encountered during execution.
+    Args:
+        user: User object containing email and password.
+    
+    Return:
+        - DB Users instance
+    
+    Raises:
+        DoesNotExist: If the user does not exist in the database.
+        InvalidError: Password doesn't match.
+        Exception: For any other errors encountered during execution.
     """
     try:
         async with get_db_session() as session:
             result = await session.execute(select(Users).where(Users.email == user.email))
-            existing_user = result.scalars().first()
+            existing_user: Users = result.scalars().first()
 
             if not existing_user:
                 raise DoesNotExist("User")
 
-            print(existing_user.password, user.password)
             if PH.verify(existing_user.password, user.password):
                 return existing_user
     except argon2.exceptions.InvalidHashError:

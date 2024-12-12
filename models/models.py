@@ -33,8 +33,25 @@ class RegisterUser(_User):
     visible: bool = Field(False, description="Is the user's account visible to other user's for the leaderboard")
 
 
+class UserCount(Base):
+    count: int
+    entities: Optional[list[str]] = Field(
+        None, 
+        description="A list of usernames"
+    )
+
+
+class UserMetrics(Base):
+    following: Optional[UserCount] = None
+    followers: UserCount
+
+
 class Username(Base):
     username: Optional[str] = None
+
+
+class AuthResponse(Username):
+    token: str
     
 
 class OrderStatusBody(Username):

@@ -19,7 +19,7 @@ from db_models import UserWatchlist, Users, Orders
 from models.models import CopyTradeRequest, GrowthBody, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetricsBody, QuantitativeMetrics, TickerDistribution, Username
 
 # FA
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 
@@ -222,7 +222,7 @@ async def orders(
                 )
                 user_id = user_id.first()[0]
             except TypeError:
-                raise InvalidAction("Account is private")
+                raise HTTPException(status_code=403)
         
     existing_data: dict | None = retrieve_from_internal_cache(user_id, 'orders')
     tupled_order_status = tuple(body.order_status)
@@ -276,7 +276,9 @@ async def performance(
                 )
                 user_id = r.first()[0]
         except TypeError:
-            raise InvalidAction("Account is private")
+            raise HTTPException(status_code=403)
+        except Exception as e:
+            print('performance inner: ', type(e), str(e))
     
     main_dictionary = {}
     try:
@@ -336,7 +338,7 @@ async def quantitative_metrics(
                 data['user_id'] = r.first()[0]
                 data.update(body.model_dump())
         except TypeError:
-            raise InvalidAction("Account is private")
+            raise HTTPException(status_code=403)
     else:
         data.update(QuantitativeMetricsBody().model_dump())
     
@@ -346,8 +348,8 @@ async def quantitative_metrics(
 
 @portfolio.post("/growth", response_model=List[GrowthModel])
 async def growth(
+    body: GrowthBody,
     user_id: str = Depends(verify_jwt_token_http),
-    body: Optional[GrowthBody] = None
 ) -> List[GrowthModel]:    
     """
     Returns growth list for the tradingview chart frontend
@@ -358,7 +360,7 @@ async def growth(
     Returns:
         list
     """ 
-    if body.username:
+    if body.username is not None:
         try:
             async with get_db_session() as session:
                 r = await session.execute(
@@ -370,7 +372,7 @@ async def growth(
                 )
                 user_id = r.first()[0]
         except TypeError:
-            raise InvalidAction("Account is private")
+            raise HTTPException(status_code=403)
     
     existing_data: dict | None = retrieve_from_internal_cache(user_id, 'growth')
     interval = body.interval
@@ -450,7 +452,7 @@ async def distribution(
                 )
                 user_id = r.first()[0]
         except TypeError:
-            raise InvalidAction("Account is private")
+            raise HTTPException(status_code=403)
     
     all_orders = await get_active_orders(user_id)
     ticker_map = {
@@ -472,7 +474,7 @@ async def distribution(
     
     
 @portfolio.post('/weekday-results')
-async def wins_losses_weekday(
+async def weekday_results(
     user_id: str = Depends(verify_jwt_token_http),
     body: Optional[Username] = None
 ):
@@ -491,7 +493,7 @@ async def wins_losses_weekday(
                 )
                 constraints.update({'user_id': r.first()[0]})
         except TypeError:
-            raise InvalidAction("Account is private")
+            raise HTTPException(status_code=403)
             
     all_orders = await get_orders(**constraints)
     num_range = range(7)
@@ -509,7 +511,10 @@ async def wins_losses_weekday(
 
 
 @portfolio.post("/copy")
-async def copy_trades(body: CopyTradeRequest, user_id: str = Depends(verify_jwt_token_http)):
+async def copy_trades(
+    body: CopyTradeRequest, 
+    user_id: str = Depends(verify_jwt_token_http)
+):
     """
     Enters a record into DB
     

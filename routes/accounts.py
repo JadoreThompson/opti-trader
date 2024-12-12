@@ -1,16 +1,20 @@
-from sqlalchemy import insert
-from sqlalchemy.exc import IntegrityError
+import asyncio
+from typing import Optional
 
 # Local
 from config import PH
-from db_models import Users
+from db_models import UserWatchlist, Users
 from exceptions import DuplicateError, DoesNotExist, InvalidError
-from models.models import LoginUser, RegisterUser
-from utils.auth import check_user_exists, create_jwt_token
+from models.models import AuthResponse, LoginUser, RegisterUser, UserMetrics
+from utils.auth import check_user_exists, create_jwt_token, verify_jwt_token_http
 from utils.db import get_db_session
 
+# SA
+from sqlalchemy import insert, select, func, text
+from sqlalchemy.exc import IntegrityError
+
 # FA
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 
@@ -43,13 +47,14 @@ async def register(body: RegisterUser):
             async with get_db_session() as session:
                 user = await session.execute(
                     insert(Users).values(**vars(body))
-                    .returning(Users)
+                    .returning(Users.user_id, Users.username)
                 )
                 
                 await session.commit()
-                return JSONResponse(
-                    status_code=200,
-                    content={'token': create_jwt_token({'sub': str(user.scalar().user_id)})}
+                user = user.first()
+                return AuthResponse(
+                    username=user[1],
+                    token=create_jwt_token({'sub': str(user[0])})
                 )
         except IntegrityError as e:
             raise DuplicateError('User already exists')
@@ -80,11 +85,10 @@ async def login(body: LoginUser):
     """
     try:
         user = await check_user_exists(body)
-        
-        return JSONResponse(
-                status_code=200,
-                content={'token': create_jwt_token({'sub': str(user.user_id)})}
-            )
+        return AuthResponse(
+            userame=user.username, 
+            token=create_jwt_token({'sub': str(user.user_id)})
+        )
     except DoesNotExist as e:
         return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
     except InvalidError as e:
@@ -93,3 +97,63 @@ async def login(body: LoginUser):
     except Exception as e:
         print("[LOGIN][ERROR] >> ", type(e), str(e))
         raise
+
+
+@accounts.get("/metrics")
+async def metrics(
+    user_id: str = Depends(verify_jwt_token_http),
+    page: Optional[int] = 0,
+):
+    PAGE_SIZE = 10
+    
+    try:
+        async def get_follwers(user_id):
+            async with get_db_session() as session:
+                count = await session.execute(
+                    select(func.count(UserWatchlist.watcher))
+                    .where(UserWatchlist.master == user_id)
+                )
+                entities = await session.execute(
+                    select(Users.username)
+                    .where(Users.user_id.in_(
+                        select(UserWatchlist.watcher)
+                        .where(UserWatchlist.master == user_id)
+                    ))
+                )
+                return count.scalar(), entities.all()
+            
+        async def get_following(user_id):
+            async with get_db_session() as session:
+                count = await session.execute(
+                    select(func.count(UserWatchlist.master))
+                    .where(UserWatchlist.watcher == user_id)
+                )
+                entities = await session.execute(
+                    select(Users.username)
+                    .where(Users.user_id.in_(
+                        select(UserWatchlist.master)
+                        .where(UserWatchlist.watcher == user_id)
+                    ))
+                )
+                return count.scalar(), entities.all()
+            
+        follower_result, following_result = await asyncio.gather(
+            *[
+                get_follwers(user_id), 
+                get_following(user_id)
+            ]
+        )
+        
+        return UserMetrics(**{
+            'followers': {
+                'count': follower_result[0],
+                'entities': [item[0] for item in follower_result[1]]
+            },
+            'following': {
+                'count': following_result[0],
+                'entities': [item[0] for item in following_result[1]]
+            }
+        })
+        
+    except Exception as e: 
+        print('account metrics: ', type(e), str(e))
