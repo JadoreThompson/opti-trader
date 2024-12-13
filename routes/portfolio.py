@@ -209,8 +209,7 @@ async def orders(
     order_status: Annotated[list[OrderStatus], Query()],
     username: Optional[str] = None,
     user_id: str = Depends(verify_jwt_token_http),
-):    
-    
+):        
     if username:
         async with get_db_session() as session:
             try:

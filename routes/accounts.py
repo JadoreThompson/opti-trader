@@ -86,7 +86,7 @@ async def login(body: LoginUser):
     try:
         user = await check_user_exists(body)
         return AuthResponse(
-            userame=user.username, 
+            username=user.username, 
             token=create_jwt_token({'sub': str(user.user_id)})
         )
     except DoesNotExist as e:
@@ -105,7 +105,7 @@ async def metrics(
     username: Optional[str] = None,
     page: Optional[int] = 0,
 ) -> UserMetrics:
-    PAGE_SIZE = 10
+    PAGE_SIZE = 5
     
     try:
         if username:
@@ -125,7 +125,8 @@ async def metrics(
                         select(UserWatchlist.watcher)
                         .where(UserWatchlist.master == user_id)
                     ))
-                    .offset(page * PAGE_SIZE)
+                    .offset(page_num * PAGE_SIZE)
+                    .limit(PAGE_SIZE)
                 )
                 return count.scalar(), entities.all()
             
@@ -140,8 +141,9 @@ async def metrics(
                     .where(Users.user_id.in_(
                         select(UserWatchlist.master)
                         .where(UserWatchlist.watcher == user_id)
-                        .offset(page * PAGE_SIZE)
                     ))
+                    .offset(page_num * PAGE_SIZE)
+                    .limit(PAGE_SIZE)
                 )
                 return count.scalar(), entities.all()
             
@@ -165,3 +167,23 @@ async def metrics(
         
     except Exception as e: 
         print('account metrics: ', type(e), str(e))
+
+
+@accounts.get("/search")
+async def search(
+    prefix: str,
+    page: Optional[int] = 0,
+    user_id: str = Depends(verify_jwt_token_http),
+) -> list:
+    PAGE_SIZE = 10
+    try:
+        async with get_db_session() as session:
+            resp = await session.execute(
+                select(Users.username)
+                .where(Users.username.like(f"%{prefix}%"))
+                .offset(page * PAGE_SIZE)
+                .limit(PAGE_SIZE)
+            )
+            return [item[0] for item in resp]
+    except Exception as e:
+        print('accounts search: ', type(e), str(e))

@@ -181,14 +181,6 @@ class CopyTradeRequest(Base):
     limit_orders: bool = False
     market_orders: bool = False
     
-    # @classmethod
-    # @field_validator('limit_orders')
-    # def minimum_entry_validation(cls, limit_orders, values) -> bool:
-    #     print(values)
-    #     if not limit_orders and not values.get('market_orders', None):
-    #         raise ValueError("Must specifiy either limit_orders or market_orders")
-    #     return limit_orders
-    
     def __init__(self, **kw):
         if not kw.get('limit_orders', None) and not kw.get('market_orders', None):
             raise ValueError("Must specifiy either limit_orders or market_orders")
