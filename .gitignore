@@ -9,7 +9,8 @@ csvs/
 .vscode/
 rec.py
 temp.csv
-gc_client_adc.json
+client_secret.json
+tokens
 
 alembic.ini
 docker-compose.yaml
