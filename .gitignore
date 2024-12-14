@@ -7,10 +7,9 @@ myfile.txt
 ai/datasets/
 csvs/
 .vscode/
-
-gc_client_secret.json
-gc_client.json
 rec.py
+temp.csv
+gc_client_adc.json
 
 alembic.ini
 docker-compose.yaml
