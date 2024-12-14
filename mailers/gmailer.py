@@ -22,7 +22,7 @@ class GMailer(Mailer):
         self.service = None
         super().__init__()
     
-    async def initialise_service(self, scopes: list[str], client_secret_path: str, prefix: str='',):
+    async def create_service_async(self, scopes: list[str], client_secret_path: str, prefix: str='',):
         await asyncio.to_thread(self.create_service, **locals())
     
     def create_service(self, scopes: list[str], client_secret_path: str, prefix: str='',) -> None:
