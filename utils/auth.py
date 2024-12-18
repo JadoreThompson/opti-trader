@@ -1,3 +1,5 @@
+import logging
+
 from datetime import timedelta, datetime
 
 # Security
@@ -16,7 +18,7 @@ from fastapi.security import OAuth2PasswordBearer
 # Local
 from config import PH
 from db_models import Users
-from exceptions import DoesNotExist, InvalidError, InvalidAction
+from exceptions import DoesNotExist, InvalidAction
 from models.models import _User
 from utils.db import get_db_session
 
@@ -27,6 +29,9 @@ ACCESS_TOKEN_EXPIRY_MINUTES = 10 ** 5
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+logger = logging.getLogger(__name__)
+
 
 
 def create_jwt_token(data: dict) -> str:
@@ -50,7 +55,7 @@ def verify_jwt_token_http(token: str = Depends(oauth2_scheme)) -> str:
         raise InvalidAction("User unauthorised")
     
     except Exception as e:
-        print('verify jwt http: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
 
 
 def verify_jwt_token_ws(token: str) -> str:
@@ -73,7 +78,6 @@ async def check_user_exists(user: _User) -> Users:
     
     Raises:
         DoesNotExist: If the user does not exist in the database.
-        InvalidError: Password doesn't match.
         Exception: For any other errors encountered during execution.
     """
     try:
@@ -87,10 +91,11 @@ async def check_user_exists(user: _User) -> Users:
             if PH.verify(existing_user.password, user.password):
                 return existing_user
     except argon2.exceptions.InvalidHashError:
-        raise InvalidError("Invalid credentials")
+        raise InvalidAction("Invalid credentials")
     
-    except (DoesNotExist, InvalidError) as e:
+    except DoesNotExist as e:
         raise
         
     except Exception as e:
-        print("Error in check user exists: ", type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
+

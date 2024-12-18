@@ -1,11 +1,14 @@
 import json, asyncio
+import logging
 from starlette.websockets import WebSocketDisconnect as StarletteWebSocketDisconnect
 from fastapi import APIRouter, WebSocket
+from fastapi.websockets import WebSocketDisconnect as FastAPIWebSockDisconnect
 
 # Local
 from engine.client_manager import ClientManager
 
 
+logger = logging.getLogger(__name__)
 MANAGER = ClientManager()
 stream = APIRouter(prefix='/stream', tags=['stream'])
 
@@ -33,7 +36,7 @@ async def trade(websocket: WebSocket):
             await MANAGER.receive(websocket, user_id)
             await asyncio.sleep(0.1)
             
-    except (StarletteWebSocketDisconnect, RuntimeError) as e:
+    except (StarletteWebSocketDisconnect, RuntimeError, FastAPIWebSockDisconnect) as e:
         MANAGER.cleanup(user_id)
     except Exception as e:
-        print("[TRADE STREAM ENDPOINT][ERROR] >> ", type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')

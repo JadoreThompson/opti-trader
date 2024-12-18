@@ -1,14 +1,19 @@
-import asyncio, json, redis, time, logging
+import asyncio
+import asyncpg
+import json
+import logging
+import redis
+import queue
+
 from datetime import datetime
-from functools import wraps
 from uuid import UUID
-from threading import Thread
 from random import randint
+from multiprocessing import Queue
 
 # FA
-from starlette.websockets import WebSocketDisconnect as StarletteWebSocketDisconnect
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
+from starlette.websockets import WebSocketDisconnect as StarletteWebSocketDisconnect
 
 # SA
 import redis.asyncio.connection
@@ -16,31 +21,26 @@ from sqlalchemy import select
 
 # Local
 from db_models import Orders, UserWatchlist, Users
+from config import REDIS_HOST, REDIS_CONN_POOL
 from exceptions import UnauthorisedError, InvalidAction
 from enums import ConsumerMessageStatus, OrderType, OrderStatus
-from models.models import TickerData
-from models.socket_models import OrderRequest
+from models.socket_models import Request
 from utils.auth import verify_jwt_token_ws
-from utils.connection import RedisConnection
 from utils.db import get_db_session, check_user_exists
-from .config import QUEUE, REDIS_HOST
 
 
 logger = logging.getLogger(__name__)
-
-REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
-    connection_class=RedisConnection, 
-    max_connections=20
-)
 REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=REDIS_HOST)
 
 
 class ClientManager:
-    def __init__(self) -> None:
-        self._initialised: bool = False
-        self._active_connections: dict[str, dict[str, any]] = {}
-        self._ticker_quotes: dict[str, float] = {'APPL': randint(10, 1000)}
-        
+    _initialised: bool = False
+    _active_connections: dict[str, dict[str, any]] = {}
+    _ticker_quotes: dict[str, float] = {'APPL': randint(10, 1000)}
+    
+    def __init__(self, queue: Queue=None) -> None:    
+        self.order_queue = queue
+        self.price_queue = None
         self._message_handlers = {
             OrderType.MARKET: self._market_order_handler,
             OrderType.LIMIT: self._limit_order_handler,
@@ -49,46 +49,46 @@ class ClientManager:
         }
         
     async def _listen_to_prices(self) -> None:
+        """Listens to prices from the Orderbook instances for sendout"""        
         try:
-            last_price = None
             while True:
                 try:
-                    item = QUEUE.get_nowait()
-                    if isinstance(item, (float, int)):
-                        if item != last_price:
-                            last_price = item
-                            asyncio.get_running_loop().create_task(self._process_price(last_price))
-
-                        QUEUE.task_done()    
-                except asyncio.queues.QueueEmpty as e:
+                    item = self.price_queue.get_nowait()
+                    if isinstance(item, tuple):
+                        ticker, price = item
+                        if price == self._ticker_quotes[ticker]:
+                            continue
+                        
+                        self._ticker_quotes[ticker] = price
+                        asyncio.get_running_loop().create_task(self._process_price(price, ticker))
+                except (asyncio.queues.QueueEmpty, queue.Empty) as e:
                     pass
                 except Exception as e:
-                    print('listen price client manger: ', type(e), str(e))
-                finally:
-                    await asyncio.sleep(0.05)        
+                    logger.error(f'Inner exc >> {type(e)} - {str(e)}')
+                await asyncio.sleep(0.001)        
                     
         except Exception as e:
-            print('Listen to prices in client manager: ', type(e), str(e))
+            logger.error(f'Outer exc >> {type(e)} - {str(e)}')
         finally:
             await asyncio.sleep(0.05)
     
-    async def _process_price(self, new_price: float | int) -> None:
+    async def _process_price(self, price: float | int, ticker: str) -> None:
         for _, details in self._active_connections.items():
             try:
                 await details['socket'].send_text(json.dumps({
                     'status': ConsumerMessageStatus.PRICE_UPDATE,
                     'message': {
-                        'ticker': 'APPL', 
-                        'price': new_price, 
-                        'time': int(datetime.now().timestamp())
-                    }
+                        'ticker': ticker, 
+                        'price': price, 
+                        'time': int(datetime.now().timestamp()),
+                    },
                 }))
             except (KeyError, RuntimeError, StarletteWebSocketDisconnect):
                 pass
             except Exception as e:
-                print('Client manager - ', type(e), str(e))
-            finally: 
-                await asyncio.sleep(0.01)
+                logger.error(f'{type(e)} - {str(e)}')
+            
+            await asyncio.sleep(0.01)
                 
     async def _listen_to_order_updates(self, user_id: str) -> None:
         try:
@@ -111,12 +111,12 @@ class ClientManager:
                         await ps.unsubscribe(channel)
                         break
                     except Exception as e:
-                        print('listen to order update inner: ', type(e), str(e))
+                        logger.error(f'Inner exc >> {type(e)} - {str(e)}')
                     finally:
                         await asyncio.sleep(0.1)
               
         except Exception as e:
-            print('listen to order update: ', type(e), str(e))
+            logger.error(f'Outer exc >> {type(e)} - {str(e)}')
             
     async def _send_watchlist_alerts(self, message: dict, user_id: str) -> None:
         """
@@ -124,33 +124,41 @@ class ClientManager:
         Args:
             message (dict): _description_
             user_id (str): _description_
-        """        
-        if message['status'] == ConsumerMessageStatus.SUCCESS:        
-            query = select(UserWatchlist.watcher).where(UserWatchlist.master == user_id)
-            
-            if message['internal'] == OrderType.LIMIT:
-                query = query.where(UserWatchlist.limit_orders == True)
-            elif message['internal'] == OrderType.MARKET:
-                query = query.where(UserWatchlist.market_orders == True)
-            
-            async with get_db_session() as session:
-                r = await session.execute(query)
-                watchlist = r.all()
+        """       
+        try: 
+            if message['status'] == ConsumerMessageStatus.SUCCESS:        
+                query = select(UserWatchlist.watcher).where(UserWatchlist.master == user_id)
+                 
+                internal = message.get('internal', None)
                 
-                if not watchlist:
+                if internal is None:
                     return
                 
-                # In production send out email notifcations too
-                for item in watchlist:
-                    try:
-                        await self._active_connections[str(item[0])]['socket'].send_text(json.dumps({
-                            'status': ConsumerMessageStatus.NOTIFICATION,
-                            'message': f'{self._active_connections[str(item[0])]['user'].username} opened an order at {message['details']['filled_price']}'
-                        }))
-                    except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
-                        continue
-                    except Exception as e:
-                        print('send watchlist alert: ', type(e), str(e))
+                if internal == OrderType.LIMIT:
+                    query = query.where(UserWatchlist.limit_orders == True)
+                elif internal == OrderType.MARKET:
+                    query = query.where(UserWatchlist.market_orders == True)
+                
+                async with get_db_session() as session:
+                    r = await session.execute(query)
+                    watchlist = r.all()
+                    
+                    if not watchlist:
+                        return
+                    
+                    # In production send out email notifcations too
+                    for item in watchlist:
+                        try:
+                            await self._active_connections[str(item[0])]['socket'].send_text(json.dumps({
+                                'status': ConsumerMessageStatus.NOTIFICATION,
+                                'message': f'{self._active_connections[str(item[0])]['user'].username} opened an order at {message['details']['filled_price']}'
+                            }))
+                        except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
+                            continue
+                        except Exception as e:
+                            logger.error(f'Inner exc >> {type(e)} - {str(e)}')
+        except Exception as e:
+            logger.error(f'Outer exc >> {type(e)} - {str(e)}')
                 
             
     def cleanup(self, user_id: str) -> None: 
@@ -159,7 +167,7 @@ class ClientManager:
                 self._active_connections[user_id]['listen_order_task'].cancel()
                 del self._active_connections[user_id]
             except Exception as e:
-                print('client manager cleanup: ',type(e), str(e))
+                logger.error(f'{type(e)} - {str(e)}')
         
     async def connect(self, socket: WebSocket) -> None:
         try:
@@ -170,7 +178,7 @@ class ClientManager:
                 self._initialised = True
             
         except Exception as e:
-            print('connect: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
             
     async def receive_token(self, socket: WebSocket) -> bool | str:
         try:
@@ -198,7 +206,7 @@ class ClientManager:
         except StarletteWebSocketDisconnect:
             raise
         except Exception as e:
-            print('receive token: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
     
     async def receive(self, socket: WebSocket, user_id: str) -> None:
         try:
@@ -208,7 +216,7 @@ class ClientManager:
             message: str = await socket.receive_text()
             
             asyncio.create_task(self._message_handler(
-                message=OrderRequest(**json.loads(message)), 
+                message=Request(**json.loads(message)), 
                 user_id=user_id
             ))
             await asyncio.sleep(0.1)
@@ -221,30 +229,29 @@ class ClientManager:
         except (TypeError, RuntimeError, StarletteWebSocketDisconnect) as e:
             raise WebSocketDisconnect
         except Exception as e:
-            print('receive: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
     
-    async def _message_handler(self, message: OrderRequest, user_id: str) -> None:
+    async def _message_handler(self, message: Request, user_id: str) -> None:
         try:
             order: dict = await self._message_handlers[message.type]\
-            (
-                message=message,
-                user_id=user_id
-            )
+                (message=message, user_id=user_id)
             
-            if 'order_status' in order:
-                if order['order_status'] == OrderStatus.CLOSED:
-                    raise InvalidAction("Cannot perform operations on closed orders")
+            if order:
+                if 'order_status' in order:
+                    if order['order_status'] == OrderStatus.CLOSED:
+                        raise InvalidAction("Cannot perform operations on closed orders")
 
-            order.update({'type': message.type, 'user_id': user_id})
-            QUEUE.put_nowait(order)
-            
+                order.update({'type': message.type, 'user_id': user_id})
+                self.order_queue.put_nowait(order)
+                logger.info('{mtype} succesfully sent'.format(mtype=message.type))
+                
         except (InvalidAction, UnauthorisedError) as e:
-            await self._active_connections[user_id]['socket'].send_text(json.dumps({
-                'status': ConsumerMessageStatus.ERROR,
-                'message': str(e)
-            }))
+                await self._active_connections[user_id]['socket'].send_text(json.dumps({
+                    'status': ConsumerMessageStatus.ERROR,
+                    'message': str(e)
+                }))
         except Exception as e:
-            print('message handler: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
     
     def _validate_tp_sl(self, ticker: str, tp_price: float, sl_price: float) -> bool:
         current_price = self._ticker_quotes.get(ticker, None)
@@ -260,7 +267,7 @@ class ClientManager:
         except TypeError:
             raise InvalidAction("Ticker not supported")
         except Exception as e:
-            print('validate tp sl: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
         
         
     def _validate_balance(self, user_id: str, quantity: int, ticker: str) -> bool:
@@ -296,36 +303,34 @@ class ClientManager:
             if key != '_sa_instance_state'
         }
         
-    async def _market_order_handler(self, message: OrderRequest, user_id: str)-> dict:
+    async def _market_order_handler(self, message: Request, user_id: str)-> dict:
         message_dict: dict = message.market_order.model_dump()
                 
         try:
-            if not self._validate_tp_sl(
+            self._validate_tp_sl(
                 tp_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
                 sl_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
                 ticker=message_dict['ticker']
-            ): 
-                return
-            
-            if self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker']):
-                return await self._create_order(message_dict, OrderType.MARKET, user_id)
-            
-        except (InvalidAction, UnauthorisedError):
+            )
+            self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker'])
+            return await self._create_order(message_dict, OrderType.MARKET, user_id)
+        except (InvalidAction, UnauthorisedError) as e:
             raise
+        except asyncpg.exceptions.TooManyConnectionsError:
+            logger.info('Too many db connections')
         except Exception as e:
-            print('market order handler clietn manger: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
             
             
-    async def _limit_order_handler(self, message: OrderRequest, user_id: str) -> dict:
+    async def _limit_order_handler(self, message: Request, user_id: str) -> dict:
         message_dict: dict = message.limit_order.model_dump()
         
         try:
-            if not self._validate_tp_sl(
+            self._validate_tp_sl(
                 tp_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
                 sl_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
                 ticker=message_dict['ticker']
-            ): 
-                return
+            )
             
             current_price = self._ticker_quotes[message_dict['ticker']]
             lower_boundary = current_price * 0.5
@@ -334,14 +339,18 @@ class ClientManager:
                 raise InvalidAction("Limit price is outside of liquidity zone")
             
             
-            if self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker']):
-                return await self._create_order(message_dict, OrderType.LIMIT, user_id)
+            self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker'])
+            return await self._create_order(message_dict, OrderType.LIMIT, user_id)
             
         except (InvalidAction, UnauthorisedError):
             raise
+        except asyncpg.exceptions.TooManyConnectionsError:
+            pass
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
         
         
-    async def _close_order_handler(self, message: OrderRequest, user_id: str) -> dict:
+    async def _close_order_handler(self, message: Request, user_id: str) -> dict:
         message_dict: dict = message.close_order.model_dump()
 
         # Checking if user has enough assets to perform action
@@ -377,12 +386,12 @@ class ClientManager:
         return message_dict
     
     
-    async def _modify_order_handler(self, message: OrderRequest, user_id: str) -> dict:
+    async def _modify_order_handler(self, message: Request, user_id: str) -> dict:
         message_dict = message.modify_order.model_dump()
         
         async with get_db_session() as session:
             result = await session.execute(
-                select(Orders.order_status)
+                select(Orders.order_status, Orders.ticker)
                 .where(
                     (Orders.user_id == user_id)
                     & (Orders.order_id == message_dict['order_id'])
@@ -390,14 +399,15 @@ class ClientManager:
                 )
             )
             
-            order_status = result.scalars().first()
+            order_details = result.first()
         
-        if not order_status:
+        if not order_details:
             raise InvalidAction
                 
         message_dict.update({
-            'order_status': order_status, 
-            'order_id': str(message_dict['order_id'])
+            'order_status': order_details[0], 
+            'order_id': str(message_dict['order_id']),
+            'ticker': order_details[1],
         })
         return message_dict
     

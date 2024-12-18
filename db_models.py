@@ -28,6 +28,7 @@ class Base(DeclarativeBase):
 
 
 class UserWatchlist(Base):
+    """Database Model for the user watchilist. Used for copy trading"""
     __tablename__ = 'watchlist_user'
     
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True),primary_key=True, default=uuid4)
@@ -47,6 +48,7 @@ class UserWatchlist(Base):
 
 
 class Users(Base):
+    """Database Model for Users"""
     __tablename__ = "users"
 
     user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -65,6 +67,7 @@ class Users(Base):
 
 
 class Orders(Base):
+    """Database Model for Orders"""
     __tablename__ = 'orders'
 
     # Fields
@@ -105,6 +108,7 @@ class Orders(Base):
 
 
 class MarketData(Base):
+    """Database Model for Market data"""
     __tablename__ = 'market_data'
     
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True),primary_key=True, default=uuid4)

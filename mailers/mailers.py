@@ -1,5 +1,7 @@
-import os, asyncio, base64
-
+import os
+import asyncio
+import base64
+import logging
 
 # Google
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,10 +16,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # Local
-from .mailer import Mailer
+from mailers.base import BaseMailer
 
 
-class GMailer(Mailer):
+logger = logging.getLogger(__name__)
+
+
+class GMailer(BaseMailer):
     def __init__(self) -> None:
         self.service = None
         super().__init__()
@@ -83,7 +88,7 @@ class GMailer(Mailer):
             
             print(api_name, api_version, 'service created successfully -_-')
         except Exception as e:
-            print(type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
             os.remove(os.path.join(working_dir, token_dir, token_file))
 
     async def send_email_async(self, to: list[str], subject: str, body: str, body_type: str='plain'):

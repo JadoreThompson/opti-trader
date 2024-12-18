@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta
+import logging
 from typing import List
 
 # Local
@@ -75,9 +76,8 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List
             ) 
             for i in range(len(leaderboard_items[:10]))
         ]
-        print(leaderboard_cache['data'])
         return leaderboard_cache['data']
 
     except Exception as e:
-        print('leaderboard >> ', type(e), str(e))
+        logger = logging.getLogger(__name__)
         

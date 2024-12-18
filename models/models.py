@@ -62,7 +62,7 @@ class GrowthBody(Username):
     interval: GrowthInterval
 
 
-class OrderRequest(UserID):
+class RetrieveOrdersRequest(UserID):
     order_status: Optional[OrderStatus] = Field(None, 
                     description="The specific order status you want the trades to have")
 
@@ -125,7 +125,7 @@ class PerformanceMetrics(QuantitativeMetrics):
         return value
     
 
-class Order(Base):
+class APIOrder(Base):
     """
     Order Schema for API Endpoints        
     """    

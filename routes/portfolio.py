@@ -1,3 +1,4 @@
+import logging
 import  traceback
 import asyncio
 from datetime import datetime, timedelta
@@ -16,12 +17,11 @@ from utils.portfolio import get_balance, get_monthly_returns
 from enums import OrderStatus, GrowthInterval
 from exceptions import DuplicateError, InvalidAction
 from db_models import UserWatchlist, Users, Orders
-from models.models import CopyTradeRequest, GrowthBody, GrowthModel, Order, OrderStatusBody, PerformanceMetrics, QuantitativeMetricsBody, QuantitativeMetrics, TickerDistribution, Username
+from models.models import CopyTradeRequest, GrowthBody, GrowthModel, APIOrder, OrderStatusBody, PerformanceMetrics, QuantitativeMetricsBody, QuantitativeMetrics, TickerDistribution, Username
 
 # FA
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-
 
 async def get_quant_metrics_handler(
     user_id: str,
@@ -201,10 +201,10 @@ def get_avg_risk_per_trade(
 
 # Initialisation
 # ^^^^^^^^^^^^^^
+logger = logging.getLogger(__name__)
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
 
-
-@portfolio.get('/orders', response_model=List[Order])
+@portfolio.get('/orders', response_model=List[APIOrder])
 async def orders(
     order_status: Annotated[list[OrderStatus], Query()],
     username: Optional[str] = None,
@@ -240,13 +240,14 @@ async def orders(
                     (Orders.user_id == user_id))
             )
             
-            all_orders = [Order(**vars(item)) for item in r.scalars().all()]
+            all_orders = [APIOrder(**vars(item)) for item in r.scalars().all()]
         add_to_internal_cache(user_id=user_id, channel='orders', value={tupled_order_status: all_orders})
         return all_orders
     except InvalidAction:
         raise
     except Exception as e:
-        print('orders: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
+
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
@@ -278,7 +279,8 @@ async def performance(
         except TypeError:
             raise HTTPException(status_code=403)
         except Exception as e:
-            print('performance inner: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
+
     
     main_dictionary = {}
     try:
@@ -307,7 +309,8 @@ async def performance(
         return PerformanceMetrics(**main_dictionary)
             
     except Exception as e:
-        print('portfolio/performance/: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
+
 
 
 @portfolio.get("/quantitative", response_model=QuantitativeMetrics)
@@ -410,8 +413,7 @@ async def growth(
     try:
         all_orders, current_balance = await asyncio.gather(*[retrieve_orders(query), get_balance(user_id)])
     except Exception as e:
-        print("Growth Error: ", type(e), str(e))
-        print('-' * 10)
+        logger.error(f'{type(e)} - {str(e)}')
             
     starting_period_balance: float = current_balance
     
@@ -572,5 +574,5 @@ async def copy_trades(
     except InvalidAction:
         raise
     except Exception as e:
-        print('copy trades: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
         

@@ -13,24 +13,18 @@ class OrderStatus(str, Enum):
     PARTIALLY_FILLED = 'partially_filled'
     NOT_FILLED = 'not_filled'
     CLOSED = 'closed'
-    
-    # The order has quantity that needs to be closed, this can't be closed again
-    PARTIALLY_CLOSED = 'partially_closed'
-
-    # The order still has some quantity that can be closed
-    PARTIALLY_CLOSED_ACTIVE = 'partially_closed_active'
-
-
-class _OrderType(int, Enum):
     """
-    Within the Matching engine, to allow tracking and differentation
-    of order types we have these types as an added key:pair
-    """    
-    MARKET_ORDER = 0
-    LIMIT_ORDER = 1
-    STOP_LOSS_ORDER = 2
-    TAKE_PROFIT_ORDER = 3
-    CLOSE_ORDER = 4
+    Order still has quantity remaining for consumption.
+    Objects with this OrderStatus can't be called within a CLOSE request
+    again
+    """
+    PARTIALLY_CLOSED_INACTIVE = 'partially_closed_inactive'
+
+    """
+    Order still has remaining quantity to be consumed
+    however it can still be called for a close request
+    """
+    PARTIALLY_CLOSED_ACTIVE = 'partially_closed_active'
 
 class ConsumerMessageStatus(str, Enum):
     """

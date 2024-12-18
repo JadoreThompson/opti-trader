@@ -40,11 +40,11 @@ async def generate_order_requests(quantity: int = 10) -> list:
                 quantity=random.randint(1, 50),
             ),
             
-            # socket_models.LimitOrder(
-            #     ticker='APPL',
-            #     quantity=random.randint(1, 50),
-            #     limit_price=random.choice([n for n in range(20, 1000, 10)])
-            # )
+            socket_models.LimitOrder(
+                ticker='APPL',
+                quantity=random.randint(1, 50),
+                limit_price=random.choice([n for n in range(20, 1000, 10)])
+            )
         ])
 
         order_type = {
@@ -52,7 +52,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             socket_models.LimitOrder: OrderType.LIMIT
         }[type(order_obj)]
             
-        order_req = socket_models.OrderRequest(
+        order_req = socket_models.Request(
             type=order_type, 
             market_order=order_obj if order_type == OrderType.MARKET else None,
             limit_order=order_obj if order_type == OrderType.LIMIT else None
@@ -142,7 +142,7 @@ async def main():
             name=fkr.first_name(), 
             divider=randint(2, 5), 
             num_orders=randint(10_000, 30_000), 
-            close_quantity=randint(10, 50)
+            close_quantity=randint(50, 100)
         ) for _ in range(TEST_SIZE)
     ])
 

@@ -11,6 +11,7 @@ rec.py
 temp.csv
 client_secret.json
 tokens
+log
 
 alembic.ini
 docker-compose.yaml

@@ -1,10 +1,11 @@
 import asyncio
+import logging
 from typing import Optional
 
 # Local
 from config import PH
 from db_models import UserWatchlist, Users
-from exceptions import DuplicateError, DoesNotExist, InvalidError
+from exceptions import DuplicateError, DoesNotExist, InvalidAction
 from models.models import AuthResponse, LoginUser, RegisterUser, UserMetrics
 from utils.auth import check_user_exists, create_jwt_token, verify_jwt_token_http
 from utils.db import check_visible_user, get_db_session
@@ -17,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-
+logger = logging.getLogger(__name__)
 accounts = APIRouter(prefix="/accounts", tags=['accounts'])
 
 
@@ -59,14 +60,12 @@ async def register(body: RegisterUser):
         except IntegrityError as e:
             raise DuplicateError('User already exists')
         except Exception as e:
-            print('register inner error: ', type(e), str(e))
+            logger.error(f'{type(e)} - {str(e)}')
             
-    except InvalidError:
-        raise InvalidError("User already exists")
-    except DuplicateError:
-        raise
+    except (InvalidAction, DuplicateError):
+        raise InvalidAction('User already exists')
     except Exception as e:
-        print('register outer: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
         raise
 
 
@@ -91,11 +90,10 @@ async def login(body: LoginUser):
         )
     except DoesNotExist as e:
         return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
-    except InvalidError as e:
-        print('Invalid error: ', type(e), str(e))
+    except InvalidAction as e:
         raise
     except Exception as e:
-        print("[LOGIN][ERROR] >> ", type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
         raise
 
 
@@ -166,7 +164,7 @@ async def metrics(
         })
         
     except Exception as e: 
-        print('account metrics: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
 
 
 @accounts.get("/search")
@@ -186,4 +184,5 @@ async def search(
             )
             return [item[0] for item in resp]
     except Exception as e:
-        print('accounts search: ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
+
