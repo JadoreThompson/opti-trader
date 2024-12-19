@@ -59,6 +59,8 @@ class Users(Base):
     api_key: Mapped[str] = mapped_column(String, default=generate_api_key)
     visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    authenticated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    # pfp: Mapped[str] = mapped_column(String)
 
     # Relationships
     orders = relationship("Orders", back_populates='users', cascade="all, delete-orphan")

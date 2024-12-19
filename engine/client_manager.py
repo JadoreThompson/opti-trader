@@ -27,6 +27,7 @@ from enums import ConsumerMessageStatus, OrderType, OrderStatus
 from models.socket_models import Request
 from utils.auth import verify_jwt_token_ws
 from utils.db import get_db_session, check_user_exists
+from utils.tasks import send_copy_trade_email
 
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,7 @@ class ClientManager:
                                 socket: WebSocket = self._active_connections[user_id]['socket']
                                 message: str = json.loads(message['data'])
                                 await socket.send_text(json.dumps(message))
-                                asyncio.create_task(self._send_watchlist_alerts(message=message, user_id=user_id))
+                                asyncio.create_task(self._send_copy_trade_alerts(message=message, user_id=user_id))
                                 await asyncio.sleep(0.1)
                     except StarletteWebSocketDisconnect:
                         await ps.unsubscribe(channel)
@@ -118,7 +119,7 @@ class ClientManager:
         except Exception as e:
             logger.error(f'Outer exc >> {type(e)} - {str(e)}')
             
-    async def _send_watchlist_alerts(self, message: dict, user_id: str) -> None:
+    async def _send_copy_trade_alerts(self, message: dict, user_id: str) -> None:
         """
         Sends alerts to all subscribed users
         Args:
@@ -127,39 +128,85 @@ class ClientManager:
         """       
         try: 
             if message['status'] == ConsumerMessageStatus.SUCCESS:        
-                query = select(UserWatchlist.watcher).where(UserWatchlist.master == user_id)
-                 
                 internal = message.get('internal', None)
                 
-                if internal is None:
+                if internal not in [OrderType.MARKET, OrderType.LIMIT]:
                     return
                 
-                if internal == OrderType.LIMIT:
-                    query = query.where(UserWatchlist.limit_orders == True)
-                elif internal == OrderType.MARKET:
-                    query = query.where(UserWatchlist.market_orders == True)
-                
-                async with get_db_session() as session:
-                    r = await session.execute(query)
-                    watchlist = r.all()
-                    
-                    if not watchlist:
-                        return
-                    
-                    # In production send out email notifcations too
-                    for item in watchlist:
-                        try:
-                            await self._active_connections[str(item[0])]['socket'].send_text(json.dumps({
-                                'status': ConsumerMessageStatus.NOTIFICATION,
-                                'message': f'{self._active_connections[str(item[0])]['user'].username} opened an order at {message['details']['filled_price']}'
-                            }))
-                        except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
-                            continue
-                        except Exception as e:
-                            logger.error(f'Inner exc >> {type(e)} - {str(e)}')
+                await asyncio.gather(*[
+                    self._copy_trade_email_handler(user_id, internal, message),
+                    self._copy_trader_socket_handler(internal, user_id, message)
+                ])
         except Exception as e:
             logger.error(f'Outer exc >> {type(e)} - {str(e)}')
+            
+    async def _copy_trade_email_handler(self, user_id, order_type: OrderType, message: dict) -> None:
+        """Finds all watchers for the user_id and calls the corresponding celery task"""
+        componenets = [[], None]
+        
+        query = \
+            select(UserWatchlist.watcher)\
+            .where(UserWatchlist.master == user_id)
+    
+        if order_type == OrderType.MARKET:
+            query = query.where(UserWatchlist.market_orders == True)
+        elif order_type == OrderType.LIMIT:
+            query = query.where(UserWatchlist.limit_orders == True)
+        
+        try:
+            async with get_db_session() as session:        
+                result = await session.execute(
+                    select(Users.email)
+                    .where(Users.user_id.in_(query))
+                )
+                componenets[0] = [item[0] for item in result.all()]
                 
+                if not componenets[0]:
+                    return
+                
+                result = await session.execute(
+                    select(Users.username)
+                    .where(Users.user_id == user_id)
+                )
+                componenets[1] = result.first()[0]
+            
+            
+            send_copy_trade_email.delay(
+                componenets[0], 
+                componenets[1], 
+                **message['details']
+            )
+            
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
+            
+    async def _copy_trader_socket_handler(self, order_type: str, user_id: str, message: dict) -> None:
+        """Sends out socket message to all users with user_id as master"""
+        query = select(UserWatchlist.watcher).where(UserWatchlist.master == user_id)
+                
+        if order_type == OrderType.LIMIT:
+            query = query.where(UserWatchlist.limit_orders == True)
+        elif order_type == OrderType.MARKET:
+            query = query.where(UserWatchlist.market_orders == True)
+        
+        async with get_db_session() as session:
+            r = await session.execute(query)
+            watchlist = r.all()
+            
+            if not watchlist:
+                return                    
+        
+        for user in watchlist:
+            try:
+                user = str(user)
+                await self._active_connections[user]['socket'].send_text(json.dumps({
+                    'status': ConsumerMessageStatus.NOTIFICATION,
+                    'message': f'{self._active_connections[user]['user'].username} opened an order at {message['details']['filled_price']}'
+                }))
+            except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
+                continue
+            except Exception as e:
+                logger.error(f'Inner exc >> {type(e)} - {str(e)}')
             
     def cleanup(self, user_id: str) -> None: 
         if user_id in self._active_connections:

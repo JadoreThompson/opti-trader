@@ -263,8 +263,7 @@ class OrderBook:
                     and len(self.bids[key]) > 0
                 }
                 
-            result = sorted(cleaned_prices.items(), key=lambda item: item[1])[0][0]
-            return result
+            return sorted(cleaned_prices.items(), key=lambda item: item[1])[0][0]
         except ValueError:
             return None
         except IndexError:

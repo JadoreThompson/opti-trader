@@ -1,4 +1,9 @@
-import asyncpg, asyncio, json, logging
+import asyncpg
+import asyncio
+import json
+import logging
+
+from collections import deque
 
 # Local
 from config import LOG_FOLDER
@@ -18,13 +23,13 @@ class DBListener:
     def dsn(self):
         return self._dsn
         
-    def handler(self, conn, pid, channel, payload) -> None:
+    def _handler(self, conn, pid, channel, payload) -> None:
         if isinstance(payload, str):
             payload = json.loads(payload)
         
         self._queue.put_nowait(payload['user_id'])
-        
-    async def process_notifications(self) -> None:
+    
+    async def _process_update_notifications(self) -> None:
         logger.info('Waiting for messages')
         while True:
             try:
@@ -44,13 +49,13 @@ class DBListener:
         db_url = self.dsn.replace('+asyncpg', '')
         
         try:
-            self.conn = await asyncpg.connect(dsn=db_url)
-            await self.conn.add_listener('order_change', self.handler)
-            await self.process_notifications()
+            self._conn = await asyncpg.connect(dsn=db_url)
+            await self._conn.add_listener('order_change', self._handler),   
+            await self._process_update_notifications(),
         except Exception as e:
-            logger.error(f'{e}')
+            logger.error('{} - {}'.format(type(e), str(e)))
         finally:
             # Cleanup
             if hasattr(self, 'conn'):
-                await self.conn.remove_listener('order_change', self.handler)
-                await self.conn.close()
+                await self._conn.remove_listener('order_change', self._handler)
+                await self._conn.close()

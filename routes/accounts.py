@@ -1,29 +1,32 @@
 import asyncio
 import logging
 from typing import Optional
+from datetime import datetime, timedelta
 
 # Local
 from config import PH
 from db_models import UserWatchlist, Users
 from exceptions import DuplicateError, DoesNotExist, InvalidAction
-from models.models import AuthResponse, LoginUser, RegisterUser, UserMetrics
+from models.models import AuthResponse, LoginUser, ModifyAccountBody, RegisterBodyWithToken, RegisterBody, UserMetrics
 from utils.auth import check_user_exists, create_jwt_token, verify_jwt_token_http
 from utils.db import check_visible_user, get_db_session
+from utils.tasks import send_confirmation_email, generate_token
 
 # SA
-from sqlalchemy import insert, select, func, text
+from sqlalchemy import insert, select, func, text, update
 from sqlalchemy.exc import IntegrityError
 
 # FA
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
+
 logger = logging.getLogger(__name__)
 accounts = APIRouter(prefix="/accounts", tags=['accounts'])
-
+TOKENS = {}
 
 @accounts.post("/register")
-async def register(body: RegisterUser):
+async def register(body: RegisterBody):
     """
     Registers a new user account.
     If the user already exists, raises DuplicateError.
@@ -42,21 +45,10 @@ async def register(body: RegisterUser):
             raise DuplicateError("An account already exists")
 
     except DoesNotExist:
-        try:
-            body.password = PH.hash(body.password)
-
-            async with get_db_session() as session:
-                user = await session.execute(
-                    insert(Users).values(**vars(body))
-                    .returning(Users.user_id, Users.username)
-                )
-                
-                await session.commit()
-                user = user.first()
-                return AuthResponse(
-                    username=user[1],
-                    token=create_jwt_token({'sub': str(user[0])})
-                )
+        try:    
+            token = generate_token()
+            TOKENS[body.email] = (token, datetime.now())
+            send_confirmation_email.delay(body.email, token)
         except IntegrityError as e:
             raise DuplicateError('User already exists')
         except Exception as e:
@@ -84,6 +76,10 @@ async def login(body: LoginUser):
     """
     try:
         user = await check_user_exists(body)
+        
+        if not user.authenticated:
+            raise DoesNotExist
+        
         return AuthResponse(
             username=user.username, 
             token=create_jwt_token({'sub': str(user.user_id)})
@@ -95,6 +91,68 @@ async def login(body: LoginUser):
     except Exception as e:
         logger.error(f'{type(e)} - {str(e)}')
         raise
+
+
+@accounts.post("/authenticate")
+async def authenticate(body: RegisterBodyWithToken):
+    try:
+        if body.email not in TOKENS:
+            raise InvalidAction("Register for account")
+
+        current = datetime.now()
+        og_token, creation_time = TOKENS[body.email]
+        
+        if creation_time - current > timedelta(minutes=5):
+            raise InvalidAction("Token has expired")
+
+        if og_token != body.token:
+            raise InvalidAction('Invalid token')
+            
+        body.password = PH.hash(body.password)
+
+        async with get_db_session() as session:
+            result = await session.execute(
+                insert(Users).values(
+                    **{ k: v for k, v in vars(body).items() if k != 'token' },
+                    authenticated=True
+                )
+                .returning(Users.user_id, Users.username)
+            )
+            
+            await session.commit()
+            details = result.first()
+        
+        del TOKENS[body.email]    
+        return AuthResponse(
+            username=details[1], 
+            token=create_jwt_token({'sub': str(details[0])})
+        )
+            
+    except InvalidAction:
+        raise
+    except Exception as e:
+        logger.error('{} - {}'.format(type(e), str(e)))
+        
+
+@accounts.post("/modify")
+async def modify(body: ModifyAccountBody, user_id: str=Depends(verify_jwt_token_http)):
+    try:
+        async with get_db_session() as session:
+            r = await session.execute(
+                update(Users)
+                .where(Users.user_id == user_id)
+                .values(**{k: v for k, v in vars(body).items() if v != None})
+                .returning(Users.username, Users.user_id)
+            )
+            await session.commit()
+            r = r.first()
+            
+        return AuthResponse(
+            username=r[0], 
+            token=create_jwt_token({'sub': str(r[1])})
+        )
+    except Exception as e:
+        logger.error('{} - {}'.format(type(e), str(e)))
 
 
 @accounts.get("/metrics", response_model=UserMetrics)
@@ -185,4 +243,3 @@ async def search(
             return [item[0] for item in resp]
     except Exception as e:
         logger.error(f'{type(e)} - {str(e)}')
-

@@ -8,6 +8,8 @@ from urllib.parse import quote
 from argon2 import PasswordHasher
 from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from mailers.mailers import GMailer
 from utils.connection import RedisConnection
 
 
@@ -43,4 +45,11 @@ logging.basicConfig(
     filename=LOG_FOLDER + f"/app.log", 
     level=logging.INFO, 
     format="[%(levelname)s][%(asctime)s] %(name)s - %(funcName)s - %(message)s"
+)
+
+# Mailer
+MAILER = GMailer()
+MAILER.create_service(
+    ['https://mail.google.com/'],
+    '../client_secret.json',    
 )
