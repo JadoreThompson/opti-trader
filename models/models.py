@@ -28,9 +28,8 @@ class LoginUser(_User):
     pass
 
 
-class RegisterUser(_User):
+class RegisterBody(_User):
     username: str
-    visible: bool = Field(False, description="Is the user's account visible to other user's for the leaderboard")
 
 
 class UserCount(Base):
@@ -51,6 +50,7 @@ class Username(Base):
 
 
 class AuthResponse(Username):
+    """Response Model for Login and Register endpoint"""
     token: str
     
 
@@ -186,3 +186,13 @@ class CopyTradeRequest(Base):
             raise ValueError("Must specifiy either limit_orders or market_orders")
         super().__init__(**kw)
     
+    
+class ModifyAccountBody(Base):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    visible: Optional[bool] = None
+
+
+class RegisterBodyWithToken(RegisterBody):
+    token: str

@@ -30,7 +30,7 @@ class GMailer(BaseMailer):
     async def create_service_async(self, scopes: list[str], client_secret_path: str, prefix: str='',):
         await asyncio.to_thread(self.create_service, **locals())
     
-    def create_service(self, scopes: list[str], client_secret_path: str, prefix: str='',) -> None:
+    def create_service(self, scopes: list[str], client_secret_path: str, prefix: str='') -> None:
         """
         Handles service creation for api_name
 
@@ -97,22 +97,25 @@ class GMailer(BaseMailer):
         await asyncio.to_thread(self.send_email, **params)
 
     def send_email(self, to: list[str], subject: str, body: str, body_type: str='plain') -> None:
-        if self.service is None:
-            raise ValueError('Must initialise service first')
-        
-        body_type = body_type.lower()
-        if body_type not in ['plain', 'html']:
-            raise ValueError('Body type must be either plain or html')
-        
-        for recipient in to:
-            msg = MIMEMultipart()
-            msg['to'] = recipient
-            msg['subject'] = subject
+        try:
+            if self.service is None:
+                raise ValueError('Must initialise service first')
             
-            msg.attach(MIMEText(body, body_type))
+            body_type = body_type.lower()
+            if body_type not in ['plain', 'html']:
+                raise ValueError('Body type must be either plain or html')
             
-            raw_msg = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
-            self.service.users().messages().send(userId='me', body={'raw': raw_msg}).execute()
+            for recipient in to:
+                msg = MIMEMultipart()
+                msg['to'] = recipient
+                msg['subject'] = subject
+                
+                msg.attach(MIMEText(body, body_type))
+                
+                raw_msg = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+                self.service.users().messages().send(userId='me', body={'raw': raw_msg}).execute()
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
         
     async def send_email_with_attachment_async(self, to: list[str], subject: str, body: str, attchment_paths: list[str]) -> None:
         params = locals()

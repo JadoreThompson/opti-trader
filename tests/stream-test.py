@@ -66,7 +66,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
 # ^^^^^
 import json
 
-async def test_create_user():
+async def create_user():
     async with get_db_session() as sess:
         pw = fkr.pystr()
         creds = {'email': fkr.email(), 'password': pw, 'username': fkr.last_name(), 'visible': random.choice([True, False])}
@@ -76,7 +76,7 @@ async def test_create_user():
         
         user = await sess.execute(
             sa.insert(Users)
-            .values(**creds)
+            .values(**creds, authenticated=True)
             .returning(Users)
         )
 
@@ -98,7 +98,7 @@ async def test_socket(
         divider (int, optional): How often to sell. Defaults to 5.
         quantity (int, optional): Quantity of shares to purchase. Defaults to 20.
     """
-    _, token = await test_create_user()
+    _, token = await create_user()
     orders = await generate_order_requests(num_orders)
     
     if kwargs.get('name', None):
