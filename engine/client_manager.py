@@ -74,7 +74,7 @@ class ClientManager:
             await asyncio.sleep(0.05)
     
     async def _process_price(self, price: float | int, ticker: str) -> None:
-        for _, details in self._active_connections.items():
+        for _, details in self._active_connections.copy().items():
             try:
                 await details['socket'].send_text(json.dumps({
                     'status': ConsumerMessageStatus.PRICE_UPDATE,
