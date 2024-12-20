@@ -20,9 +20,9 @@ from exceptions import DoesNotExist
 
 from .enums import OrderType as _OrderType
 from .orderbook import OrderBook
+from .utils import batch_update
 from .order.bid import BidOrder
 from .order.ask import AskOrder
-from .order.manager import OrderManager
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,6 @@ class MatchingEngine:
     _order_book: dict[str, OrderBook] = {}
     _redis = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=REDIS_HOST)
     _current_price = deque()
-    _order_manager = OrderManager()
 
     def __init__(self, queue=None) -> None:
         self.order_queue = queue
@@ -135,7 +134,7 @@ class MatchingEngine:
                 try:
                     order.order_status = OrderStatus.PARTIALLY_FILLED
                     orderbook.append_bid(order, data['price'])
-                    await self._order_manager.batch_update([data])
+                    await batch_update([data])
                 except Exception as e:
                     logger.error(f'handle market order -> {str(e)}')
         
@@ -156,7 +155,7 @@ class MatchingEngine:
                         orderbook.append_ask(order.data['stop_loss'], new_order)
                     
                     
-                    asyncio.create_task(self._order_manager.batch_update([data]))
+                    asyncio.create_task(batch_update([data]))
                     await asyncio.sleep(0)
 
                     orderbook.price = result[1]
@@ -269,7 +268,7 @@ class MatchingEngine:
                 except ValueError:
                     pass
             
-            asyncio.create_task(self._order_manager.batch_update([item.data for item in touched_orders]))    
+            asyncio.create_task(batch_update([item.data for item in touched_orders]))    
             if order.standing_quantity == 0:
                 return (2, ask_price)
 
@@ -416,7 +415,7 @@ class MatchingEngine:
                     order.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
 
                 orderbook.price = result[1]
-                await self._order_manager.batch_update([order.data])
+                await batch_update([order.data])
 
             except Exception as e:
                 logger.error(f'{type(e)} - {str(e)}')
@@ -526,7 +525,7 @@ class MatchingEngine:
                 new_order = AskOrder(item.data, _OrderType.STOP_LOSS_ORDER)
                 orderbook.append_ask(item.data['stop_loss'], new_order)
                     
-        asyncio.create_task(self._order_manager.batch_update([item.data for item in touched_orders]))    
+        asyncio.create_task(batch_update([item.data for item in touched_orders]))    
         
         if quantity <= 0:
             return (2, bid_price)
