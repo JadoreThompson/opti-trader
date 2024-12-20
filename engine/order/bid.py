@@ -5,14 +5,6 @@ from .base import BaseOrder
 class BidOrder(BaseOrder):
     def __init__(self, data: dict, order_type: OrderType, **kwargs) -> None:
         super().__init__(data, order_type, **kwargs)
-        
-    @property
-    def stop_loss(self) -> "None | AskOrder":
-        return self._stop_loss_order
-
-    @property
-    def take_profit(self) -> "None | AskOrder":
-        return self._take_profit_order
 
     @property
     def order_status(self):

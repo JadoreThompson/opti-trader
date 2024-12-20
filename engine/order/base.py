@@ -2,46 +2,16 @@ from datetime import datetime
 from .commons import OrderType, OrderStatus
 
 class BaseOrder:
-    """
-    This class represents an order
-    and some of  the properties to be used
-    by the matching engine and order manager
-    for retrieval and later computation
-    """
+    """Base Order class used to represent an order in the matching engine"""
     
     def __init__(self, data: dict, order_type: OrderType, **kwargs) -> None:
         if isinstance(data['created_at'], str):
             data['created_at'] = datetime.strptime(data['created_at'], "%Y-%m-%d %H:%M:%S.%f")
         
         self.data = data
-        self._quantity = data['quantity']
         self._standing_quantity = data['quantity']
         self._order_status = data['order_status']
-        
-        self._close_price = None
-        self._open_price = kwargs.get('filled_price', None)
         self.order_type = order_type
-        self._parent_order = kwargs.get('parent', None)
-        
-    @property
-    def quantity(self):
-        return self._quantity
-        
-    @property
-    def close_price(self):
-        return self._close_price
-    
-    @close_price.setter
-    def close_price(self, value: float):
-        self._close_price = value
-    
-    @property
-    def open_price(self) -> float | None:
-        return self._open_price
-
-    @open_price.setter
-    def open_price(self, value: float) -> None:
-        self._open_price = value
     
     @property
     def standing_quantity(self):
@@ -62,7 +32,8 @@ class BaseOrder:
 
     @order_status.setter
     def order_status(self, value: OrderStatus):
-        self._order_status = value
+        self._order_status = self.data['order_status'] = value
+
         
     def __str__(self) -> str:
         return f"{self.data['order_id'][:5]} >> {self._order_status}"

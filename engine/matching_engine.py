@@ -402,8 +402,9 @@ class MatchingEngine:
             
             try:
                 open_price = order.data['filled_price']
-                pnl = (result[1] / open_price) * (quantity * open_price)
-                order.data['realised_pnl'] +=  -1 * (order.position_size - round(pnl, 2))
+                position_size = open_price * order.data['quantity']
+                pnl = (result[1] / open_price) * (order.data['quantity'] * open_price)
+                order.data['realised_pnl'] +=  -1 * (position_size - round(pnl, 2))
                 
                 if order.standing_quantity <= 0:
                     order.data['close_price'] = result[1]
