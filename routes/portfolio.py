@@ -1,23 +1,69 @@
-import logging
-import  traceback
 import asyncio
-from datetime import datetime, timedelta
+from datetime import (
+    datetime, 
+    timedelta
+)
+import json
+import logging
+from typing import (
+    List, 
+    Optional, 
+    Annotated
+)
 from uuid import UUID
-from typing import List, Optional, Annotated
 
 # SA
-from sqlalchemy import select, insert
-from sqlalchemy.exc import IntegrityError
+import redis
+import redis.connection
+from sqlalchemy import (
+    select,
+    insert
+)
 
 # Local
-from utils.arithemtic import get_quantitative_metrics, beta, get_benchmark_returns, get_ghpr
-from utils.db import add_to_internal_cache, get_active_orders, get_orders, get_db_session, retrieve_from_internal_cache
+from config import (
+    REDIS_HOST,
+    SYNC_REDIS_CONN_POOL,
+)
+from utils.arithemtic import (
+    get_quantitative_metrics,
+    beta,
+    get_benchmark_returns,
+    get_ghpr
+)
+
+from utils.db import (
+
+    get_active_orders,
+    get_orders,
+    get_db_session,    
+)
 from utils.auth import verify_jwt_token_http
-from utils.portfolio import get_balance, get_monthly_returns
-from enums import OrderStatus, GrowthInterval
-from exceptions import DuplicateError, InvalidAction
-from db_models import UserWatchlist, Users, Orders
-from models.models import CopyTradeRequest, GrowthBody, GrowthModel, APIOrder, OrderStatusBody, PerformanceMetrics, QuantitativeMetricsBody, QuantitativeMetrics, TickerDistribution, Username
+from utils.portfolio import (
+    get_balance,
+    get_monthly_returns
+)
+from enums import (
+    OrderStatus,
+    GrowthInterval
+)
+from exceptions import InvalidAction
+from db_models import (
+    UserWatchlist,
+    Users,
+    Orders
+)
+from models.models import (
+    CopyTradeRequest,
+    GrowthModel,
+    APIOrder,
+    PerformanceMetrics,
+    QuantitativeMetricsBody,
+    QuantitativeMetrics,
+    TickerDistribution,
+    Username
+)
+
 
 # FA
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -163,7 +209,6 @@ def get_average_daily_return_and_total_profit_and_winrate(
     return average_daily_return, total_return, win_rate
     
     
-
 def get_avg_risk_per_trade(
     all_orders: list[dict],
     balance: float
@@ -203,6 +248,10 @@ def get_avg_risk_per_trade(
 # ^^^^^^^^^^^^^^
 logger = logging.getLogger(__name__)
 portfolio = APIRouter(prefix='/portfolio', tags=['portfolio'])
+REDIS_CLIENT = redis.Redis(
+    host=REDIS_HOST, 
+    connection_pool=SYNC_REDIS_CONN_POOL
+)
 
 @portfolio.get('/orders', response_model=List[APIOrder])
 async def orders(
@@ -224,24 +273,44 @@ async def orders(
             except TypeError:
                 raise HTTPException(status_code=403)
         
-    existing_data: dict | None = retrieve_from_internal_cache(user_id, 'orders')
-    tupled_order_status = tuple(order_status)
+    order_status = tuple(order_status)
+    existing_data = REDIS_CLIENT.get(user_id)
     
     if existing_data:
-        if tupled_order_status in existing_data:
-            return existing_data[tupled_order_status]
+        existing_data = json.loads(existing_data)
+        if 'orders' in existing_data:      
+            if ''.join(order_status) in existing_data['orders']:
+                return [
+                    APIOrder(**item) 
+                    for item in existing_data['orders'][''.join(order_status)]
+                ]
+    else:
+        existing_data = {}
+    
+    existing_data.setdefault('orders', {})
                 
     try:    
         async with get_db_session() as session:                
             r = await session.execute(
                 select(Orders)
                 .where(
-                    (Orders.order_status.in_(tupled_order_status)) &
+                    (Orders.order_status.in_(order_status)) &
                     (Orders.user_id == user_id))
             )
             
-            all_orders = [APIOrder(**vars(item)) for item in r.scalars().all()]
-        add_to_internal_cache(user_id=user_id, channel='orders', value={tupled_order_status: all_orders})
+            rs = [vars(item) for item in r.scalars().all()]
+            all_orders = [APIOrder(**item) for item in rs]
+        
+        existing_data['orders'][''.join(order_status)] = [
+            {
+                k: (str(v) if isinstance(v, (datetime, UUID)) else v)
+                for k, v in item.items()
+                if k != 'user_id' and k != '_sa_instance_state'
+            } 
+            for item in rs
+        ]
+        
+        REDIS_CLIENT.set(user_id, json.dumps(existing_data))
         return all_orders
     except InvalidAction:
         raise
@@ -264,7 +333,15 @@ async def performance(
     Returns:
         PerformanceMetrics()
     """
+    data = REDIS_CLIENT.get(user_id)
     
+    if data:
+        data = json.loads(data)
+        if 'performance' in data:
+            return data['performance']
+    else:
+        data = {}
+        
     if username:
         try:
             async with get_db_session() as session:
@@ -281,10 +358,10 @@ async def performance(
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
 
+    performance_dict = {}
     
-    main_dictionary = {}
     try:
-        main_dictionary['balance'], all_orders = await asyncio.gather(*[
+        performance_dict['balance'], all_orders = await asyncio.gather(*[
             get_balance(user_id),
             get_orders(**{'user_id': user_id, 'order_status': OrderStatus.CLOSED})
         ])
@@ -295,18 +372,20 @@ async def performance(
             user_id=user_id, 
             all_orders=all_orders, 
             all_dates=all_dates,
-            balance=main_dictionary['balance']
+            balance=performance_dict['balance']
         )
         
-        main_dictionary.update(
+        performance_dict.update(
             dict(zip(
                 ['daily', 'total_profit', 'winrate'], 
                 get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
             ))
         )
         
-        main_dictionary.update(quant_data)
-        return PerformanceMetrics(**main_dictionary)
+        performance_dict.update(quant_data)
+        data.update({'performance': performance_dict})
+        REDIS_CLIENT.set(user_id, json.dumps(data))
+        return PerformanceMetrics(**performance_dict)
             
     except Exception as e:
         logger.error(f'{type(e)} - {str(e)}')
@@ -327,6 +406,7 @@ async def quantitative_metrics(
         QuantitativeMetrics()
     """ 
     data = {'user_id': user_id}
+    key_ = 'quantitative'
     
     if username is not None:
         try:
@@ -342,11 +422,24 @@ async def quantitative_metrics(
         except TypeError:
             raise HTTPException(status_code=403)
     
+    existing_data = REDIS_CLIENT.get(user_id)
+    if existing_data:
+        existing_data = json.loads(existing_data)
+        if key_ in existing_data:
+            return existing_data[key_]
+    else:
+        existing_data = {}
+    
     data.update(QuantitativeMetricsBody().model_dump())    
     data['benchmark_ticker'] = str(data['benchmark_ticker'][0])
     data['months_ago'] = int(data['months_ago'][0])
     data.update(await get_quant_metrics_handler(**data))
-    return QuantitativeMetrics(**data)
+    
+    final_value = QuantitativeMetrics(**data)
+    existing_data.update({key_: final_value.model_dump()})
+    REDIS_CLIENT.set(user_id, json.dumps(data))
+    
+    return final_value
 
 
 @portfolio.get("/growth", response_model=List[GrowthModel])
@@ -378,13 +471,17 @@ async def growth(
         except TypeError:
             raise HTTPException(status_code=403)
     
-    existing_data: dict | None = retrieve_from_internal_cache(user_id, 'growth')
+    key_ = 'growth_data'
+    existing_data = REDIS_CLIENT.get(user_id)
+    if existing_data:
+        existing_data = json.loads(existing_data)
+        if key_ in existing_data:
+            if interval in existing_data[key_]:
+                return existing_data[key_][interval]
+    else:
+        existing_data = {}
     
-    try:
-        if interval in existing_data:
-            return existing_data[interval]
-    except TypeError:
-        pass
+    existing_data.setdefault(key_, {})
     
     query = select(Orders).where((Orders.user_id == user_id) & (Orders.order_status == OrderStatus.CLOSED))
     today = datetime.now()
@@ -432,15 +529,20 @@ async def growth(
     
     return_list.sort(key= lambda item: item['time'])
     return_list = [GrowthModel(**item) for item in return_list if return_list.count(item) == 1]
-    add_to_internal_cache(user_id, 'growth', {interval: return_list})
+    
+    existing_data.update({
+        interval: [item.model_dump() for item in return_list]
+    })
+    REDIS_CLIENT.set(user_id, json.dumps(existing_data))
+    
     return return_list
     
 
-@portfolio.get("/distribution", response_model=List[TickerDistribution])
+@portfolio.get("/distribution", response_model=List[Optional[TickerDistribution]])
 async def distribution(
     user_id: str = Depends(verify_jwt_token_http),
     username: Optional[str] = None,
-) -> List[TickerDistribution]:
+) -> List[Optional[TickerDistribution]]:
     
     if username:
         try:
@@ -456,6 +558,16 @@ async def distribution(
         except TypeError:
             raise HTTPException(status_code=403)
     
+    key_ = 'distribution'
+    existing_data = REDIS_CLIENT.get(user_id)
+    
+    if existing_data:
+        existing_data = json.loads(existing_data)
+        if key_ in existing_data:
+            return existing_data[key_]
+    else:
+        existing_data = {}
+    
     all_orders = await get_active_orders(user_id)
     ticker_map = {
         ticker: 0
@@ -466,50 +578,92 @@ async def distribution(
     for order in all_orders:
         price = order['price'] or order['filled_price']
         ticker_map[order['ticker']] += price * order['quantity']
+    
     total = sum(ticker_map.values())
     ticker_map = {
         k: (v / total)
         for k, v in ticker_map.items()
     }
     
-    return [TickerDistribution(name=key, value=value) for key, value in ticker_map.items()]
+    final_value = [
+        TickerDistribution(
+            name=key, 
+            value=value
+        ) 
+        for key, value in ticker_map.items()
+    ]
     
+    existing_data.update({
+        key_: [
+            item.model_dump()
+            for item in final_value
+        ]
+    })
+    REDIS_CLIENT.set(user_id, json.dumps(existing_data))    
+    
+    return final_value
+
     
 @portfolio.get('/weekday-results')
 async def weekday_results(
     user_id: str = Depends(verify_jwt_token_http),
     username: Optional[Username] = None,
 ):
-    constraints = {'user_id': user_id, 'order_status': OrderStatus.CLOSED}
+    try:
+        constraints = {
+            'user_id': user_id, 
+            'order_status': OrderStatus.CLOSED
+        }
 
-    
-    if username:
-        try:
-            async with get_db_session() as session:
-                r = await session.execute(
-                    select(Users.user_id)
-                    .where(
-                        (Users.username == username) &
-                        (Users.visible == True)
+        if username:
+            try:
+                async with get_db_session() as session:
+                    r = await session.execute(
+                        select(Users.user_id)
+                        .where(
+                            (Users.username == username) &
+                            (Users.visible == True)
+                        )
                     )
+                    constraints.update({'user_id': r.first()[0]})
+            except TypeError:
+                raise HTTPException(status_code=403)
+        
+        key_ = 'weekday_results'
+        existing_data = REDIS_CLIENT.get(constraints['user_id'])
+
+        if existing_data:
+            existing_data = json.loads(existing_data)
+            if key_ in existing_data:
+                return JSONResponse(
+                    status_code=200, 
+                    content=existing_data[key_]
                 )
-                constraints.update({'user_id': r.first()[0]})
-        except TypeError:
-            raise HTTPException(status_code=403)
-            
-    all_orders = await get_orders(**constraints)
-    num_range = range(7)
-    wins = [0 for _ in num_range]    
-    losses = [0 for _ in num_range]
+        else:
+            existing_data = {}
     
-    for order in all_orders:
-        realised_pnl = order['realised_pnl']
-        if realised_pnl < 0:
-            losses[order['created_at'].weekday()] += 1
-        elif realised_pnl > 0:
-            wins[order['created_at'].weekday()] += 1
+        all_orders = await get_orders(**constraints)
+        num_range = range(7)
+        wins = [0 for _ in num_range]    
+        losses = [0 for _ in num_range]
     
-    return JSONResponse(status_code=200, content={'wins': wins, 'losses': losses})
+        for order in all_orders:
+            realised_pnl = order['realised_pnl']
+            if realised_pnl < 0:
+                losses[order['created_at'].weekday()] += 1
+            elif realised_pnl > 0:
+                wins[order['created_at'].weekday()] += 1
+        
+        final_value = {'wins': wins, 'losses': losses}
+        existing_data.update({key_: final_value})
+        REDIS_CLIENT.set(constraints['user_id'], json.dumps(existing_data))
+        
+        return JSONResponse(
+            status_code=200, 
+            content=final_value
+        )
+    except Exception as e:
+        logger.error('{} - {}'.format(type(e), str(e)))
 
 
 @portfolio.post("/copy")

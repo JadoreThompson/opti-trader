@@ -1,8 +1,9 @@
 import asyncio
+import json
 import random
 import logging 
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime
 from faker import Faker
 from multiprocessing import Queue
@@ -10,8 +11,15 @@ from sqlalchemy import insert
 
 # Local
 from db_models import MarketData
+from enums import PubSubCategory, UpdateScope
 from exceptions import DoesNotExist
+from models.models import APIOrder
+from models.socket_models import (
+    OrderUpdatePubSubMessage, 
+    BasePubSubMessage
+)
 from utils.db import get_db_session
+from .utils import publish_update_to_client
 from .order.commons import OrderType, OrderStatus
 
 
@@ -30,6 +38,7 @@ class OrderBook:
     
     _price = None
     _orders: dict[str, dict[str, "BidOrder | AskOrder"]] = defaultdict(dict)
+    _dom = defaultdict(dict)
 
     def __init__(self, ticker: str, queue: Queue) -> None:
         self._ticker = ticker
@@ -65,7 +74,15 @@ class OrderBook:
             return
         
         self._price = price
-        asyncio.get_running_loop().create_task(self._process_price(price))
+        
+        tasks = [
+            self._process_price(price),
+            self._update_unrealised_pnl(price),
+            self._update_dom(price),
+        ]
+        
+        for task in tasks:
+            asyncio.get_running_loop().create_task(task)
     
     async def _process_price(self, price: float) -> None:
         """Persist price in DB and push to the client manager"""
@@ -90,7 +107,74 @@ class OrderBook:
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
         
+    async def _update_unrealised_pnl(self, price: float) -> None:
+        """Update unrealisd pnl for all orders and publish to the clients"""
+        for _, v in self._orders.copy().items():
+            await asyncio.sleep(0)
+            try:
+                if 'entry' not in v:
+                    continue
+                
+                order = v['entry']
+                
+                if order.order_status in [OrderStatus.NOT_FILLED, OrderStatus.CLOSED]:
+                    continue
+                
+                # Only here for testing
+                if 'unrealised_pnl' not in order.data:
+                    continue
+                
+                starting_upl = order.data['unrealised_pnl']
+                
+                pos_size = order.standing_quantity * order.data['filled_price']
+                upl = (price / order.data['filled_price']) * (pos_size)
+                order.data['unrealised_pnl'] += -1 * (pos_size - round(upl, 2))
+                
+                if not order.data['unrealised_pnl'] == starting_upl:
+                    await publish_update_to_client(**{
+                        'channel': f'trades_{order.data['user_id']}',
+                        'message': OrderUpdatePubSubMessage(
+                            category=PubSubCategory.ORDER_UPDATE,
+                            on=UpdateScope.EXISTING,
+                            details=APIOrder(**order.data).model_dump()
+                        ).model_dump()
+                    })
+                
+            except Exception as e:
+                logger.error('{} - {}'.format(type(e), str(e)))
     
+    async def _update_dom(self, price: float) -> None:
+        dom_size = 5
+        dom = {'ticker': self._ticker}
+        
+        prices = [i for i in self._ask_levels if i >= price][-1 * dom_size:]
+        dom['asks'] = dict(
+            zip(
+                prices,
+                [len(self._asks[price]) for price in prices]
+            )
+        )
+        
+        prices = [i for i in self._bid_levels if i <= price][-1 * dom_size:]
+        dom['bids'] = dict(
+            zip(
+                prices,
+                [len(self._bids[price]) for price in prices]
+            )
+        )
+        
+        if dom != self._dom:
+            await publish_update_to_client(
+                **{
+                    'channel': 'dom',
+                    'message':
+                        BasePubSubMessage(
+                            category=PubSubCategory.DOM_UPDATE,
+                            details=dom
+                        ).model_dump()
+                }
+            )
+
     def fetch(self, order_id: str) -> "BidOrder":        
         try:
             return self._orders[order_id]['entry']
@@ -115,7 +199,6 @@ class OrderBook:
         if order.data['order_id'] not in self._orders:
             raise DoesNotExist(message="You must append bid first")
         
-        # self.asks.setdefault(price, [])
         self.asks[price].append(order)
         
         if order.order_type == OrderType.STOP_LOSS_ORDER:

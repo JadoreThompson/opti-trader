@@ -21,23 +21,23 @@ from sqlalchemy import select
 
 # Local
 from db_models import Orders, UserWatchlist, Users
-from config import REDIS_HOST, REDIS_CONN_POOL
+from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
 from exceptions import UnauthorisedError, InvalidAction
-from enums import ConsumerMessageStatus, OrderType, OrderStatus
-from models.socket_models import Request
+from enums import PubSubCategory, OrderType, OrderStatus
+from models.socket_models import BasePubSubMessage, Request
 from utils.auth import verify_jwt_token_ws
 from utils.db import get_db_session, check_user_exists
 from utils.tasks import send_copy_trade_email
 
 
 logger = logging.getLogger(__name__)
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=REDIS_HOST)
+REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=ASYNC_REDIS_CONN_POOL, host=REDIS_HOST)
 
 
 class ClientManager:
     _initialised: bool = False
     _active_connections: dict[str, dict[str, any]] = {}
-    _ticker_quotes: dict[str, float] = {'APPL': randint(10, 1000)}
+    _ticker_quotes: dict[str, float] = {'APPL': 300}
     
     def __init__(self, queue: Queue=None) -> None:    
         self.order_queue = queue
@@ -48,6 +48,22 @@ class ClientManager:
             OrderType.CLOSE: self._close_order_handler,
             OrderType.MODIFY: self._modify_order_handler,
         }
+    
+    async def _send_update_all(self, message: dict, category: PubSubCategory) -> None:
+        for _, details in self._active_connections.copy().items():
+            try:
+                await details['socket'].send_text(json.dumps(
+                    BasePubSubMessage(
+                        category=category,
+                        details=message
+                    ).model_dump()
+                ))
+            except (KeyError, RuntimeError, StarletteWebSocketDisconnect):
+                pass
+            except Exception as e:
+                logger.error(f'{type(e)} - {str(e)}')
+            
+            await asyncio.sleep(0.01)
         
     async def _listen_to_prices(self) -> None:
         """Listens to prices from the Orderbook instances for sendout"""        
@@ -61,7 +77,15 @@ class ClientManager:
                             continue
                         
                         self._ticker_quotes[ticker] = price
-                        asyncio.get_running_loop().create_task(self._process_price(price, ticker))
+                        asyncio.get_running_loop().create_task(self._send_update_all(
+                                {
+                                    'ticker': ticker,
+                                    'price': price,
+                                    'time': int(datetime.now().timestamp())
+                                },
+                                PubSubCategory.PRICE_UPDATE,
+                            )
+                        )
                 except (asyncio.queues.QueueEmpty, queue.Empty) as e:
                     pass
                 except Exception as e:
@@ -72,24 +96,26 @@ class ClientManager:
             logger.error(f'Outer exc >> {type(e)} - {str(e)}')
         finally:
             await asyncio.sleep(0.05)
-    
-    async def _process_price(self, price: float | int, ticker: str) -> None:
-        for _, details in self._active_connections.copy().items():
-            try:
-                await details['socket'].send_text(json.dumps({
-                    'status': ConsumerMessageStatus.PRICE_UPDATE,
-                    'message': {
-                        'ticker': ticker, 
-                        'price': price, 
-                        'time': int(datetime.now().timestamp()),
-                    },
-                }))
-            except (KeyError, RuntimeError, StarletteWebSocketDisconnect):
-                pass
-            except Exception as e:
-                logger.error(f'{type(e)} - {str(e)}')
             
-            await asyncio.sleep(0.01)
+    async def _listen_to_dom(self) -> None:
+        try:
+            async with REDIS_CLIENT.pubsub() as ps:
+                await ps.subscribe('dom')
+                while True:
+                    try:
+                        msg = await ps.get_message(ignore_subscribe_messages=True)
+                        if msg:
+                            msg = json.loads(msg['data'])
+                            asyncio.get_running_loop().create_task(
+                                self._send_update_all(
+                                    msg['details'], 
+                                    PubSubCategory.DOM_UPDATE
+                                    )
+                            )
+                    except Exception as e:
+                        logger.error('Inner {} - {}'.format(type(e), str(e)))
+        except Exception as e:
+            logger.error('Outer {} - {}'.format(type(e), str(e)))
                 
     async def _listen_to_order_updates(self, user_id: str) -> None:
         try:
@@ -100,21 +126,27 @@ class ClientManager:
 
                 while True:
                     try:
-                        message = await ps.get_message(ignore_subscribe_messages=True, timeout=0.1)
-                        if message:
+                        msg = await ps.get_message(ignore_subscribe_messages=True, timeout=0.1)
+                        if msg:
                             if user_id in self._active_connections:
-                                socket: WebSocket = self._active_connections[user_id]['socket']
-                                message: str = json.loads(message['data'])
-                                await socket.send_text(json.dumps(message))
-                                asyncio.create_task(self._send_copy_trade_alerts(message=message, user_id=user_id))
-                                await asyncio.sleep(0.1)
+                                msg = json.loads(msg['data'])
+                                
+                                if msg['category'] == 'dom':
+                                    print(json.dumps(msg, indent=4))
+                                
+                                await self._active_connections[user_id]['socket'].send_text(json.dumps(msg))
+                                asyncio.create_task(self._send_copy_trade_alerts(
+                                    message=msg, 
+                                    user_id=user_id
+                                ))
+
                     except StarletteWebSocketDisconnect:
                         await ps.unsubscribe(channel)
                         break
                     except Exception as e:
                         logger.error(f'Inner exc >> {type(e)} - {str(e)}')
-                    finally:
-                        await asyncio.sleep(0.1)
+                    
+                    await asyncio.sleep(0.1)
               
         except Exception as e:
             logger.error(f'Outer exc >> {type(e)} - {str(e)}')
@@ -127,15 +159,15 @@ class ClientManager:
             user_id (str): _description_
         """       
         try: 
-            if message['status'] == ConsumerMessageStatus.SUCCESS:        
-                internal = message.get('internal', None)
+            if message['category'] == PubSubCategory.SUCCESS:        
+                order_type = message['details'].get('order_type', None)
                 
-                if internal not in [OrderType.MARKET, OrderType.LIMIT]:
+                if order_type not in [OrderType.MARKET, OrderType.LIMIT]:
                     return
                 
                 await asyncio.gather(*[
-                    self._copy_trade_email_handler(user_id, internal, message),
-                    self._copy_trader_socket_handler(internal, user_id, message)
+                    self._copy_trade_email_handler(user_id, order_type, message),
+                    self._copy_trader_socket_handler(order_type, user_id, message)
                 ])
         except Exception as e:
             logger.error(f'Outer exc >> {type(e)} - {str(e)}')
@@ -198,11 +230,13 @@ class ClientManager:
         
         for user in watchlist:
             try:
-                user = str(user)
-                await self._active_connections[user]['socket'].send_text(json.dumps({
-                    'status': ConsumerMessageStatus.NOTIFICATION,
-                    'message': f'{self._active_connections[user]['user'].username} opened an order at {message['details']['filled_price']}'
-                }))
+                user = str(user[0])
+                await self._active_connections[user]['socket'].send_text(json.dumps(
+                    BasePubSubMessage(
+                        category=PubSubCategory.NOTIFICATION,
+                        message=f'{self._active_connections[user]['user'].username} opened an order at {message['details']['filled_price']}'
+                    ).model_dump()
+                ))
             except (KeyError, StarletteWebSocketDisconnect, RuntimeError) as e:
                 continue
             except Exception as e:
@@ -221,6 +255,7 @@ class ClientManager:
             await socket.accept()
             if not self._initialised:
                 asyncio.create_task(self._listen_to_prices())
+                asyncio.create_task(self._listen_to_dom())
                 await asyncio.sleep(0.01)
                 self._initialised = True
             
@@ -242,10 +277,12 @@ class ClientManager:
                 'listen_order_task': asyncio.create_task(self._listen_to_order_updates(user_id=user_id)),
             }
 
-            await socket.send_text(json.dumps({
-                'status': ConsumerMessageStatus.SUCCESS,
-                'message': 'Successfully connected',                
-            }))
+            await socket.send_text(json.dumps(
+                BasePubSubMessage(
+                    category=PubSubCategory.SUCCESS,
+                    message="Successfully connected"
+                ).model_dump()
+            ))
 
             return user_id
         except (KeyError, InvalidAction):
@@ -269,10 +306,12 @@ class ClientManager:
             await asyncio.sleep(0.1)
             
         except ValidationError as e:
-            await socket.send_text(json.dumps({
-                'status': ConsumerMessageStatus.ERROR,
-                'message': e.errors()
-            }))
+            await socket.send_text(json.dumps(
+                BasePubSubMessage(
+                    category=PubSubCategory.ERROR,
+                    message=str(e)
+                ).model_dump()
+            ))
         except (TypeError, RuntimeError, StarletteWebSocketDisconnect) as e:
             raise WebSocketDisconnect
         except Exception as e:
@@ -293,10 +332,12 @@ class ClientManager:
                 logger.info('{mtype} succesfully sent'.format(mtype=message.type))
                 
         except (InvalidAction, UnauthorisedError) as e:
-                await self._active_connections[user_id]['socket'].send_text(json.dumps({
-                    'status': ConsumerMessageStatus.ERROR,
-                    'message': str(e)
-                }))
+                await self._active_connections[user_id]['socket'].send_text(json.dumps(
+                    BasePubSubMessage(
+                        category=PubSubCategory.ERROR,
+                        message=str(e)
+                    ).model_dump()
+                ))
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
     

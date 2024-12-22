@@ -1,9 +1,9 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
-
 from pydantic import BaseModel, Field, field_validator
 
-from enums import OrderType
+from enums import UpdateScope, OrderType, PubSubCategory
 
 
 class Base(BaseModel):
@@ -125,3 +125,22 @@ class Request(Base):
     limit_order: Optional[LimitOrder] = None
     close_order: Optional[CloseOrder] = None
     modify_order: Optional[ModifyOrder] = None
+
+
+class BasePubSubMessage(Base):
+    category: PubSubCategory
+    message: Optional[str] = None
+    details: Optional[dict] = None
+    
+    @field_validator('details')
+    def details_validator(cls, details) -> None:
+        if details is not None:
+            details = {
+                k: (str(v) if isinstance(v, (datetime, UUID)) else v)
+                for k, v in details.items()
+            }
+        return details
+
+class OrderUpdatePubSubMessage(BasePubSubMessage):
+    on: UpdateScope
+    

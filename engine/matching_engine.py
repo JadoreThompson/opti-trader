@@ -13,14 +13,15 @@ from uuid import UUID
 
 
 # Local
-from config import REDIS_HOST, REDIS_CONN_POOL
-from enums import ConsumerMessageStatus, OrderType, OrderStatus
+from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
+from enums import PubSubCategory, OrderType, OrderStatus, UpdateScope
 from models.models import APIOrder
 from exceptions import DoesNotExist
+from models.socket_models import BasePubSubMessage, OrderUpdatePubSubMessage
 
 from .enums import OrderType as _OrderType
 from .orderbook import OrderBook
-from .utils import batch_update
+from .utils import batch_update, publish_update_to_client
 from .order.bid import BidOrder
 from .order.ask import AskOrder
 
@@ -32,7 +33,7 @@ class MatchingEngine:
     _MAX_MATCHING_ATTEMPTS = 20
     _MAX_PRICE_LEVEL_ATTEMPTS = 5
     _order_book: dict[str, OrderBook] = {}
-    _redis = redis.asyncio.client.Redis(connection_pool=REDIS_CONN_POOL, host=REDIS_HOST)
+    _redis = redis.asyncio.client.Redis(connection_pool=ASYNC_REDIS_CONN_POOL, host=REDIS_HOST)
     _current_price = deque()
 
     def __init__(self, queue=None) -> None:
@@ -84,23 +85,6 @@ class MatchingEngine:
         except Exception as e:
             logger.error(f'{message['type']} - {type(e)} - {str(e)}')
 
-    async def _publish_update_to_client(self, channel: str, message: str | dict) -> None:
-        """
-        Publishes message to Redis channel
-
-        Args:
-            channel (str):
-            message (str): 
-        """        
-        try:
-            if isinstance(message, dict):
-                message = json.dumps(message)
-            
-            if isinstance(message, str):
-                await self._redis.publish(channel=channel, message=message)
-        except Exception as e:
-            logger.error(str(e))
-
     async def _handle_market_order(self, data: dict, channel: str) -> None:
         """
         Central point for matching bid against asks
@@ -116,7 +100,6 @@ class MatchingEngine:
         try:       
             order = BidOrder(data, _OrderType.MARKET_ORDER)
             orderbook.append_bid(order, to_book=False)    
-            start = time.time()
             result: tuple = self.match_bid_order(
                 order=order, 
                 ticker=order.data['ticker'], 
@@ -167,39 +150,31 @@ class MatchingEngine:
      
             orderbook.append_bid(order)
         
-            await self._publish_update_to_client(**{
+            await publish_update_to_client(**{
                     0: {
                         "channel": channel,
-                        "message": {
-                            'status': ConsumerMessageStatus.ERROR,
-                            'internal': OrderType.MARKET,
-                            'message': 'Isufficient asks to fiullfill bid order',
-                            'details': { 'order_id': data['order_id'] }
-                        }
+                        'message': BasePubSubMessage(
+                            category=PubSubCategory.ERROR,
+                            message="Insufficient asks to fulfill bid order",
+                        ).model_dump()
                     },
+                    
                     1: {
                         "channel": channel,
-                        "message": json.dumps({
-                            "status": ConsumerMessageStatus.UPDATE, 
-                            'internal': OrderType.MARKET,
-                            "message": "Order partially filled",
-                            "details": {
-                                k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
-                                for k, v in APIOrder(**data).model_dump().items()
-                            }
-                        })
+                        'message': OrderUpdatePubSubMessage(
+                            category=PubSubCategory.ORDER_UPDATE,
+                            message="Order partially filled",
+                            on=UpdateScope.NEW,
+                            details=APIOrder(**data).model_dump()
+                        ).model_dump()
                     },
                     2: {
                         "channel": channel,
-                        "message": json.dumps({
-                            "status": ConsumerMessageStatus.SUCCESS,
-                            'internal': OrderType.MARKET,
-                            "message": "Order successfully placed",
-                            "details": {
-                                k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
-                                for k, v in APIOrder(**data).model_dump().items()
-                            }
-                        })
+                        'message': BasePubSubMessage(
+                            category=PubSubCategory.SUCCESS,
+                            message="Order successfully placed",
+                            details=APIOrder(**data).model_dump()
+                        ).model_dump()
                     }
                 }[result[0]])
         except Exception as e:
@@ -302,18 +277,13 @@ class MatchingEngine:
                 data['limit_price']
             )
             
-            await self._publish_update_to_client(
+            await publish_update_to_client(
                 channel=channel,
-                message=json.dumps({
-                    'status': 'success',
-                    'internal': OrderType.LIMIT,
-                    'message': 'Limit order created successfully',
-                    'order_id': data['order_id'],
-                    "details": {
-                        k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
-                        for k, v in APIOrder(**data).model_dump().items()
-                    }
-                })
+                message=BasePubSubMessage(
+                    category=PubSubCategory.SUCCESS,
+                    message="Limit order placed succesfully",
+                    details=APIOrder(**data).model_dump()
+                ).model_dump()
             )
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
@@ -402,7 +372,7 @@ class MatchingEngine:
             try:
                 open_price = order.data['filled_price']
                 position_size = open_price * order.data['quantity']
-                pnl = (result[1] / open_price) * (order.data['quantity'] * open_price)
+                pnl = (result[1] / open_price) * (position_size)
                 order.data['realised_pnl'] +=  -1 * (position_size - round(pnl, 2))
                 
                 if order.standing_quantity <= 0:
@@ -428,37 +398,31 @@ class MatchingEngine:
             2: fill
         }[result[0]](result=result, order=order, orderbook=orderbook)
         
-        await self._publish_update_to_client(**{
+        await publish_update_to_client(**{
             0: {
                 'channel': channel,
-                'message': json.dumps({
-                    "status": ConsumerMessageStatus.ERROR,
-                    "message": "Insufficient bids to fulfill sell order",
-                    "order_id": order.data['order_id'],
-                })
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.ERROR, 
+                    message="Insufficient bids to fulfill sell order"
+                ).model_dump()
             },
+            
             1: {
                 "channel": channel,
-                "message": json.dumps({
-                    "status": ConsumerMessageStatus.UPDATE, 
-                    "message": "Insufficient bids to fulfill sell order",
-                    "order_id": order.data['order_id']
-                })
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.ERROR, 
+                    message="Insufficient bids to fulfill sell order"
+                ).model_dump()
             },
             
             2: {
                 "channel": channel,
-                "message": json.dumps({
-                    "status": ConsumerMessageStatus.SUCCESS,
-                    'internal': OrderType.CLOSE,
-                    "message": "Order successfully closed",
-                    "order_id": order.data['order_id'],
-                    'details': {
-                        k: (str(v) if isinstance(v, (datetime, UUID)) else v) 
-                        for k, v in order.data.items()
-                        if k != 'user_id'
-                    }
-                })
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.ORDER_UPDATE,
+                    on=UpdateScope.EXISTING,
+                    message='Order closed successfully',
+                    details=APIOrder(**order.data).model_dump()
+                ).model_dump()
             }
         }[result[0]])
 
@@ -542,24 +506,7 @@ class MatchingEngine:
             )
     
         return (1,)
-        
-    async def _handle_limit_order(self, data: dict, channel: str) -> None:
-        """
-        Places limit order into the bids list
-
-        Args:
-            data (dict): 
-            channel (str): 
-        """        
-        self._order_book[data['ticker']].append_bid(BidOrder(data, _OrderType.LIMIT_ORDER), data['limit_price'])
-        await self._publish_update_to_client(
-            channel,
-            {
-                'status': ConsumerMessageStatus.SUCCESS, 
-                'message': 'Limit Order placed successfully'
-            }
-        )
-        
+            
     async def _handle_modify_order(self, data: dict, channel: str) -> None:
         try:
             self._order_book[data['ticker']].alter_tp_sl(
@@ -568,12 +515,12 @@ class MatchingEngine:
                 data['stop_loss'],
             )
             
-            await self._publish_update_to_client(**{
+            await publish_update_to_client(**{
                 'channel': channel,
-                'message': {
-                    'status': ConsumerMessageStatus.SUCCESS,
-                    'message': 'Updated TP & SL'
-                }
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.SUCCESS,
+                    message="Limit Order placed successfully"
+                ).model_dump()
             })
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))

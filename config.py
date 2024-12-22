@@ -9,8 +9,8 @@ from argon2 import PasswordHasher
 from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from mailers.mailers import GMailer
-from utils.connection import RedisConnection
+from mailers.gmailer import GMailer
+from utils.connection import AsyncRedisConnection, SyncRedisConnection
 
 
 load_dotenv(override=False)
@@ -23,8 +23,12 @@ PH = PasswordHasher(time_cost=2, memory_cost=102400, parallelism=8)
 
 # Redis
 REDIS_HOST = os.getenv('REDIS_HOST')
-REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
-    connection_class=RedisConnection,
+SYNC_REDIS_CONN_POOL = redis.connection.ConnectionPool(
+    connection_class=SyncRedisConnection,
+    max_connections=20
+)
+ASYNC_REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
+    connection_class=AsyncRedisConnection,
     max_connections=20
 )
 
@@ -51,5 +55,5 @@ logging.basicConfig(
 MAILER = GMailer()
 MAILER.create_service(
     ['https://mail.google.com/'],
-    '../client_secret.json',    
+    './client_secret.json',    
 )

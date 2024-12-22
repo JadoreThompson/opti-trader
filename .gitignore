@@ -8,7 +8,6 @@ ai/datasets/
 csvs/
 .vscode/
 rec.py
-temp.csv
 client_secret.json
 tokens
 log
@@ -18,5 +17,4 @@ docker-compose.yaml
 entrypoint.sh
 **.log
 
-Yahoo Ticker Symbols - September 2017.xlsx
 .pytest_cache

@@ -126,9 +126,7 @@ class PerformanceMetrics(QuantitativeMetrics):
     
 
 class APIOrder(Base):
-    """
-    Order Schema for API Endpoints        
-    """    
+    """Client facing schema for an order"""    
     ticker: str
     order_type: OrderType
     limit_price: Optional[float] = None
@@ -142,6 +140,7 @@ class APIOrder(Base):
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
     realised_pnl: Optional[float] = None
+    unrealised_pnl: Optional[float] = None
     order_id: UUID
 
 

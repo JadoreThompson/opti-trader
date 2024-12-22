@@ -54,6 +54,7 @@ def constraints_to_tuple(constraints: dict) -> tuple:
 _CACHE = {}
 
 def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
+    global _CACHE
     try:    
         if isinstance(channel, list):
             for item in channel:
@@ -62,9 +63,12 @@ def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwarg
             _CACHE[user_id].pop(channel, None)
     except KeyError:
         pass
+    except Exception as e:
+        print('cache ', type(e), str(e))
     
     
 def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
+    global _CACHE
     _CACHE.setdefault(user_id, {})  
     
     if channel not in _CACHE[user_id]:
@@ -78,6 +82,7 @@ def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None
     
 
 def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
+    global _CACHE
     try:
         return _CACHE[user_id][channel]
     except KeyError:
