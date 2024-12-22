@@ -147,7 +147,7 @@ class OrderBook:
         dom_size = 5
         dom = {'ticker': self._ticker}
         
-        prices = [i for i in self._ask_levels if i >= price][-1 * dom_size:]
+        prices = [i for i in self._ask_levels if i > price][-1 * dom_size:]
         dom['asks'] = dict(
             zip(
                 prices,
@@ -155,13 +155,30 @@ class OrderBook:
             )
         )
         
-        prices = [i for i in self._bid_levels if i <= price][-1 * dom_size:]
-        dom['bids'] = dict(
-            zip(
-                prices,
-                [len(self._bids[price]) for price in prices]
+        try:
+            prices = [i for i in self._bid_levels if i < price][-5:]
+            prices.sort(reverse=True)
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
+            prices = []
+            
+        try:
+            quantity = [len(self._bids[price]) for price in prices]
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
+            quantity = []
+            
+        try:
+            dom['bids'] = dict(
+                zip(
+                    prices,
+                    quantity
+                )
             )
-        )
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
+            dom['bids'] = {}
+        
         
         if dom != self._dom:
             await publish_update_to_client(

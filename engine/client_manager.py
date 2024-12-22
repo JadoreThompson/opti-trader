@@ -11,7 +11,10 @@ from random import randint
 from multiprocessing import Queue
 
 # FA
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import (
+    WebSocket, 
+    WebSocketDisconnect
+)
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect as StarletteWebSocketDisconnect
 
@@ -20,18 +23,45 @@ import redis.asyncio.connection
 from sqlalchemy import select
 
 # Local
-from db_models import Orders, UserWatchlist, Users
-from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
-from exceptions import UnauthorisedError, InvalidAction
-from enums import PubSubCategory, OrderType, OrderStatus
-from models.socket_models import BasePubSubMessage, Request
-from utils.auth import verify_jwt_token_ws
-from utils.db import get_db_session, check_user_exists
-from utils.tasks import send_copy_trade_email
+from db_models import (
+    Orders, 
+    UserWatchlist, 
+    Users
+)
+from config import (
+    REDIS_HOST, 
+    ASYNC_REDIS_CONN_POOL
+)
+from exceptions import (
+    UnauthorisedError, 
+    InvalidAction
+)
+from enums import (
+    PubSubCategory, 
+    OrderType, 
+    OrderStatus
+)
+from models.socket_models import (
+    BasePubSubMessage, 
+    Request
+)
+from utils.auth import (
+    verify_jwt_token_ws
+)
+from utils.db import (
+    get_db_session, 
+    check_user_exists
+)
+from utils.tasks import (
+    send_copy_trade_email
+)
 
 
 logger = logging.getLogger(__name__)
-REDIS_CLIENT = redis.asyncio.client.Redis(connection_pool=ASYNC_REDIS_CONN_POOL, host=REDIS_HOST)
+REDIS_CLIENT = redis.asyncio.client.Redis(
+    connection_pool=ASYNC_REDIS_CONN_POOL, 
+    host=REDIS_HOST
+)
 
 
 class ClientManager:
@@ -110,7 +140,7 @@ class ClientManager:
                                 self._send_update_all(
                                     msg['details'], 
                                     PubSubCategory.DOM_UPDATE
-                                    )
+                                )
                             )
                     except Exception as e:
                         logger.error('Inner {} - {}'.format(type(e), str(e)))
