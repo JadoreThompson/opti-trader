@@ -1,29 +1,72 @@
 import asyncio
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
+from datetime import (
+    datetime,
+    timedelta
+)
+from typing import (
+    Any,
+    Optional,
+    Dict,
+)
 
 # Local
 from config import PH
-from db_models import UserWatchlist, Users
-from exceptions import DuplicateError, DoesNotExist, InvalidAction
-from models.models import AuthResponse, LoginUser, ModifyAccountBody, RegisterBodyWithToken, RegisterBody, UserMetrics
-from utils.auth import check_user_exists, create_jwt_token, verify_jwt_token_http
-from utils.db import check_visible_user, get_db_session
-from utils.tasks import send_confirmation_email, generate_token
+from db_models import (
+    UserWatchlist,
+    Users
+)
+from exceptions import (
+    DuplicateError,
+    DoesNotExist,
+    InvalidAction
+)
+from models.models import (
+    AuthResponse,
+    LoginUser,
+    ModifyAccountBody,
+    RegisterBodyWithToken,
+    RegisterBody,
+    UserMetrics
+)
+from utils.auth import (
+    check_user_exists,
+    create_jwt_token,
+    verify_jwt_token_http
+)
+from utils.db import (
+    check_visible_user,
+    get_db_session
+)
+from utils.tasks import (
+    send_confirmation_email,
+    generate_token
+)
 
 # SA
-from sqlalchemy import insert, select, func, text, update
+from sqlalchemy import (
+    insert,
+    select,
+    func,
+    text,
+    update
+)
 from sqlalchemy.exc import IntegrityError
 
 # FA
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException
+)
 from fastapi.responses import JSONResponse
 
 
 logger = logging.getLogger(__name__)
 accounts = APIRouter(prefix="/accounts", tags=['accounts'])
 TOKENS = {}
+TOKENS_REQUEST_LIMIT = 2
+TOKENS_RATE_LIMIT = timedelta(minutes=5)
 
 @accounts.post("/register")
 async def register(body: RegisterBody):
@@ -47,7 +90,7 @@ async def register(body: RegisterBody):
     except DoesNotExist:
         try:    
             token = generate_token()
-            TOKENS[body.email] = (token, datetime.now())
+            TOKENS[body.email] = [token, datetime.now(), 1]
             send_confirmation_email.delay(body.email, token)
         except IntegrityError as e:
             raise DuplicateError('User already exists')
@@ -100,9 +143,9 @@ async def authenticate(body: RegisterBodyWithToken):
             raise InvalidAction("Register for account")
 
         current = datetime.now()
-        og_token, creation_time = TOKENS[body.email]
+        og_token, creation_time, count = TOKENS[body.email]
         
-        if creation_time - current > timedelta(minutes=5):
+        if creation_time - current > TOKENS_RATE_LIMIT:
             raise InvalidAction("Token has expired")
 
         if og_token != body.token:
@@ -132,6 +175,7 @@ async def authenticate(body: RegisterBodyWithToken):
         raise
     except Exception as e:
         logger.error('{} - {}'.format(type(e), str(e)))
+        raise HTTPException(status_code=500, detail='Internal server error')
         
 
 @accounts.post("/modify")
@@ -243,3 +287,27 @@ async def search(
             return [item[0] for item in resp]
     except Exception as e:
         logger.error(f'{type(e)} - {str(e)}')
+
+
+@accounts.post("/token")
+async def send_token(body: Dict[str, str]) -> None:
+    try:
+        current = datetime.now()
+        token = generate_token()
+        count = 1
+        
+        if body['email'] in TOKENS:
+            _, creation_time, count = TOKENS[body['email']]
+            
+            if count == TOKENS_REQUEST_LIMIT:
+                raise InvalidAction('Try again later')
+            
+            if current - creation_time < TOKENS_RATE_LIMIT:
+                count += 1
+        
+        TOKENS[body['email']] = [token, current, count]
+        send_confirmation_email.delay(body['email'], token)
+    except InvalidAction:
+        raise
+    except Exception as e:
+        print(type(e), str(e))
