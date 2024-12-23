@@ -1,3 +1,5 @@
+import logging
+
 from datetime import timedelta, datetime
 
 # Security
@@ -16,8 +18,8 @@ from fastapi.security import OAuth2PasswordBearer
 # Local
 from config import PH
 from db_models import Users
-from exceptions import DoesNotExist, InvalidError, InvalidAction
-from models.socket_models import User
+from exceptions import DoesNotExist, InvalidAction
+from models.models import _User
 from utils.db import get_db_session
 
 
@@ -27,6 +29,9 @@ ACCESS_TOKEN_EXPIRY_MINUTES = 10 ** 5
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+logger = logging.getLogger(__name__)
+
 
 
 def create_jwt_token(data: dict) -> str:
@@ -49,8 +54,8 @@ def verify_jwt_token_http(token: str = Depends(oauth2_scheme)) -> str:
     except InvalidTokenError:
         raise InvalidAction("User unauthorised")
     
-    except Exception:
-        print('Chicken noode lsoup')
+    except Exception as e:
+        logger.error(f'{type(e)} - {str(e)}')
 
 
 def verify_jwt_token_ws(token: str) -> str:
@@ -61,21 +66,24 @@ def verify_jwt_token_ws(token: str) -> str:
         raise InvalidAction("User unauthorised")
     
 
-async def check_user_exists(user: User) -> Users:
+async def check_user_exists(user: _User) -> Users:
     """
     Checks if the user exists in the database and verifies their credentials.
 
-    :param user: User object containing email and password.
-    :return: True if the user exists and credentials are valid, otherwise raises an exception.
-
-    :raises DoesNotExist: If the user does not exist in the database.
-    :raises InvalidError: If the provided credentials are invalid.
-    :raises Exception: For any other errors encountered during execution.
+    Args:
+        user: User object containing email and password.
+    
+    Return:
+        - DB Users instance
+    
+    Raises:
+        DoesNotExist: If the user does not exist in the database.
+        Exception: For any other errors encountered during execution.
     """
     try:
         async with get_db_session() as session:
             result = await session.execute(select(Users).where(Users.email == user.email))
-            existing_user = result.scalars().first()
+            existing_user: Users = result.scalars().first()
 
             if not existing_user:
                 raise DoesNotExist("User")
@@ -83,30 +91,11 @@ async def check_user_exists(user: User) -> Users:
             if PH.verify(existing_user.password, user.password):
                 return existing_user
     except argon2.exceptions.InvalidHashError:
-        raise InvalidError("Invalid credentials")
+        raise InvalidAction("Invalid credentials")
     
-    except (DoesNotExist, InvalidError) as e:
+    except DoesNotExist as e:
         raise
         
-    except Exception:
-        print("Error in check user exists: ", type(e), str(e))
+    except Exception as e:
+        logger.error(f'{type(e)} - {str(e)}')
 
-
-async def verify_api_key(request: Request) -> Users:
-    """
-    Verifies that the user_id being passed in the path
-
-    Args:
-        request (Request): _description_
-
-    Returns:
-        UUID: _description_
-    """
-    async with get_db_session() as session:
-        result = await session.execute(
-            select(Users).where(Users.user_id == request.g)
-        )
-        if result:
-            return result.scalar()
-        raise
-    

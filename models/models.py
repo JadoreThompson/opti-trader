@@ -2,7 +2,7 @@ from typing import Any, Optional
 from datetime import datetime
 
 # Local
-from enums import OrderStatus, OrderType
+from enums import GrowthInterval, OrderStatus, OrderType
 
 # Pydantic
 from uuid import UUID
@@ -14,13 +14,63 @@ class Base(BaseModel):
         use_enum_values = True
         
 
-class User(Base):
+class UserID(Base):
     user_id: UUID
 
 
-class OrderRequest(User):
+class _User(Base):
+    """Represents a user with email and password attributes."""
+    email: str
+    password: str
+    
+
+class LoginUser(_User):
+    pass
+
+
+class RegisterBody(_User):
+    username: str
+
+
+class UserCount(Base):
+    count: int
+    entities: Optional[list[str]] = Field(
+        None, 
+        description="A list of usernames"
+    )
+
+
+class UserMetrics(Base):
+    following: Optional[UserCount] = None
+    followers: UserCount
+
+
+class Username(Base):
+    username: Optional[str] = None
+
+
+class AuthResponse(Username):
+    """Response Model for Login and Register endpoint"""
+    token: str
+    
+
+class OrderStatusBody(Username):
+    order_status: list[OrderStatus]
+    
+
+class GrowthBody(Username):
+    interval: GrowthInterval
+
+
+class RetrieveOrdersRequest(UserID):
     order_status: Optional[OrderStatus] = Field(None, 
-                                                description="The specific order status you want the trades to have")
+                    description="The specific order status you want the trades to have")
+
+
+class QuantitativeMetricsBody(Username):
+    benchmark_ticker: Optional[str] = "^GSPC",
+    months_ago: Optional[int] = 6,
+    total_trades: Optional[int] = 100
     
 
 class QuantitativeMetrics(BaseModel):
@@ -75,10 +125,8 @@ class PerformanceMetrics(QuantitativeMetrics):
         return value
     
 
-class Order(Base):
-    """
-    Order Schema for API Endpoints        
-    """    
+class APIOrder(Base):
+    """Client facing schema for an order"""    
     ticker: str
     order_type: OrderType
     limit_price: Optional[float] = None
@@ -92,6 +140,7 @@ class Order(Base):
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
     realised_pnl: Optional[float] = None
+    unrealised_pnl: Optional[float] = None
     order_id: UUID
 
 
@@ -114,3 +163,35 @@ class GrowthModel(Base):
 class TickerDistribution(Base):
     value: Optional[float] = None
     name: Optional[str] = None
+
+
+class LeaderboardItem(Base):
+    rank: int = Field(gt=0)
+    username: str
+    earnings: float | str = Field(gt=0)    
+    
+    @field_validator('earnings')
+    def earnings_validator(cls, earnings: float) -> str:
+        return f"${round(earnings, 2)}"
+
+
+class CopyTradeRequest(Base):
+    username: str
+    limit_orders: bool = False
+    market_orders: bool = False
+    
+    def __init__(self, **kw):
+        if not kw.get('limit_orders', None) and not kw.get('market_orders', None):
+            raise ValueError("Must specifiy either limit_orders or market_orders")
+        super().__init__(**kw)
+    
+    
+class ModifyAccountBody(Base):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    visible: Optional[bool] = None
+
+
+class RegisterBodyWithToken(RegisterBody):
+    token: str

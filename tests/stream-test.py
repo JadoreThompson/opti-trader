@@ -52,7 +52,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             socket_models.LimitOrder: OrderType.LIMIT
         }[type(order_obj)]
             
-        order_req = socket_models.OrderRequest(
+        order_req = socket_models.Request(
             type=order_type, 
             market_order=order_obj if order_type == OrderType.MARKET else None,
             limit_order=order_obj if order_type == OrderType.LIMIT else None
@@ -66,17 +66,17 @@ async def generate_order_requests(quantity: int = 10) -> list:
 # ^^^^^
 import json
 
-async def test_create_user():
+async def create_user():
     async with get_db_session() as sess:
         pw = fkr.pystr()
-        creds = {'email': fkr.email(), 'password': PH.hash(pw)}
+        creds = {'email': fkr.email(), 'password': pw, 'username': fkr.last_name(), 'visible': random.choice([True, False])}
         # with open('myfile.txt', 'w') as f:
         #     f.write(f'Password: {pw}\n')
         #     f.write(f'{creds}')
         
         user = await sess.execute(
             sa.insert(Users)
-            .values(**creds)
+            .values(**creds, authenticated=True)
             .returning(Users)
         )
 
@@ -98,7 +98,7 @@ async def test_socket(
         divider (int, optional): How often to sell. Defaults to 5.
         quantity (int, optional): Quantity of shares to purchase. Defaults to 20.
     """
-    _, token = await test_create_user()
+    _, token = await create_user()
     orders = await generate_order_requests(num_orders)
     
     if kwargs.get('name', None):
@@ -110,7 +110,9 @@ async def test_socket(
             async with websockets.connect(SOCKET_URL) as socket:
                 await socket.send(json.dumps({'token': token}))
                 m = await socket.recv()
-                print('Signing Message: ', m)
+                
+                if 'name' in kwargs:
+                    print(f'[{kwargs['name']}]: ', m)
                 
                 while i < len(orders):
                     await socket.send(json.dumps(orders[i].model_dump()))
@@ -140,7 +142,7 @@ async def main():
             name=fkr.first_name(), 
             divider=randint(2, 5), 
             num_orders=randint(10_000, 30_000), 
-            close_quantity=randint(10, 50)
+            close_quantity=randint(50, 100)
         ) for _ in range(TEST_SIZE)
     ])
 

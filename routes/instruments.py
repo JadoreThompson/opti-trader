@@ -2,6 +2,7 @@ import csv
 
 from datetime import datetime, timedelta
 from io import BytesIO
+import logging
 from typing import List
 from sqlalchemy import asc, select
 
@@ -109,6 +110,4 @@ async def to_csv(
             
         return FileResponse(filename)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print('instrument - csv >> ', type(e), str(e))
+        logger = logging.getLogger(__name__)

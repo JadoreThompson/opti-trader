@@ -16,7 +16,7 @@ from enums import OrderStatus
 RISK_FREE = 4.0
 BENCHMARK_TICKER = "^GSPC"
 
-async def get_benchmark_returns(months_ago: int = 6, ticker: str = BENCHMARK_TICKER) -> list[float]:
+def get_benchmark_returns(months_ago: int = 6, ticker: str = BENCHMARK_TICKER) -> list[float]:
     """
     Returns
 
@@ -50,7 +50,7 @@ async def get_benchmark_returns(months_ago: int = 6, ticker: str = BENCHMARK_TIC
         raise InvalidAction('Ticker not supported')
 
 
-async def std(returns: List[float]) -> float:
+def std(returns: List[float]) -> float:
     """Standard Deviation Calculation"""
     if not returns:
         return 0.0
@@ -63,17 +63,17 @@ async def std(returns: List[float]) -> float:
         return 0.0
 
 
-async def sharpe(returns: List[float], risk_free: float = None) -> float:
+def sharpe(returns: List[float], risk_free: float = None) -> float:
     """Sharpe Ratio"""
     risk_free = RISK_FREE if not risk_free else risk_free
     try:
-        std_dev = await std(returns)
+        std_dev = std(returns)
         return round((sum(returns) - (risk_free * len(returns))) / std_dev, 3)
     except ZeroDivisionError:
         return 0.0
 
 
-async def downward_std(returns: List[float]) -> float:
+def downward_std(returns: List[float]) -> float:
     """Returns downside deviation"""
     if not returns:
         return 0.0
@@ -87,17 +87,17 @@ async def downward_std(returns: List[float]) -> float:
         return 0.0
 
 
-async def sortino(returns: List[float], risk_free: float = None) -> float:
+def sortino(returns: List[float], risk_free: float = None) -> float:
     """Sortino Ratio"""
     risk_free = RISK_FREE if not risk_free else risk_free
     try:
-        downside_dev = await downward_std(returns)
+        downside_dev = downward_std(returns)
         return round((sum(returns) / (risk_free * len(returns))) / downside_dev, 3)
     except ZeroDivisionError:
         return 0.0
         
 
-async def beta(portfolio_returns: list[float], benchmark_returns: list[float]) -> float:
+def beta(portfolio_returns: list[float], benchmark_returns: list[float]) -> float:
     """
     Returns the Beta for a portfolio against a benchmark
     
@@ -125,7 +125,7 @@ async def beta(portfolio_returns: list[float], benchmark_returns: list[float]) -
         return 0.0
     
 
-async def treynor(avg_pf_return: float, avg_bm_return: float, pf_beta: float) -> float:
+def treynor(avg_pf_return: float, avg_bm_return: float, pf_beta: float) -> float:
     """
     Returns the Treynor Ratio for a portfolio
     
@@ -143,7 +143,7 @@ async def treynor(avg_pf_return: float, avg_bm_return: float, pf_beta: float) ->
         return 0.0
 
 
-async def get_ghpr(pf_returns: list[float]) -> float:
+def get_ghpr(pf_returns: list[float]) -> float:
     """
     Returns the Geometric Holding Period Return for a portfolio
     
@@ -163,7 +163,7 @@ async def get_ghpr(pf_returns: list[float]) -> float:
     return multiplied_value ** (1 - (len(multiplied_value)))
 
 
-async def risk_of_ruin(
+def risk_of_ruin(
     win_rate: float,
     risk_per_trade: float,
     total_trades: int
@@ -189,7 +189,7 @@ async def risk_of_ruin(
 
 
 
-async def get_quantitative_metrics(
+def get_quantitative_metrics(
     risk_per_trade: float,
     winrate: float,
     monthly_returns: dict,
@@ -208,9 +208,6 @@ async def get_quantitative_metrics(
         InvalidAction: benchmark ticker not supported or you provided benchmark ticker without
         months ago and vice versa
     """    
-    # TODO: Reduce time take to get YFinance Data
-    # TODO: Ensure the percentages are being taken from the beginning of the month
-    #       or from the beginning of the segment
     if not total_num_trades:
         total_num_trades = 100
         
@@ -221,7 +218,7 @@ async def get_quantitative_metrics(
     pf_returns_monetary = [v for _, v in monthly_returns.items()]
     pf_returns_pct = [(((balance - (-1 * v)) - balance) / balance) * 100 for _, v in monthly_returns.items()]
     
-    bm_returns = await get_benchmark_returns(months_ago, benchmark_ticker)
+    bm_returns = get_benchmark_returns(months_ago, benchmark_ticker)
     bm_returns = bm_returns[:len(pf_returns_monetary)]
     
     
@@ -229,15 +226,11 @@ async def get_quantitative_metrics(
         'sharpe': sharpe(pf_returns_pct),
         'std': std(pf_returns_pct),
         'beta': beta(pf_returns_pct, bm_returns),
-        'risk_of_ruin': risk_of_ruin(winrate, risk_per_trade, total_num_trades)
+        'risk_of_ruin': risk_of_ruin(winrate, risk_per_trade, total_num_trades),
     }
     
-    quant_metrics_map = dict(
-        zip([k for k in quant_metrics_map], await asyncio.gather(*[v for _, v in quant_metrics_map.items()]))
-    )
-    
     try:
-        quant_metrics_map['treynor'] = await treynor(
+        quant_metrics_map['treynor'] = treynor(
                 sum(pf_returns_pct) / len(pf_returns_pct),
                 sum(bm_returns) / len(pf_returns_pct),
                 quant_metrics_map['beta']
