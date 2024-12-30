@@ -1,42 +1,56 @@
-import asyncpg, asyncio, json, logging
+import asyncpg
+import asyncio
+import json
+import logging
+
+from collections import deque
+
+import redis
 
 # Local
-from config import DB_URL
-from utils.db import delete_from_internal_cache
+from config import REDIS_HOST, SYNC_REDIS_CONN_POOL
+
 
 logger = logging.getLogger(__name__)
 
-
 class DBListener:
-    def __init__(self, dsn: str, cache_channels: list = None) -> None:
-        self.dsn = dsn
-        self.queue = asyncio.Queue()
-        self.channels = set({'orders', 'active_orders'})
+    _queue = asyncio.Queue()
+    _order_creation_queue = deque()
+    _channels = set({'orders', 'active_orders'})
+    _redis = redis.Redis(
+        host=REDIS_HOST,
+        connection_pool=SYNC_REDIS_CONN_POOL 
+    )
+    
+    def __init__(self, dsn: str) -> None:
+        self._dsn = dsn
         
-        if cache_channels:
-            for channel in self.channels:
-                self.channels.add(channel)
-                
+    @property
+    def dsn(self):
+        return self._dsn
         
-    async def handler(self, conn, pid, channel, payload) -> None:
+    def _handler(self, conn, pid, channel, payload) -> None:
         if isinstance(payload, str):
             payload = json.loads(payload)
         
-        self.queue.put_nowait(payload['user_id'])
-        
-        
-    async def process_notifications(self) -> None:
+        self._queue.put_nowait(payload['user_id'])
+    
+    async def _process_update_notifications(self) -> None:
         logger.info('Waiting for messages')
         while True:
             try:
-                user_id = self.queue.get_nowait()            
+                user_id = self._queue.get_nowait()            
                 if user_id:
-                    await delete_from_internal_cache(user_id, list(self.channels))
-                    self.queue.task_done()
+                    data = self._redis.get(user_id)
+                    if data:
+                        data = {}
+                        self._redis.set(user_id, json.dumps(data))
+                    
+                    self._queue.task_done()
             except asyncio.queues.QueueEmpty:
                 pass
             except Exception as e:
-                print('db_listener - process notifications: ', type(e), str(e))
+                logger.error(f'{type(e)} - {str(e)}')
                 pass
             finally:
                 await asyncio.sleep(0.01)
@@ -45,23 +59,13 @@ class DBListener:
         db_url = self.dsn.replace('+asyncpg', '')
         
         try:
-            self.conn = await asyncpg.connect(dsn=db_url)
-            await self.conn.add_listener('order_change', self.handler)
-            await self.process_notifications()
+            self._conn = await asyncpg.connect(dsn=db_url)
+            await self._conn.add_listener('order_change', self._handler),   
+            await self._process_update_notifications(),
         except Exception as e:
-            logger.error(f'{e}')
+            logger.error('{} - {}'.format(type(e), str(e)))
         finally:
             # Cleanup
             if hasattr(self, 'conn'):
-                await self.conn.remove_listener('order_change', self.handler)
-                await self.conn.close()
-
-
-async def main():
-    global DB_URL
-    listener = DBListener(DB_URL)
-    await listener.start()
-
-
-if __name__ == '__main__':
-    asyncio.run(main()) 
+                await self._conn.remove_listener('order_change', self._handler)
+                await self._conn.close()

@@ -7,15 +7,14 @@ myfile.txt
 ai/datasets/
 csvs/
 .vscode/
-
-gc_client_secret.json
-gc_client.json
 rec.py
+client_secret.json
+tokens
+log
 
 alembic.ini
 docker-compose.yaml
 entrypoint.sh
 **.log
 
-Yahoo Ticker Symbols - September 2017.xlsx
 .pytest_cache

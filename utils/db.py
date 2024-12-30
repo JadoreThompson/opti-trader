@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from collections import defaultdict
 from uuid import UUID
 import asyncio
 
@@ -52,23 +53,36 @@ def constraints_to_tuple(constraints: dict) -> tuple:
 
 _CACHE = {}
 
-async def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
+def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
+    global _CACHE
     try:    
         if isinstance(channel, list):
-            for c in channel:
-                _CACHE[user_id].pop(c, None)
+            for item in channel:
+                _CACHE[user_id].pop(item, None)
         else:
             _CACHE[user_id].pop(channel, None)
     except KeyError:
         pass
+    except Exception as e:
+        print('cache ', type(e), str(e))
     
     
-async def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
-    _CACHE.setdefault(user_id, {})    
-    _CACHE[user_id][channel] = value
+def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
+    global _CACHE
+    _CACHE.setdefault(user_id, {})  
+    
+    if channel not in _CACHE[user_id]:
+       _CACHE[user_id][channel] = {}
+    
+    if isinstance(value, dict):
+        _CACHE[user_id][channel].update(value)
+    else:
+        _CACHE[user_id][channel] = value
+    
     
 
-async def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
+def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
+    global _CACHE
     try:
         return _CACHE[user_id][channel]
     except KeyError:
@@ -83,7 +97,7 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
         constraints (dict)
     """ 
     key = kwargs.get('order_status', None) or 'all'
-    existing_data = await retrieve_from_internal_cache(user_id, 'orders')
+    existing_data = retrieve_from_internal_cache(user_id, 'orders')
     if existing_data:
         if key in existing_data:
             return existing_data[key]
@@ -98,7 +112,7 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
         results = await session.execute(query.limit(1000))
     
     order_list = [vars(order) for order in results.scalars().all()]
-    asyncio.create_task(add_to_internal_cache(user_id, 'orders', {key: order_list}))
+    add_to_internal_cache(user_id, 'orders', {key: order_list})
     return order_list
 
 
@@ -109,7 +123,7 @@ async def get_active_orders(user_id: str) -> list[dict]:
     Args:
         constraints (dict)
     """
-    existing_data = await retrieve_from_internal_cache(user_id, 'active_orders')
+    existing_data = retrieve_from_internal_cache(user_id, 'active_orders')
     if existing_data:
         return existing_data
     
@@ -129,8 +143,7 @@ async def get_active_orders(user_id: str) -> list[dict]:
             for order in results.scalars().all()
         ]
         
-        asyncio.create_task(add_to_internal_cache(user_id, 'active_orders', existing_data))
-        
+        add_to_internal_cache(user_id, 'active_orders', existing_data)
         return existing_data
 
 
@@ -148,3 +161,26 @@ async def check_user_exists(user_id: str):
             return user            
     except Exception:
         raise
+
+
+async def check_visible_user(username: str) -> str:
+    """
+    Returns the user_id for the username passsed in param
+    if the user exists and has visible set to True.
+    
+    Args:
+        username (str):
+
+    Returns:
+        str: UserId
+    """    
+    async with get_db_session() as session:
+        res = await session.execute(
+            select(Users.user_id)
+            .where(
+                (Users.username == username) &
+                (Users.visible == True)
+            )
+        )
+        return res.first()[0]
+        

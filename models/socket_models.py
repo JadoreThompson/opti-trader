@@ -1,9 +1,9 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
-
 from pydantic import BaseModel, Field, field_validator
 
-from enums import OrderType
+from enums import UpdateScope, OrderType, PubSubCategory
 
 
 class Base(BaseModel):
@@ -11,12 +11,6 @@ class Base(BaseModel):
 
     class Config:
         use_enum_values = True
-
-
-class User(Base):
-    """Represents a user with email and password attributes."""
-    email: str
-    password: str
 
 
 class TakeProfitOrder(Base):
@@ -107,13 +101,6 @@ class CloseOrder(Base):
     quantity: Optional[float] = Field(None, gt=0)
 
 
-# class TakeProfitChange(TakeProfitOrder):
-#     order_id: UUID
-
-
-# class StopLossChange(StopLossOrder):
-#     order_id: UUID
-
 class ModifyOrder(Base):
     order_id: UUID
     take_profit: Optional[float] = None
@@ -125,7 +112,7 @@ class EntryPriceChange(Base):
     order_id: UUID
 
 
-class OrderRequest(Base):
+class Request(Base):
     """Represents an order with type, market order, and limit order details.
 
     Attributes:
@@ -138,3 +125,22 @@ class OrderRequest(Base):
     limit_order: Optional[LimitOrder] = None
     close_order: Optional[CloseOrder] = None
     modify_order: Optional[ModifyOrder] = None
+
+
+class BasePubSubMessage(Base):
+    category: PubSubCategory
+    message: Optional[str] = None
+    details: Optional[dict] = None
+    
+    @field_validator('details')
+    def details_validator(cls, details) -> None:
+        if details is not None:
+            details = {
+                k: (str(v) if isinstance(v, (datetime, UUID)) else v)
+                for k, v in details.items()
+            }
+        return details
+
+class OrderUpdatePubSubMessage(BasePubSubMessage):
+    on: UpdateScope
+    
