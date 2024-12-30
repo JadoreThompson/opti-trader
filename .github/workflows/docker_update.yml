@@ -5,6 +5,16 @@ on:
     branches: [release]
 
 jobs:
+  Find-Latest-Tag:
+    runs-on: ubuntu-latest
+
+    steps:
+     - name: Checkout
+        uses: actions/checkout@v4
+      
+    - name: Find latest tag
+      run: echo "latest_tag=git describe --tags $(git rev-list --tags --max-count=1)" >> $GITHUB_ENV
+
   Update-Docker-Image:
     runs-on: ubuntu-latest
     
@@ -20,5 +30,5 @@ jobs:
 
       - name: Update docker image
         run: |
-          docker build --no-cache -t zeznjt/order-matcher-backend-api .
+          docker build --no-cache -t zeznjt/order-matcher-backend-api:latest -t zeznjt/order-matcher-backend-api:{{ env.latest_tag }} .
           docker push zeznjt/order-matcher-backend-api
