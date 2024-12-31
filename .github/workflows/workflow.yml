@@ -28,7 +28,16 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Update docker image
+      - name: Find latest tag
+        run: 
+          git fetch --tags
+          echo "LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)" >> $GITHUB_ENV
+
+      - name: Build image
         run: |
-          docker build --no-cache -t zeznjt/order-matcher-backend-api:latest -t zeznjt/order-matcher-backend-api:{{ env.latest_tag }} .
-          docker push zeznjt/order-matcher-backend-api
+          docker build --no-cache \
+            -t zeznjt/order-matcher-backend-api:latest \
+            -t zeznjt/order-matcher-backend-api:${LATEST_TAG} .
+
+      - name: Push Image
+        run: docker push zeznjt/order-matcher-backend-api
