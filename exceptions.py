@@ -23,3 +23,9 @@ class UnauthorisedError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(self.message)
+
+
+class Web3ConnectionError(Exception):
+    """Error connecting to node or other related service"""
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
