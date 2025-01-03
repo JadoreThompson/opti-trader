@@ -4,8 +4,8 @@ import logging
 from multiprocessing import Process, Queue
 
 from config import DB_URL
-from engine.matching_engine import MatchingEngine
-from engine.db_listener import DBListener
+from trading_engine.spot import SpotEngine
+from trading_engine.db_listener import DBListener
 
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ def db_listener():
 
 
 def engine(order_queue: Queue, price_queue: Queue) -> None:
-    asyncio.run(MatchingEngine(order_queue).main(price_queue))
+    asyncio.run(SpotEngine(order_queue).start(price_queue))
 
 
 def server(order_queue: Queue, price_queue: Queue) -> None:

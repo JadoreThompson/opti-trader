@@ -15,19 +15,18 @@ from exceptions import (
 
 load_dotenv()
 
+# TODO: MIN_BALANCE=?
+
 class CryptoWallet:
-    def __init__(self, network: str='mainnet'):
+    def __init__(self, network: str='mainnet') -> None:
         self._raw_private_key = secrets.token_bytes(32)
         self._public_key = self._gen_public_key()
         self._address = self._gen_address()
         
-        if network not in ['mainnet', 'sepolia']:
-            raise InvalidAction("Network must be mainnet or testnet")
-        
+        self._w3 = Web3(Web3.HTTPProvider(f"https://{network}.infura.io/v3/{os.getenv('MM_API_KEY')}"))
         self._network = network
-        self._w3 = Web3(Web3.HTTPProvider(f"https://{self._network}.infura.io/v3/{os.getenv('MM_API_KEY')}"))
         
-    def _gen_public_key(self):
+    def _gen_public_key(self) -> bytes:
         return \
             SigningKey.from_string(
                 self._raw_private_key, 
@@ -36,7 +35,7 @@ class CryptoWallet:
             .get_verifying_key()\
             .to_string()
         
-    def _gen_address(self):
+    def _gen_address(self) -> bytes:
         khash = keccak.new(digest_bits=256)
         khash.update(self._public_key) 
         return khash.digest()[-20:]
@@ -83,4 +82,5 @@ class CryptoWallet:
 
 if __name__ == "__main__":
     wallet = CryptoWallet()
-    print(wallet._gen_address())
+    print(type(wallet._gen_address()))
+    

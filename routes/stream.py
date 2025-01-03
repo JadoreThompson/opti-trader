@@ -5,7 +5,7 @@ from fastapi import APIRouter, WebSocket
 from fastapi.websockets import WebSocketDisconnect as FastAPIWebSockDisconnect
 
 # Local
-from engine.client_manager import ClientManager
+from trading_engine.client_manager import ClientManager
 
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,7 @@
 from threading import Thread
 
 # Local
-from engine.matching_engine import run as run_matching_engine
+from trading_engine.spot import run as run_matching_engine
 
 threads = [
     Thread(target=run_matching_engine, daemon=True),

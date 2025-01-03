@@ -44,7 +44,6 @@ LOG_FOLDER = os.getcwd() + '/log'
 if not os.path.exists(LOG_FOLDER):
     os.mkdir(LOG_FOLDER)
     
-LOGGER = logging.getLogger()
 logging.basicConfig(
     filename=LOG_FOLDER + f"/app.log", 
     level=logging.INFO, 

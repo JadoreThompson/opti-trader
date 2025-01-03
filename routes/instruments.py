@@ -99,7 +99,6 @@ async def to_csv(
         data: list[TickerData] = await get_data(ticker=ticker, interval=interval, user_id=user_id)
         
         filename = f'csvs/{user_id}_{ticker}_{interval.value}_{datetime.now().timestamp()}.csv'
-        # wr = csv.writer(file)
         
         with open(filename, 'w', newline='') as f:
             wr = csv.writer(f, delimiter=',')            

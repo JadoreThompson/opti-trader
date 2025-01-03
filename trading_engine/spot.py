@@ -29,15 +29,18 @@ from .order.ask import AskOrder
 logger = logging.getLogger(__name__)
 
 
-class MatchingEngine:
+class SpotEngine:
     _MAX_MATCHING_ATTEMPTS = 20
     _MAX_PRICE_LEVEL_ATTEMPTS = 5
-    _order_book: dict[str, OrderBook] = {}
-    _redis = redis.asyncio.client.Redis(connection_pool=ASYNC_REDIS_CONN_POOL, host=REDIS_HOST)
-    _current_price = deque()
 
     def __init__(self, queue=None) -> None:
         self.order_queue = queue
+        self._order_book: dict[str, OrderBook] = {}
+        self._redis = redis.asyncio.client.Redis(
+            connection_pool=ASYNC_REDIS_CONN_POOL, 
+            host=REDIS_HOST
+        )
+        self._current_price = deque()
         self._handlers: dict = {
             OrderType.MARKET: self._handle_market_order,
             OrderType.CLOSE: self._handle_close_order,
@@ -45,7 +48,7 @@ class MatchingEngine:
             OrderType.MODIFY: self._handle_modify_order,
         }
 
-    async def main(self, price_queue: Queue) -> None:
+    async def start(self, price_queue: Queue) -> None:
         """
         Listens to messages from the to_order_book channel
         and relays to the handler
