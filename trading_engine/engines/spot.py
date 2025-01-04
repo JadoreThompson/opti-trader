@@ -105,7 +105,7 @@ class SpotEngine:
         
         try:       
             order = BidOrder(data, _OrderType.MARKET_ORDER)
-            orderbook.append_bid(order=order)    
+            orderbook.track(order=order) 
             order.append_to_orderbook(orderbook)
             result: tuple = self._match_bid_order(
                 order=order, 
@@ -122,7 +122,7 @@ class SpotEngine:
                 
                 try:
                     order.order_status = OrderStatus.PARTIALLY_FILLED
-                    orderbook.append_bid(order=order)
+                    orderbook.track(order=order)
                     order.append_to_orderbook(orderbook, order.data['price'])
                     await batch_update([data])
                 except Exception as e:
@@ -140,12 +140,12 @@ class SpotEngine:
                     
                     if order.data['take_profit'] is not None:
                         new_order = AskOrder(order.data, _OrderType.TAKE_PROFIT_ORDER)
-                        orderbook.append_ask(order=new_order, channel='take_profit')
+                        orderbook.track(order=new_order, channel='take_profit')
                         new_order.append_to_orderbook(orderbook)
                         
                     if order.data['stop_loss'] is not None:
                         new_order = AskOrder(order.data, _OrderType.STOP_LOSS_ORDER)
-                        orderbook.append_ask(order=new_order, channel='stop_loss')
+                        orderbook.track(order=new_order, channel='stop_loss')
                         order.append_to_orderbook(orderbook)
                     
                     asyncio.create_task(batch_update([data]))
@@ -158,7 +158,7 @@ class SpotEngine:
             await {0: not_filled, 1: partial_fill, 2: filled}[result[0]]\
                 (result=result, data=data, order=order, orderbook=orderbook)
      
-            orderbook.append_bid(order=order)
+            orderbook.track(order=order)
             order.append_to_orderbook(orderbook)
         
             await publish_update_to_client(**{
@@ -250,7 +250,7 @@ class SpotEngine:
             for o in closed_orders:
                 try:
                     o.order_status = OrderStatus.CLOSED
-                    orderbook.remove_related(order=o)
+                    orderbook.rtrack(order=o, channel='all')
                 except ValueError:
                     pass
             
@@ -284,7 +284,7 @@ class SpotEngine:
         
         try:
             order = BidOrder(data, _OrderType.LIMIT_ORDER)
-            self._order_books[data['ticker']].append_bid(order=order, )
+            self._order_books[data['ticker']].track(order=order, )
             order.append_to_orderbook(self._order_books[data['ticker']], order.data['limit_price'])
             
             await publish_update_to_client(
@@ -394,7 +394,7 @@ class SpotEngine:
                         order.data['closed_at'] = datetime.now()
                         order.reduce_standing_quantity(order.standing_quantity)
                         order.order_status = OrderStatus.CLOSED
-                        orderbook.remove_related(order=order)
+                        orderbook.rtrack(order=order, channel='all')
                     else:
                         order.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
                     
@@ -502,12 +502,12 @@ class SpotEngine:
                 
                 if item.data['take_profit'] is not None:
                     new_order = AskOrder(item.data, _OrderType.TAKE_PROFIT_ORDER)
-                    orderbook.append_ask(order=new_order, channel='take_profit')
+                    orderbook.track(order=new_order, channel='take_profit')
                     new_order.append_to_orderbook(orderbook)
                     
                 if item.data['stop_loss']is not None:
                     new_order = AskOrder(item.data, _OrderType.STOP_LOSS_ORDER)
-                    orderbook.append_ask(order=new_order, channel='stop_loss')
+                    orderbook.track(order=new_order, channel='stop_loss')
                     new_order.append_to_orderbook(orderbook)
                         
             asyncio.create_task(batch_update([item.data for item in touched_orders]))    
