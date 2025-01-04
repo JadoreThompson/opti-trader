@@ -17,10 +17,6 @@ class BaseSpotOrder(Base):
         self._standing_quantity = data['quantity']
         self._order_status = data['order_status']
         self._order_type = order_type
-
-    @override
-    def alter_position(self, orderbook: OrderBook, price: float=None) -> None: ...
-    """Alters the position of the order within the orderbook"""
         
     def reduce_standing_quantity(self, value: int):
         remaining = self._standing_quantity - value

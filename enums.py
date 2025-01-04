@@ -105,3 +105,6 @@ class GrowthInterval(str, Enum):
 class Side(str, Enum):
     LONG = 'long'
     SHORT = 'short'
+    
+    def invert(self):
+        return Side.SHORT if self == Side.LONG else Side.LONG

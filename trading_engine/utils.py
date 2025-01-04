@@ -10,7 +10,10 @@ from utils.auth import get_db_session
 
 
 logger = logging.getLogger(__name__)
-REDIS = redis.asyncio.client.Redis(connection_pool=ASYNC_REDIS_CONN_POOL, host=REDIS_HOST)
+REDIS = redis.asyncio.client.Redis(
+    connection_pool=ASYNC_REDIS_CONN_POOL, 
+    host=REDIS_HOST
+)
 
 async def batch_update(orders: list[dict]) -> None:
     """

@@ -9,14 +9,20 @@ from .base import Base
 logger = logging.getLogger(__name__)
 
 class _FuturesContract(Base):
-    def __init__(self, data: dict) -> None:
-        self.price = \
-            data['entry_price'] if data.get('entry_price', None) is not None \
-            else data['limit_price']
+    def __init__(
+        self, 
+        data: dict, 
+        price: float, 
+        tag: str=None, 
+        side: Side=None
+    ) -> None:
+        self.price = price
+        self.position = None
         
+        self._tag = tag
         self._contract_id = uuid4()
         self._data = data
-        self._side: Side = data['side']
+        self._side: Side = side or data['side']
         self._status: OrderStatus = data['status']
         self._standing_quantity: int = data['standing_quantity']
         self._quantity: int = data['quantity']
@@ -29,16 +35,7 @@ class _FuturesContract(Base):
             else:
                 orderbook.asks[self.price].remove(self)
         except (KeyError, ValueError) as e:
-            logger.error('{} - {}'.format(type(e), str(e)))
             pass
-    
-    def append_to_orderbook(self, orderbook: OrderBook) -> None:
-        if self.side == Side.LONG:
-            orderbook.bids.setdefault(self.price, [])
-            orderbook.bids[self.price].append(self)
-        else:
-            orderbook.asks.setdefault(self.price, [self])
-            orderbook.asks[self.price].append(self)
     
     def reduce_standing_quantity(self, quantity: int) -> None:
         if self._standing_quantity - quantity <= 0:
@@ -48,9 +45,24 @@ class _FuturesContract(Base):
             self._standing_quantity -= quantity
             
         self._calculate_margin()
+        
+    def append_to_orderbook(self, orderbook: OrderBook, price: float = None) -> None:
+        if not price:
+            price = self.price
             
+        if self._side == Side.LONG:
+            orderbook.bids[price].append(self)
+        else:
+            orderbook.asks[price].append(self)
+    
     def _calculate_margin(self):
         self._margin = self._standing_quantity * self.price
+            
+    def __repr__(self) -> str:
+        return f'Contract(side={self.side})'
+
+    def __str__(self) -> str:
+        return self.__repr__()
             
     @property
     def contract_id(self) -> UUID:
@@ -69,8 +81,8 @@ class _FuturesContract(Base):
         return self._status
     
     @status.setter
-    def status(self, status: OrderStatus) -> None:
-        self._status = self.data['status'] = status
+    def status(self, value: OrderStatus) -> None:
+        self._status = self.data['status'] = value
         
     @property
     def standing_quantity(self) -> int:
@@ -83,3 +95,7 @@ class _FuturesContract(Base):
     @property
     def quantity(self) -> int:
         return self._quantity
+
+    @property
+    def tag(self):
+        return self._tag

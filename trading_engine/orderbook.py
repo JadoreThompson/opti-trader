@@ -18,7 +18,6 @@ from models.socket_models import (
     OrderUpdatePubSubMessage, 
     BasePubSubMessage
 )
-# from .order.base import Base
 from utils.db import get_db_session
 from .utils import publish_update_to_client
 from .order.commons import OrderType, OrderStatus
@@ -184,8 +183,8 @@ class OrderBook:
             return self._tracker[order_id]['entry']
         except KeyError:
             raise DoesNotExist(message=f"{order_id} doesn't exist in tracker")
-        
-    def append_bid(self, **kwargs) -> None:
+    
+    def track(self, **kwargs) -> None:
         """
         Appends a bid to tracking.
 
@@ -193,11 +192,18 @@ class OrderBook:
             kwargs (dict): Arbitrary keyword arguments. Expected keys include:
                 - order (BidOrder): The bid order to append.
                 - contract (_FuturesContract): The contract to append
-        """     
+                - position (FuturesPosition): The position to track
+                - channel (Optional[str])
+        """   
         from .order.base_spot import BaseSpotOrder
         from .order.contract import _FuturesContract
-                    
-        order = kwargs.get('order', None) or kwargs.get('contract', None)
+        from .order.position import FuturesPosition
+        
+        channel = kwargs.get('channel', None) or 'entry'
+        order = \
+            kwargs.get('order', None) or \
+            kwargs.get('contract', None) or \
+            kwargs.get('position', None)
         
         if order is None:
             raise ValueError("An order (or equivalent) must be provided")
@@ -206,8 +212,78 @@ class OrderBook:
             id_key = order.contract_id
         elif isinstance(order, BaseSpotOrder):
             id_key = order.data['order_id']
+        elif isinstance(order, FuturesPosition):
+            id_key = order.contract.contract_id
         
-        self._tracker[id_key]['entry'] = order
+        self._tracker[id_key][channel] = order
+        
+    def rtrack(self, **kwargs) -> None:
+        """
+        Removes order from tracking
+        
+        Args:
+            kwargs: (dict)
+                - order (BidOrder): The bid order to remove from tracking.
+                - contract (_FuturesContract): The contract to remove from tracking.
+                - position (FuturesPosition): The position to remove from tracking.
+                - channel (str): The channel to remove from tracking
+        """     
+        from .order.base_spot import BaseSpotOrder
+        from .order.contract import _FuturesContract
+        from .order.position import FuturesPosition
+        
+        order = \
+            kwargs.get('order', None) or \
+            kwargs.get('contract', None) or \
+            kwargs.get('position', None)
+            
+        channel: str = kwargs['channel']
+        
+        if isinstance(order, BaseSpotOrder):
+            id_key = order.data['order_id']
+        elif isinstance(order, _FuturesContract):
+            id_key = order.contract_id
+        elif isinstance(order, FuturesPosition):
+            id_key = order.contract.contract_id
+        
+        if channel == 'all':
+            for key in self._tracker[id_key].copy():
+                del self._tracker[id_key][key]
+        else:
+            del self._tracker[id_key][channel]
+    
+    def append_bid(self, **kwargs) -> None:
+        """
+        Appends a bid to tracking.
+
+        Args:
+            kwargs (dict): Arbitrary keyword arguments. Expected keys include:
+                - order (BidOrder): The bid order to append.
+                - contract (_FuturesContract): The contract to append
+                - position (FuturesPosition): The position to track
+                - channel (Optional[str])
+        """     
+        from .order.base_spot import BaseSpotOrder
+        from .order.contract import _FuturesContract
+        from .order.position import FuturesPosition
+        
+        channel = kwargs.get('channel', None) or 'entry'
+        order = \
+            kwargs.get('order', None) or \
+            kwargs.get('contract', None) or \
+            kwargs.get('position', None)
+        
+        if order is None:
+            raise ValueError("An order (or equivalent) must be provided")
+        
+        if isinstance(order, _FuturesContract):
+            id_key = order.contract_id
+        elif isinstance(order, BaseSpotOrder):
+            id_key = order.data['order_id']
+        elif isinstance(order, FuturesPosition):
+            id_key = order.contract.contract_id
+        
+        self._tracker[id_key][channel] = order
         
     def append_ask(self, **kwargs):
         """
@@ -217,6 +293,7 @@ class OrderBook:
             kwargs (dict):
                 - order (BidOrder): The bid order to append.
                 - contract (_FuturesContract): The contract to append
+                - position (FuturesPosition): The position to track
                 - channel (str)
         """
         from .order.base_spot import BaseSpotOrder
@@ -241,22 +318,34 @@ class OrderBook:
         
         Args:
             kwargs: (dict)
-                - order (BidOrder): The bid order to append.
-                - contract (_FuturesContract): The contract to append
-                - channel (str)
+                - order (BidOrder): The bid order to remove from tracking.
+                - contract (_FuturesContract): The contract to remove from tracking.
+                - position (FuturesPosition): The position to remove from tracking.
+                - channel (str): The channel to remove from tracking
         """        
         from .order.base_spot import BaseSpotOrder
         from .order.contract import _FuturesContract
+        from .order.position import FuturesPosition
         
-        order: BaseSpotOrder | _FuturesContract = kwargs.get('order', None) or kwargs.get('contract', None)
+        order = \
+            kwargs.get('order', None) or \
+            kwargs.get('contract', None) or \
+            kwargs.get('position', None)
+            
         channel: str = kwargs['channel']
         
         if isinstance(order, BaseSpotOrder):
             id_key = order.data['order_id']
         elif isinstance(order, _FuturesContract):
             id_key = order.contract_id
+        elif isinstance(order, FuturesPosition):
+            id_key = order.contract.contract_id
         
-        del self._tracker[id_key][channel]
+        if channel == 'all':
+            for key in self._tracker[id_key]:
+                del self._tracker[id_key][key]
+        else:
+            del self._tracker[id_key][channel]
     
     def remove_related(self, **kwargs):
         """
@@ -333,7 +422,7 @@ class OrderBook:
             float: Closest price level to the original price passed in param
             None: No price could be found
         """         
-        if side != 'ask' and side != 'bid':
+        if side not in ['ask', 'bid']:
             raise ValueError('Book must be either ask or bid')
 
         price_levels = self.ask_levels if side == 'ask' else self.bid_levels
@@ -359,6 +448,7 @@ class OrderBook:
         except ValueError:
             return None
         except IndexError:
+            # Reversing if we can't find a level
             if count < self._MAX_PRICE_SEARCH_ATTEMPTS:
                 count += 1
                 return self.find_closest_price(
@@ -450,4 +540,8 @@ class OrderBook:
     def price(self) -> float:
         return self._price
         
+    @property
+    def dom(self) -> dict:
+        return self._dom
+    
 ### End of Class ###        

@@ -45,7 +45,6 @@ class BaseOrder(Base):
     stop_loss: Optional[StopLoss] = Field(None)
 
 
-
 class MarketOrder(BaseOrder):
     """Represents a market order, inheriting from BaseOrder."""
     
@@ -142,7 +141,7 @@ class FuturesContract(Base):
     side: Side
     ticker: str
     quantity: int
-    limit_price: float = Field(gt=0)
+    limit_price: Optional[float] = Field(None, gt=0)
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
 
