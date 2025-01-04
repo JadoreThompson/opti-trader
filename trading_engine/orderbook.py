@@ -18,6 +18,7 @@ from models.socket_models import (
     OrderUpdatePubSubMessage, 
     BasePubSubMessage
 )
+# from .order.base import Base
 from utils.db import get_db_session
 from .utils import publish_update_to_client
 from .order.commons import OrderType, OrderStatus
@@ -37,39 +38,14 @@ class OrderBook:
     _ask_levels = _asks.keys()
     
     _price = None
-    _orders: dict[str, dict[str, "BidOrder | AskOrder"]] = defaultdict(dict)
+    _tracker: dict[str, dict[str, "BidOrder | AskOrder"]] = defaultdict(dict)
     _dom = defaultdict(dict)
 
     def __init__(self, ticker: str, queue: Queue) -> None:
         self._ticker = ticker
         self.queue = queue
-    
-    @property
-    def ticker(self) -> str:
-        return self._ticker    
-    
-    @property
-    def asks(self):
-        return self._asks
-    
-    @property
-    def ask_levels(self):
-        return self._ask_levels
-    
-    @property
-    def bids(self):
-        return self._bids
 
-    @property
-    def bid_levels(self):
-        return self._bid_levels
-    
-    @property
-    def price(self) -> float:
-        return self._price
-    
-    @price.setter
-    def price(self, price: float) -> None:
+    def set_price(self, price: float) -> None:
         if price == self._price:
             return
         
@@ -83,7 +59,7 @@ class OrderBook:
         
         for task in tasks:
             asyncio.get_running_loop().create_task(task)
-    
+
     async def _process_price(self, price: float) -> None:
         """Persist price in DB and push to the client manager"""
         await self._persist_price_(price)
@@ -109,7 +85,7 @@ class OrderBook:
         
     async def _update_unrealised_pnl(self, price: float) -> None:
         """Update unrealisd pnl for all orders and publish to the clients"""
-        for _, v in self._orders.copy().items():
+        for _, v in self._tracker.copy().items():
             await asyncio.sleep(0)
             try:
                 if 'entry' not in v:
@@ -192,138 +168,154 @@ class OrderBook:
                 }
             )
 
-    def fetch(self, order_id: str) -> "BidOrder":        
-        try:
-            return self._orders[order_id]['entry']
-        except KeyError:
-            raise DoesNotExist(order_id)
-        
-    def append_bid(self, order: "BidOrder", price: float=None, to_book=True) -> None:
-        try:
-            if not price:
-                price = order.data['filled_price'] if order.data.get('filled_price', None) is not None\
-                    else order.data['price']
-            
-            if to_book:
-                self.bids.setdefault(price, [])
-                self.bids[price].append(order)
-                
-            self._orders[order.data['order_id']]['entry'] = order
-        except Exception as e:
-            logger.error('{} - {}'.format(type(e), str(e)))
-        
-    def append_ask(self, price: float, order: "AskOrder") -> None:
-        if order.data['order_id'] not in self._orders:
-            raise DoesNotExist(message="You must append bid first")
-        
-        self.asks[price].append(order)
-        
-        if order.order_type == OrderType.STOP_LOSS_ORDER:
-            self._orders[order.data['order_id']]['stop_loss'] = order
-        elif order.order_type == OrderType.TAKE_PROFIT_ORDER:
-            self._orders[order.data['order_id']]['take_profit'] = order
-        
-    def remove_order(self, order: "AskOrder | BidOrder", tracking=False) -> None:
-        """Removes order from orderbook and optionally from tracking"""
-        from .order.ask import AskOrder
-        
-        order_id: str = order.data['order_id']
-        
-        if order_id not in self._orders:
-            return
-        
-        key = None
-        order = None
-        
-        try:
-            if isinstance(order, AskOrder):
-                key = 'stop_loss' if order.order_type == OrderType.STOP_LOSS_ORDER else 'take_profit'
-                order = self._orders[order_id][key]
-                
-                try:
-                    self.asks[order.data[f'{key}_price']].remove(order)
-                    if len(self.asks[order.data[f'{key}_price']]) == 0:
-                        del self.asks[order.data[f'{key}_price']]
-                except ValueError:
-                    pass
-            else:
-                key = 'entry'
-                order = self._orders[order_id][key]
-                
-                try:
-                    self.bids[order.data['price']].remove(order)
-                except ValueError:
-                    pass
-                try:
-                    if len(self.bids[order.data['price']]) == 0:
-                        del self.bids[order.data['price']]
-                except KeyError:
-                    pass
-                
-            
-            if tracking:
-                del self._orders[order_id][key]
-        except KeyError:
-            pass
-    
-    def remove_related_orders(self, order_id: str) -> None:
-        """Removes the order_id and it's components from their place in the orderbook and tracking"""
-        if order_id not in self._orders:
-            return
-        
-        try:
-            order = self._orders[order_id]['entry']
-            price = order.data['filled_price'] if order.data.get('filled_price', None) is not None \
-                else order.data['price']
-            self.bids[price].remove(order)
+    def fetch(self, order_id: str):        
+        """
+        Returns the entry channel value for the order_id
+        Args:
+            order_id (str)
 
-            if len(self.bids[price]) == 0:
-                del self.bids[price]
-        except (ValueError, KeyError):
-            pass
+        Raises:
+            DoesNotExist: doesn't exist within the tracker
+
+        Returns:
+            order: BaseSpotOrder | _FuturesContract
+        """        
+        try:
+            return self._tracker[order_id]['entry']
+        except KeyError:
+            raise DoesNotExist(message=f"{order_id} doesn't exist in tracker")
+        
+    def append_bid(self, **kwargs) -> None:
+        """
+        Appends a bid to tracking.
+
+        Args:
+            kwargs (dict): Arbitrary keyword arguments. Expected keys include:
+                - order (BidOrder): The bid order to append.
+                - contract (_FuturesContract): The contract to append
+        """     
+        from .order.base_spot import BaseSpotOrder
+        from .order.contract import _FuturesContract
+                    
+        order = kwargs.get('order', None) or kwargs.get('contract', None)
+        
+        if order is None:
+            raise ValueError("An order (or equivalent) must be provided")
+        
+        if isinstance(order, _FuturesContract):
+            id_key = order.contract_id
+        elif isinstance(order, BaseSpotOrder):
+            id_key = order.data['order_id']
+        
+        self._tracker[id_key]['entry'] = order
+        
+    def append_ask(self, **kwargs):
+        """
+        Appends an ask to tracking
+
+        Args:
+            kwargs (dict):
+                - order (BidOrder): The bid order to append.
+                - contract (_FuturesContract): The contract to append
+                - channel (str)
+        """
+        from .order.base_spot import BaseSpotOrder
+        from models.socket_models import _FuturesContract
+
+        order: BaseSpotOrder | _FuturesContract = kwargs.get('order', None) or kwargs.get('contract', None)
+        channel: str = kwargs['channel']
+        
+        if order is None:
+            raise ValueError("An order (or equivalent) must be provided")
+        
+        if isinstance(order, _FuturesContract):
+            id_key = order.contract_id
+        elif isinstance(order, BaseSpotOrder):
+            id_key = order.data['order_id']
+        
+        self._tracker[id_key][channel] = order
+        
+    def remove(self, **kwargs) -> None:
+        """
+        Removes order from tracking
+        
+        Args:
+            kwargs: (dict)
+                - order (BidOrder): The bid order to append.
+                - contract (_FuturesContract): The contract to append
+                - channel (str)
+        """        
+        from .order.base_spot import BaseSpotOrder
+        from .order.contract import _FuturesContract
+        
+        order: BaseSpotOrder | _FuturesContract = kwargs.get('order', None) or kwargs.get('contract', None)
+        channel: str = kwargs['channel']
+        
+        if isinstance(order, BaseSpotOrder):
+            id_key = order.data['order_id']
+        elif isinstance(order, _FuturesContract):
+            id_key = order.contract_id
+        
+        del self._tracker[id_key][channel]
+    
+    def remove_related(self, **kwargs):
+        """
+        Removes order from tracking
+        
+        Args:
+            kwargs: (dict)
+                - order (BidOrder): The bid order to append.
+                - contract (_FuturesContract): The contract to append
+                - channel (str)
+        """ 
+        from .order.base_spot import BaseSpotOrder
+        from .order.contract import _FuturesContract
+        
+        order = kwargs.get('order', None) or kwargs.get('contract', None)
+        
+        if not order:
+            raise ValueError("Order (or equivalent) must be provided")
+        
+        if isinstance(order, BaseSpotOrder):
+            order_id = order.data['order_id']
+        elif isinstance(order, _FuturesContract):
+            order_id = order.contract_id
+        
+        if order_id not in self._tracker:
+            return
             
-        for key in ['stop_loss', 'take_profit']:    
-            if key not in self._orders[order_id]:
+        for key in ['entry', 'stop_loss', 'take_profit']:    
+            if key not in self._tracker[order_id]:
                 continue
 
             try:
-                order = self._orders[order_id][key]
-                self.asks[order.data[key]].remove(order)
-                if len(self.asks[order.data[key]]) == 0:
-                        del self.asks[order.data[key]]
+                order = self._tracker[order_id][key]
+                order.remove_from_orderbook(self)
             except ValueError:
                 pass
-            except KeyError as e:
+            except Exception as e:
                 logger.error('{} - {}'.format(type(e), str(e)))
         
-        del self._orders[order_id]
+        del self._tracker[order_id]
         
     def alter_tp_sl(
         self, 
         order_id: str,
-        new_take_profit_price: float=None, 
-        new_stop_loss_price: float=None,
+        new_tp_price: float=None, 
+        new_sl_price: float=None,
     ) -> None:
         """Shifts the position of the Take Profit and Stop Loss order within the Orderbook"""
-        if order_id not in self._orders:
-            raise DoesNotExist(order_id)
+        if order_id not in self._tracker:
+            return
+
+        if new_sl_price:
+            if (ex_order := self._tracker[order_id].get('stop_loss', None)):
+                ex_order.alter_position(new_sl_price)
         
-        if new_take_profit_price:
-            existing_order = self._orders[order_id].get('take_profit', None)
-            if existing_order:
-                self.asks[existing_order.data['take_profit']].remove(existing_order)
-                self.asks.setdefault(new_take_profit_price, [])
-                self.asks[new_take_profit_price].append(existing_order)
-                existing_order.data['take_profit'] = new_take_profit_price
-        
-        if new_stop_loss_price:
-            existing_order = self._orders[order_id].get('stop_loss', None)
-            if existing_order:
-                self.asks[existing_order.data['stop_loss']].remove(existing_order)
-                self.asks.setdefault(new_stop_loss_price, [])
-                self.asks[new_stop_loss_price].append(existing_order)
-                existing_order.data['stop_loss'] = new_stop_loss_price
-    
+        if new_tp_price:
+            if (ex_order := self._tracker[order_id].get('take_profit', None)):
+                ex_order.alter_position(new_tp_price)
+                
     def find_closest_price(
         self,
         price: float,
@@ -375,6 +367,8 @@ class OrderBook:
                     count
                 )
             return None
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
                 
     def _configure_bid_asks(self, quantity: int=1000, divider: int=5) -> None:
         """
@@ -398,6 +392,8 @@ class OrderBook:
                     'order_status': random.choice([OrderStatus.NOT_FILLED, OrderStatus.PARTIALLY_FILLED]), 
                     'created_at': datetime.now(),
                     'ticker': 'APPL',
+                    'take_profit': None,
+                    'stop_loss': None
                 },
                 # random.choice([OrderType.LIMIT_ORDER, OrderType.MARKET_ORDER])
                 OrderType.MARKET_ORDER
@@ -412,17 +408,46 @@ class OrderBook:
             order.data['take_profit'] = random.choice(tp)
             order.data['stop_loss'] = random.choice(sl)
             
-            self.append_bid(order, bid_price, False)
+            self.append_bid(order=order)
+            order.append_to_orderbook(self)
             
             if i % divider == 0:
                 order.data['filled_price'] = random.choice([i for i in tp if abs(bid_price - i) < 300])
                 order.order_status = OrderStatus.FILLED
-                
-                self.remove_order(order, True)
+                order.remove_from_orderbook(self)
                 
                 if order.data.get('take_profit', None) is not None:
-                    self.append_ask(order.data['take_profit'], AskOrder(order.data, OrderType.TAKE_PROFIT_ORDER))
+                    new_order = AskOrder(order.data, OrderType.TAKE_PROFIT_ORDER)
+                    new_order.append_to_orderbook(self)
+                    self.append_ask(order=new_order, channel='take_profit')
+                    
                 if order.data.get('stop_loss', None) is not None:
-                    self.append_ask(order.data['stop_loss'], AskOrder(order.data, OrderType.STOP_LOSS_ORDER))
+                    new_order = AskOrder(order.data, OrderType.STOP_LOSS_ORDER)
+                    new_order.append_to_orderbook(self)
+                    self.append_ask(order=new_order, channel='stop_loss')
+        
+    @property
+    def ticker(self) -> str:
+        return self._ticker    
+    
+    @property
+    def asks(self):
+        return self._asks
+    
+    @property
+    def ask_levels(self):
+        return self._ask_levels
+    
+    @property
+    def bids(self):
+        return self._bids
+
+    @property
+    def bid_levels(self):
+        return self._bid_levels
+    
+    @property
+    def price(self) -> float:
+        return self._price
         
 ### End of Class ###        

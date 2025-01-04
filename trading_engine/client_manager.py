@@ -43,7 +43,7 @@ from enums import (
 )
 from models.socket_models import (
     BasePubSubMessage, 
-    Request
+    SpotRequest
 )
 from utils.auth import (
     verify_jwt_token_ws
@@ -160,9 +160,6 @@ class ClientManager:
                         if msg:
                             if user_id in self._active_connections:
                                 msg = json.loads(msg['data'])
-                                
-                                if msg['category'] == 'dom':
-                                    print(json.dumps(msg, indent=4))
                                 
                                 await self._active_connections[user_id]['socket'].send_text(json.dumps(msg))
                                 asyncio.create_task(self._send_copy_trade_alerts(
@@ -292,7 +289,7 @@ class ClientManager:
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
             
-    async def receive_token(self, socket: WebSocket) -> bool | str:
+    async def receive_token(self, socket: WebSocket) -> str:
         try:
             message = await socket.receive_text()
             user_id: str = verify_jwt_token_ws(json.loads(message)['token'])
@@ -316,7 +313,7 @@ class ClientManager:
 
             return user_id
         except (KeyError, InvalidAction):
-            return False
+            return ''
         except StarletteWebSocketDisconnect:
             raise
         except Exception as e:
@@ -330,7 +327,7 @@ class ClientManager:
             message: str = await socket.receive_text()
             
             asyncio.create_task(self._message_handler(
-                message=Request(**json.loads(message)), 
+                message=SpotRequest(**json.loads(message)), 
                 user_id=user_id
             ))
             await asyncio.sleep(0.1)
@@ -347,7 +344,7 @@ class ClientManager:
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
     
-    async def _message_handler(self, message: Request, user_id: str) -> None:
+    async def _message_handler(self, message: SpotRequest, user_id: str) -> None:
         try:
             order: dict = await self._message_handlers[message.type]\
                 (message=message, user_id=user_id)
@@ -421,7 +418,7 @@ class ClientManager:
             if key != '_sa_instance_state'
         }
         
-    async def _market_order_handler(self, message: Request, user_id: str)-> dict:
+    async def _market_order_handler(self, message: SpotRequest, user_id: str)-> dict:
         message_dict: dict = message.market_order.model_dump()
                 
         try:
@@ -440,7 +437,7 @@ class ClientManager:
             logger.error(f'{type(e)} - {str(e)}')
             
             
-    async def _limit_order_handler(self, message: Request, user_id: str) -> dict:
+    async def _limit_order_handler(self, message: SpotRequest, user_id: str) -> dict:
         message_dict: dict = message.limit_order.model_dump()
         
         try:
@@ -468,7 +465,7 @@ class ClientManager:
             logger.error('{} - {}'.format(type(e), str(e)))
         
         
-    async def _close_order_handler(self, message: Request, user_id: str) -> dict:
+    async def _close_order_handler(self, message: SpotRequest, user_id: str) -> dict:
         message_dict: dict = message.close_order.model_dump()
 
         # Checking if user has enough assets to perform action
@@ -504,7 +501,7 @@ class ClientManager:
         return message_dict
     
     
-    async def _modify_order_handler(self, message: Request, user_id: str) -> dict:
+    async def _modify_order_handler(self, message: SpotRequest, user_id: str) -> dict:
         message_dict = message.modify_order.model_dump()
         
         async with get_db_session() as session:

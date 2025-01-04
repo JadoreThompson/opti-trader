@@ -22,16 +22,14 @@ async def trade(websocket: WebSocket):
     Raises:
         Exception: For any error encountered during WebSocket acceptance.
     """
-    user_id = None
+    user_id: str = None
     try:
-        # Auth
         await MANAGER.connect(websocket)
         
         user_id = await MANAGER.receive_token(websocket)
         if not user_id:
             await websocket.close(code=1014, reason="Invalid token")
             
-        # Receive
         while True:
             await MANAGER.receive(websocket, user_id)
             await asyncio.sleep(0.1)

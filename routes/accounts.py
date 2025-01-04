@@ -310,4 +310,4 @@ async def send_token(body: Dict[str, str]) -> None:
     except InvalidAction:
         raise
     except Exception as e:
-        print(type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')

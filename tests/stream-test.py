@@ -52,7 +52,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             socket_models.LimitOrder: OrderType.LIMIT
         }[type(order_obj)]
             
-        order_req = socket_models.Request(
+        order_req = socket_models.SpotRequest(
             type=order_type, 
             market_order=order_obj if order_type == OrderType.MARKET else None,
             limit_order=order_obj if order_type == OrderType.LIMIT else None
@@ -129,8 +129,8 @@ async def test_socket(
                     await asyncio.sleep(1)
                     i += 1
         except websockets.exceptions.ConnectionClosedError:
-                    if kwargs.get('name', None):
-                        print(f'[{kwargs['name']}] Disconnect - {i}')
+            if kwargs.get('name', None):
+                print(f'[{kwargs['name']}] Disconnect - {i}')
 
 from random import randint
 

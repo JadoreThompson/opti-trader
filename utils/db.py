@@ -1,7 +1,9 @@
+import asyncio
+import logging
+
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from uuid import UUID
-import asyncio
 
 # SA
 from sqlalchemy import select
@@ -14,7 +16,7 @@ from enums import OrderStatus
 from exceptions import DoesNotExist, InvalidAction
 from db_models import Orders, Users
 
-
+logger = logging.getLogger(__name__)
 
 async_session_maker = sessionmaker(
     DB_ENGINE,
@@ -64,7 +66,7 @@ def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwarg
     except KeyError:
         pass
     except Exception as e:
-        print('cache ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
     
     
 def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:

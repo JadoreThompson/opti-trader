@@ -4,7 +4,7 @@ import logging
 from multiprocessing import Process, Queue
 
 from config import DB_URL
-from trading_engine.spot import SpotEngine
+from trading_engine.engines.spot import SpotEngine
 from trading_engine.db_listener import DBListener
 
 
@@ -16,7 +16,7 @@ def db_listener():
 
 
 def engine(order_queue: Queue, price_queue: Queue) -> None:
-    asyncio.run(SpotEngine(order_queue).start(price_queue))
+    asyncio.run(SpotEngine(order_queue).start(price_queue=price_queue))
 
 
 def server(order_queue: Queue, price_queue: Queue) -> None:
@@ -26,7 +26,7 @@ def server(order_queue: Queue, price_queue: Queue) -> None:
     
     logger.info('Initialising API server')
     uvicorn.run(
-        "app:app", 
+        "api:app", 
         port=8000, 
         host='0.0.0.0', 
         ws_ping_interval=3000.0, 

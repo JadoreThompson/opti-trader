@@ -33,6 +33,9 @@ class OrderStatus(str, Enum):
     # called for a CLOSE request.
     PARTIALLY_CLOSED_ACTIVE = 'partially_closed_active'
 
+    # The contract has reached it's expiry date
+    EXPIRED = 'expired'
+
 
 class PubSubCategory(str, Enum):
     """
@@ -97,3 +100,8 @@ class GrowthInterval(str, Enum):
     MONTH = '1m'
     YEAR = '1y'
     ALL = 'all'
+
+
+class Side(str, Enum):
+    LONG = 'long'
+    SHORT = 'short'

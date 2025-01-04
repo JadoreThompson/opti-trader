@@ -1,23 +1,33 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator
+)
 
-from enums import UpdateScope, OrderType, PubSubCategory
+from enums import (
+    OrderStatus,
+    Side, 
+    UpdateScope, 
+    OrderType, 
+    PubSubCategory
+)
+from trading_engine.enums import OrderType as _OrderType
 
 
 class Base(BaseModel):
     """Base class for all models with enum value usage enabled."""
-
     class Config:
         use_enum_values = True
 
 
-class TakeProfitOrder(Base):
+class TakeProfit(Base):
     price: float = Field(gt=0)
 
 
-class StopLossOrder(Base):
+class StopLoss(Base):
     price: float = Field(gt=0)
     
 
@@ -31,8 +41,8 @@ class BaseOrder(Base):
     """
     ticker: str
     quantity: int = Field(gt=0)
-    take_profit: Optional[TakeProfitOrder] = Field(None)
-    stop_loss: Optional[StopLossOrder] = Field(None)
+    take_profit: Optional[TakeProfit] = Field(None)
+    stop_loss: Optional[StopLoss] = Field(None)
 
 
 
@@ -112,7 +122,7 @@ class EntryPriceChange(Base):
     order_id: UUID
 
 
-class Request(Base):
+class SpotRequest(Base):
     """Represents an order with type, market order, and limit order details.
 
     Attributes:
@@ -126,6 +136,26 @@ class Request(Base):
     close_order: Optional[CloseOrder] = None
     modify_order: Optional[ModifyOrder] = None
 
+
+class FuturesContract(Base):
+    """"Core schema for futures contract"""
+    side: Side
+    ticker: str
+    quantity: int
+    limit_price: float = Field(gt=0)
+    take_profit: Optional[float] = None
+    stop_loss: Optional[float] = None
+
+class _FuturesContract(FuturesContract):
+    """An Extension of FuturesContract, tailored for utility within the FuturesMatchingEngine"""
+    entry_price: float
+    contract_id: Optional[UUID] = Field(default_factory=uuid4)
+    contract_type: _OrderType = Field(description="Identifier used by the FutureEngine and Orderbook")
+    status: Optional[OrderStatus] = OrderStatus.NOT_FILLED
+
+    @field_validator('entry_price')
+    def entry_price_validator(cls, value):
+        return round(value, 2)
 
 class BasePubSubMessage(Base):
     category: PubSubCategory
@@ -143,4 +173,5 @@ class BasePubSubMessage(Base):
 
 class OrderUpdatePubSubMessage(BasePubSubMessage):
     on: UpdateScope
+    
     
