@@ -221,7 +221,6 @@ class SpotEngine:
         ex_order: AskOrder
         for ex_order in orderbook.asks[ask_price]:
             try:
-                print(ex_order)
                 touched_orders.append(ex_order)
                 leftover_quant = order.standing_quantity - ex_order.standing_quantity
                 
@@ -244,15 +243,17 @@ class SpotEngine:
                         
                 if order.standing_quantity == 0:
                     break
+                
             except Exception as e:
                 import traceback
                 logger.error(f'Error whilst matching against existing ask order {traceback.extract_tb(e.__traceback__)[-1].line} {type(e)} - {str(e)}')
 
         try:                
-            for o in closed_orders:
+            for ex_order in closed_orders:
                 try:
-                    o.order_status = OrderStatus.CLOSED
-                    orderbook.rtrack(order=o, channel='all')
+                    ex_order.order_status = OrderStatus.CLOSED
+                    orderbook.rtrack(order=ex_order, channel='all')
+                    ex_order.remove_from_orderbook(orderbook)
                 except ValueError:
                     pass
             
@@ -478,6 +479,7 @@ class SpotEngine:
         filled_orders = []
         
         # Fulfilling the order
+        ex_order: BidOrder
         for ex_order in orderbook.bids[bid_price]:
             try:
                 touched_orders.append(ex_order)         
@@ -485,13 +487,13 @@ class SpotEngine:
                 
                 if remaining_quantity >= 0:
                     filled_orders.append(ex_order)
-                    ex_order.data['filled_price'] = bid_price
                     order.reduce_standing_quantity(ex_order.standing_quantity)                
+                    ex_order.reduce_standing_quantity(ex_order.standing_quantity)
                 else:
                     ex_order.reduce_standing_quantity(quantity)
                     order.reduce_standing_quantity(quantity)
                     
-                quantity -= ex_order.standing_quantity
+                quantity = remaining_quantity
                 
                 if quantity <= 0:
                     break
@@ -499,22 +501,31 @@ class SpotEngine:
                 logger.error('Error matching against existing bid order: {} - {}'.format(type(e), str(e)))
         
         try:
-            for item in filled_orders:
-                item.order_status = OrderStatus.FILLED
+            
+            for ex_order in filled_orders:
+                ex_order.data['filled_price'] = bid_price
+                ex_order.order_status = OrderStatus.FILLED
+                ex_order.remove_from_orderbook(orderbook)
                 
-                if item.data['take_profit'] is not None:
-                    new_order = AskOrder(item.data, _OrderType.TAKE_PROFIT_ORDER)
+                orderbook.track(order=ex_order)
+                
+                if ex_order.data['take_profit'] is not None:
+                    new_order = AskOrder(ex_order.data, _OrderType.TAKE_PROFIT_ORDER)
                     orderbook.track(order=new_order, channel='take_profit')
-                    new_order.append_to_orderbook(orderbook)
+                    new_order.append_to_orderbook(orderbook, ex_order.data['take_profit'])
                     
-                if item.data['stop_loss']is not None:
-                    new_order = AskOrder(item.data, _OrderType.STOP_LOSS_ORDER)
+                if ex_order.data['stop_loss'] is not None:
+                    new_order = AskOrder(ex_order.data, _OrderType.STOP_LOSS_ORDER)
                     orderbook.track(order=new_order, channel='stop_loss')
-                    new_order.append_to_orderbook(orderbook)
+                    new_order.append_to_orderbook(orderbook, ex_order.data['stop_loss'])
                         
             asyncio.create_task(batch_update([item.data for item in touched_orders]))    
         except Exception as e:
-            logger.error('Error during handling of closed and filled bid orders: {} - {}'.format(type(e), str(e)))
+            import traceback
+            traceback.print_exc()
+            logger.error(
+                'Error during handling of closed and filled bid orders: {} - {}'.format(type(e), str(e)),
+            )
         
         if quantity <= 0:
             return (2, bid_price)

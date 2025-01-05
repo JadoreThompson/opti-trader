@@ -219,7 +219,7 @@ class OrderBook:
                 - order (BidOrder): The bid order to append.
                 - contract (_FuturesContract): The contract to append
                 - position (FuturesPosition): The position to track
-                - channel (Optional[str])
+                - channel (Optional[str]): Defaults to entry
         """   
         from .order.base_spot import BaseSpotOrder
         from .order.contract import _FuturesContract
@@ -274,6 +274,10 @@ class OrderBook:
         
         if channel == 'all':
             for key in self._tracker[id_key].copy():
+                try:
+                    self._tracker[id_key][key].remove_from_orderbook(self)
+                except ValueError:
+                    pass
                 del self._tracker[id_key][key]
         else:
             del self._tracker[id_key][channel]
@@ -374,7 +378,8 @@ class OrderBook:
                     'created_at': datetime.now(),
                     'ticker': 'APPL',
                     'take_profit': None,
-                    'stop_loss': None
+                    'stop_loss': None,
+                    'filled_price': None
                 },
                 # random.choice([OrderType.LIMIT_ORDER, OrderType.MARKET_ORDER])
                 OrderType.MARKET_ORDER

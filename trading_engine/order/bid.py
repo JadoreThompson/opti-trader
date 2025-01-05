@@ -9,10 +9,8 @@ class BidOrder(BaseSpotOrder):
 
     def remove_from_orderbook(self, orderbook: OrderBook) -> None:
         try:
-            price = \
-                self.data['limit_price'] if self.data.get('limit_price', None) is not None\
-                else self.data['filled_price']
-                
+            price = self.data['limit_price'] or self.data['price']
+            
             orderbook.bids[price].remove(self)
             
             if len(orderbook.bids[price]) == 0:
