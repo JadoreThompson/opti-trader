@@ -7,7 +7,7 @@ from typing import List
 from enums import OrderStatus
 from utils.auth import verify_jwt_token_http
 from utils.db import get_db_session
-from db_models import Orders, Users
+from db_models import DBOrder, Users
 from models.models import LeaderboardItem
 
 # SA
@@ -40,13 +40,13 @@ async def get_leaderboard(user_id: str = Depends(verify_jwt_token_http)) -> List
         
         async with get_db_session() as session:
             r = await session.execute(
-                select(Orders)
+                select(DBOrder)
                 .where(
-                    (Orders.created_at > (td - timedelta(days=td.weekday())))
-                    & (Orders.realised_pnl > 0)
+                    (DBOrder.created_at > (td - timedelta(days=td.weekday())))
+                    & (DBOrder.realised_pnl > 0)
                 )
             )
-            all_orders: list[Orders] = r.scalars().all()
+            all_orders: list[DBOrder] = r.scalars().all()
             users = await session.execute(
                 select(Users.user_id, Users.username)
                 .where(

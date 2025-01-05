@@ -5,7 +5,7 @@ import redis
 from sqlalchemy import update
 
 from config import ASYNC_REDIS_CONN_POOL, REDIS_HOST
-from db_models import Orders
+from db_models import DBOrder
 from utils.auth import get_db_session
 
 
@@ -28,7 +28,7 @@ async def batch_update(orders: list[dict]) -> None:
         for order in orders:
             try:
                 order.pop('type', None)
-                await session.execute(update(Orders),[order])
+                await session.execute(update(DBOrder),[order])
                 await session.commit()
             except Exception as e:
                 await session.rollback()

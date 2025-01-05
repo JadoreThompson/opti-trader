@@ -52,7 +52,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             socket_models.LimitOrder: OrderType.LIMIT
         }[type(order_obj)]
             
-        order_req = socket_models.SpotRequest(
+        order_req = socket_models.Request(
             type=order_type, 
             market_order=order_obj if order_type == OrderType.MARKET else None,
             limit_order=order_obj if order_type == OrderType.LIMIT else None

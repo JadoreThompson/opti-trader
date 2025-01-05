@@ -24,7 +24,7 @@ from sqlalchemy import select
 
 # Local
 from db_models import (
-    Orders, 
+    DBOrder, 
     UserWatchlist, 
     Users
 )
@@ -37,13 +37,17 @@ from exceptions import (
     InvalidAction
 )
 from enums import (
+    MarketType,
     PubSubCategory, 
     OrderType, 
     OrderStatus
 )
 from models.socket_models import (
-    BasePubSubMessage, 
-    SpotRequest
+    BasePubSubMessage,
+    FuturesContractWrite, 
+    Request,
+    SpotOrderWrite,
+    TempBaseOrder
 )
 from utils.auth import (
     verify_jwt_token_ws
@@ -65,13 +69,12 @@ REDIS_CLIENT = redis.asyncio.client.Redis(
 
 
 class ClientManager:
-    _initialised: bool = False
-    _active_connections: dict[str, dict[str, any]] = {}
-    _ticker_quotes: dict[str, float] = {'APPL': 300}
-    
     def __init__(self, queue: Queue=None) -> None:    
         self.order_queue = queue
         self.price_queue = None
+        self._initialised: bool = False
+        self._active_connections: dict[str, dict[str, any]] = {}
+        self._ticker_quotes: dict[str, float] = {'APPL': 300}  
         self._message_handlers = {
             OrderType.MARKET: self._market_order_handler,
             OrderType.LIMIT: self._limit_order_handler,
@@ -229,7 +232,6 @@ class ClientManager:
                 )
                 componenets[1] = result.first()[0]
             
-            
             send_copy_trade_email.delay(
                 componenets[0], 
                 componenets[1], 
@@ -241,7 +243,9 @@ class ClientManager:
             
     async def _copy_trader_socket_handler(self, order_type: str, user_id: str, message: dict) -> None:
         """Sends out socket message to all users with user_id as master"""
-        query = select(UserWatchlist.watcher).where(UserWatchlist.master == user_id)
+        query = \
+            select(UserWatchlist.watcher) \
+            .where(UserWatchlist.master == user_id)
                 
         if order_type == OrderType.LIMIT:
             query = query.where(UserWatchlist.limit_orders == True)
@@ -326,8 +330,15 @@ class ClientManager:
             
             message: str = await socket.receive_text()
             
+            ## New
+            if 
+            if message['market_type'] == MarketType.SPOT:
+                message = TempBaseOrder(**message)
+            elif message['market_type'] == MarketType.FUTURES:
+                message = FuturesContractWrite(**message)
+            ##
             asyncio.create_task(self._message_handler(
-                message=SpotRequest(**json.loads(message)), 
+                message=message, 
                 user_id=user_id
             ))
             await asyncio.sleep(0.1)
@@ -344,7 +355,7 @@ class ClientManager:
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
     
-    async def _message_handler(self, message: SpotRequest, user_id: str) -> None:
+    async def _message_handler(self, message: Request, user_id: str) -> None:
         try:
             order: dict = await self._message_handlers[message.type]\
                 (message=message, user_id=user_id)
@@ -384,7 +395,6 @@ class ClientManager:
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
         
-        
     def _validate_balance(self, user_id: str, quantity: int, ticker: str) -> bool:
         user: Users = self._active_connections[user_id]['user']
         purchase_amount: float = self._ticker_quotes[ticker] * quantity
@@ -394,50 +404,88 @@ class ClientManager:
         
         user.balance -= purchase_amount
         return True
-        
     
-    async def _create_order(self, data: dict, order_type: OrderType, user_id: str) -> dict:
-        for field in ['stop_loss', 'take_profit']:
-            if isinstance(data.get(field, None), dict):
-                data[field] = data.get(field, {}).get('price', None)
+    # async def _create_order(self, data: dict, order_type: OrderType, user_id: str) -> dict:
+    #     for field in ['stop_loss', 'take_profit']:
+    #         if isinstance(data.get(field, None), dict):
+    #             data[field] = data.get(field, {}).get('price', None)
         
-        if order_type == OrderType.MARKET:
+    #     if order_type == OrderType.MARKET:
+    #         data['price'] = self._ticker_quotes[data['ticker']]
+        
+    #     data['user_id'] = user_id
+    #     data['order_type'] = order_type
+
+    #     async with get_db_session() as session:
+    #         order = DBOrder(**data)
+    #         session.add(order)
+    #         await session.commit()
+            
+    #     return {
+    #         key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
+    #         for key, value in vars(order).items()
+    #         if key != '_sa_instance_state'
+    #     }
+    
+    async def _create_order(self, order: TempBaseOrder, user_id: str):
+        """Persist order"""
+        data = order.model_dump()
+        data['user_id'] = user_id
+        
+        data['order_type'] = \
+            OrderType.LIMIT if data['limit_price'] is not None \
+            else OrderType.MARKET
+                    
+        if order.limit_price is None:
             data['price'] = self._ticker_quotes[data['ticker']]
         
-        data['user_id'] = user_id
-        data['order_type'] = order_type
-
-        async with get_db_session() as session:
-            order = Orders(**data)
-            session.add(order)
-            await session.commit()
-            
+        async with get_db_session() as sess:
+            order = DBOrder(**data)
+            sess.add(order)
+            await sess.commit()
+        
         return {
             key: (str(value) if isinstance(value, (UUID, datetime)) else value) 
             for key, value in vars(order).items()
             if key != '_sa_instance_state'
         }
-        
-    async def _market_order_handler(self, message: SpotRequest, user_id: str)-> dict:
-        message_dict: dict = message.market_order.model_dump()
+
+    # async def _market_order_handler(self, message: Request, user_id: str)-> dict:
+    #     message_dict: dict = message.market_order.model_dump()
                 
+    #     try:
+    #         self._validate_tp_sl(
+    #             tp_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
+    #             sl_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
+    #             ticker=message_dict['ticker']
+    #         )
+    #         self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker'])
+    #         return await self._create_order(message_dict, OrderType.MARKET, user_id)
+    #     except (InvalidAction, UnauthorisedError) as e:
+    #         raise
+    #     except asyncpg.exceptions.TooManyConnectionsError:
+    #         logger.info('Too many db connections')
+    #     except Exception as e:
+    #         logger.error(f'{type(e)} - {str(e)}')
+            
+    async def _new_order_handler(self, message: TempBaseOrder, user_id: str,) -> dict:
         try:
             self._validate_tp_sl(
-                tp_price=message_dict.get('take_profit', {}).get('price', None) if message_dict['take_profit'] else None,
-                sl_price=message_dict.get('stop_loss', {}).get('price', None) if message_dict['stop_loss'] else None,
-                ticker=message_dict['ticker']
+                tp_price=message.take_profit,
+                sl_price=message.stop_loss,
+                ticker=message.ticker
             )
-            self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker'])
-            return await self._create_order(message_dict, OrderType.MARKET, user_id)
-        except (InvalidAction, UnauthorisedError) as e:
+            self._validate_balance(user_id, message.quantity, message.ticker)
+            return await self._create_order(message, user_id)
+        except (
+            InvalidAction, 
+            UnauthorisedError, 
+        ) as e:
             raise
-        except asyncpg.exceptions.TooManyConnectionsError:
-            logger.info('Too many db connections')
         except Exception as e:
-            logger.error(f'{type(e)} - {str(e)}')
+            logger.error('{} - {}'.format(type(e), str(e)))
             
-            
-    async def _limit_order_handler(self, message: SpotRequest, user_id: str) -> dict:
+    async def _limit_order_handler(self, message: Request, user_id: str) -> dict:
         message_dict: dict = message.limit_order.model_dump()
         
         try:
@@ -453,7 +501,6 @@ class ClientManager:
             if lower_boundary >= message_dict['limit_price'] or message_dict['limit_price'] >= (lower_boundary + current_price):
                 raise InvalidAction("Limit price is outside of liquidity zone")
             
-            
             self._validate_balance(user_id, message_dict['quantity'], message_dict['ticker'])
             return await self._create_order(message_dict, OrderType.LIMIT, user_id)
             
@@ -464,20 +511,19 @@ class ClientManager:
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
         
-        
-    async def _close_order_handler(self, message: SpotRequest, user_id: str) -> dict:
+    async def _close_order_handler(self, message: Request, user_id: str) -> dict:
         message_dict: dict = message.close_order.model_dump()
 
         # Checking if user has enough assets to perform action
         async with get_db_session() as session:
             r = await session.execute(
-                select(Orders.order_id, Orders.standing_quantity)
+                select(DBOrder.order_id, DBOrder.standing_quantity)
                 .where(
-                    (Orders.user_id == user_id) 
-                    & (Orders.ticker == message_dict['ticker']) 
+                    (DBOrder.user_id == user_id) 
+                    & (DBOrder.ticker == message_dict['ticker']) 
                     & (
-                        (Orders.order_status == OrderStatus.FILLED) |
-                        (Orders.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
+                        (DBOrder.order_status == OrderStatus.FILLED) |
+                        (DBOrder.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
                     )
                 )
             )
@@ -500,17 +546,16 @@ class ClientManager:
         message_dict.update({'order_ids': order_ids, 'price': self._ticker_quotes[message_dict['ticker']]})
         return message_dict
     
-    
-    async def _modify_order_handler(self, message: SpotRequest, user_id: str) -> dict:
+    async def _modify_order_handler(self, message: Request, user_id: str) -> dict:
         message_dict = message.modify_order.model_dump()
         
         async with get_db_session() as session:
             result = await session.execute(
-                select(Orders.order_status, Orders.ticker)
+                select(DBOrder.order_status, DBOrder.ticker)
                 .where(
-                    (Orders.user_id == user_id)
-                    & (Orders.order_id == message_dict['order_id'])
-                    & (Orders.order_status != OrderStatus.CLOSED)
+                    (DBOrder.user_id == user_id)
+                    & (DBOrder.order_id == message_dict['order_id'])
+                    & (DBOrder.order_status != OrderStatus.CLOSED)
                 )
             )
             

@@ -68,7 +68,7 @@ class Users(Base):
     watchlist_watcher = relationship("UserWatchlist", back_populates="watcher_user", cascade="all, delete-orphan", foreign_keys=[UserWatchlist.watcher])
 
 
-class Orders(Base):
+class DBOrder(Base):
     """Database Model for Orders"""
     __tablename__ = 'orders'
 

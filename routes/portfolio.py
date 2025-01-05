@@ -51,7 +51,7 @@ from exceptions import InvalidAction
 from db_models import (
     UserWatchlist,
     Users,
-    Orders
+    DBOrder
 )
 from models.models import (
     CopyTradeRequest,
@@ -292,10 +292,10 @@ async def orders(
     try:    
         async with get_db_session() as session:                
             r = await session.execute(
-                select(Orders)
+                select(DBOrder)
                 .where(
-                    (Orders.order_status.in_(order_status)) &
-                    (Orders.user_id == user_id))
+                    (DBOrder.order_status.in_(order_status)) &
+                    (DBOrder.user_id == user_id))
             )
             
             rs = [vars(item) for item in r.scalars().all()]
@@ -483,24 +483,24 @@ async def growth(
     
     existing_data.setdefault(key_, {})
     
-    query = select(Orders).where((Orders.user_id == user_id) & (Orders.order_status == OrderStatus.CLOSED))
+    query = select(DBOrder).where((DBOrder.user_id == user_id) & (DBOrder.order_status == OrderStatus.CLOSED))
     today = datetime.now()
     today = datetime(day=today.day, month=today.month, year=today.year)
     
     if interval == GrowthInterval.DAY:
-        query = query.where(Orders.created_at >= today)
+        query = query.where(DBOrder.created_at >= today)
 
     elif interval == GrowthInterval.WEEK:
         start_of_week = today - timedelta(days=today.weekday())
-        query = query.where(Orders.created_at >= start_of_week)
+        query = query.where(DBOrder.created_at >= start_of_week)
 
     elif interval == GrowthInterval.MONTH:
         start_of_month = today.replace(day=1)
-        query = query.where(Orders.created_at >= start_of_month)
+        query = query.where(DBOrder.created_at >= start_of_month)
     
     elif interval == GrowthInterval.YEAR:
         start_of_year = datetime(year=today.year, month=1, day=1)
-        query = query.where(Orders.created_at >= start_of_year)
+        query = query.where(DBOrder.created_at >= start_of_year)
     
     async def retrieve_orders(query) -> list:
         async with get_db_session() as session:
