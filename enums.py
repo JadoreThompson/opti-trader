@@ -108,3 +108,8 @@ class Side(str, Enum):
     
     def invert(self):
         return Side.SHORT if self == Side.LONG else Side.LONG
+
+class MarketType(str, Enum):
+    """Different types of markets the user can enter positions in """
+    FUTURES = 'futures'
+    SPOT = 'spot'

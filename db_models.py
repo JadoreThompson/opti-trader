@@ -8,7 +8,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Local
 from config import PH
-from enums import OrderType, OrderStatus, Side
+from enums import MarketType, OrderType, OrderStatus, Side
 
 # Factory Functions
 # ^^^^^^^^^^^^^^^^^
@@ -101,7 +101,8 @@ class Orders(Base):
         String
     )
     order_type: Mapped[OrderType] = mapped_column(
-        Enum(OrderType, name='order_type')
+        Enum(OrderType, name='order_type'),
+        nullable=False,
     )
     quantity: Mapped[int] = mapped_column(
         Integer,
@@ -145,6 +146,16 @@ class Orders(Base):
         nullable=True,
         default=0.0
     )
+    market_type: Mapped[str] = mapped_column(
+        Enum(MarketType, name='market_type'),
+        nullable=False,
+        default=MarketType.SPOT,
+    )
+    side: Mapped[str] = mapped_column(
+        Enum(Side, name='side'),
+        nullable=True,
+    )
+    
 
     
     # Constraints

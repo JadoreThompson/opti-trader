@@ -140,21 +140,12 @@ class FuturesContract(Base):
     """"Core schema for futures contract"""
     side: Side
     ticker: str
-    quantity: int
+    quantity: int = Field(gt=0)
+    standing_quantity: int = Field(ge=0)
     limit_price: Optional[float] = Field(None, gt=0)
-    take_profit: Optional[float] = None
-    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = Field(None, gt=0)
+    stop_loss: Optional[float] = Field(None, gt=0)
 
-class _FuturesContract(FuturesContract):
-    """An Extension of FuturesContract, tailored for utility within the FuturesMatchingEngine"""
-    entry_price: float
-    contract_id: Optional[UUID] = Field(default_factory=uuid4)
-    contract_type: _OrderType = Field(description="Identifier used by the FutureEngine and Orderbook")
-    status: Optional[OrderStatus] = OrderStatus.NOT_FILLED
-
-    @field_validator('entry_price')
-    def entry_price_validator(cls, value):
-        return round(value, 2)
 
 class BasePubSubMessage(Base):
     category: PubSubCategory
