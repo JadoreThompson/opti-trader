@@ -60,8 +60,39 @@ class FuturesPosition(Base):
                 self.contract.remove_from_orderbook(orderbook)
                 
         except (KeyError, ValueError) as e:
-            logger.error('{} - {}'.format(type(e), str(e)))            
+            logger.error('{} - {}'.format(type(e), str(e)))  
     
+    def alter_position(self, orderbook: OrderBook, tp_price: float=None, sl_price: float=None) -> None:
+        """
+        Alters the position by adding take profit and stop loss contracts to the orderbook
+        
+        Args:
+            orderbook (OrderBook): 
+            tp_price (float): 
+            sl_price (float): 
+        """
+        if tp_price:
+            try:
+                if self.tp_contract is None:
+                    self.tp_contract = _FuturesContract(self.data, tp_price, 'take_profit', self._side)
+                else:
+                    self.tp_contract.remove_from_orderbook(orderbook)
+                
+                self.tp_contract.append_to_orderbook(orderbook)
+            except Exception as e:
+                logger.error('Error whilst changing tp contract position {} - {}'.format(type(e), str(e)))
+        
+        if sl_price:
+            try:
+                if self.sl_contract is None:
+                    self.sl_contract = _FuturesContract(self.data, sl_price, 'stop_loss', self._side)
+                else:
+                    self.sl_contract.remove_from_orderbook(orderbook)
+                    
+                self.sl_contract.append_to_orderbook(orderbook)
+            except Exception as e:
+                logger.error('Error whilst changing sl contract position {} - {}'.format(type(e), str(e)))
+                
     def calculate_pnl(self, category: str, price: float=None, contract: _FuturesContract=None) -> float:
         if category not in ['real', 'unreal']:
             raise ValueError("Category must be real or unreal")

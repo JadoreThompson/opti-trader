@@ -14,6 +14,7 @@ from typing import (
 
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
 from enums import MarketType, OrderStatus, OrderType, PubSubCategory, Side, UpdateScope
+from exceptions import DoesNotExist
 from models.socket_models import BasePubSubMessage, FuturesContractRead, OrderUpdatePubSubMessage
 from ..order.position import FuturesPosition
 from ..utils import batch_update, publish_update_to_client
@@ -38,7 +39,7 @@ class FuturesEngine:
             OrderType.MARKET: self._handle_match,
             OrderType.LIMIT: self._handle_match,
             OrderType.CLOSE: self._close_contract,
-            OrderType.MODIFY: self._modify_contract,
+            OrderType.MODIFY: self._modify_position,
         }
         
     async def start(
@@ -82,27 +83,36 @@ class FuturesEngine:
             await asyncio.sleep(0.01)
         
     async def _route(self, data: dict) -> None: 
-        og = data['type']
         try:
-            await self._handlers[data['type']](
+            pub_params = {'channel': f"trades_{data['user_id']}"}
+            pub_params.update(await self._handlers[data['type']](
                 data=data, 
                 channel=f"trades_{data['user_id']}"
-            )
+            ))
+            
+            await publish_update_to_client(**pub_params)
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
 
-    async def _handle_match(self, data: dict, channel: str) -> None:
+    async def _handle_match(self, data: dict) -> None:
+        return_value = {
+            'message': BasePubSubMessage(
+                category=PubSubCategory.SUCCESS,
+                message="Order successfully placed",
+                details=FuturesContractRead(**data).model_dump()
+            ).model_dump()
+        }
+        
         contract: _FuturesContract = _FuturesContract(
             data, 
             data['price'] or data['limit_price'], 
             side=data['side'],
         )
-        
         orderbook: OrderBook = self._order_books[data['ticker']]
 
         if data['limit_price']:
             result = self._handle_limit(data, contract, orderbook)
-            return
+            return return_value
         
         self.count += 1
         
@@ -118,7 +128,7 @@ class FuturesEngine:
                 contract.status = OrderStatus.FILLED
                 
                 pos = FuturesPosition(data, contract)
-                orderbook.track(position=pos)
+                orderbook.track(position=pos, channel='position')
                 self._place_tp_sl(contract, pos, orderbook)
             else:
                 contract.status = {
@@ -135,9 +145,8 @@ class FuturesEngine:
         
         await batch_update([contract.data])
         
-        await publish_update_to_client(**{
+        return_value.update({
             0: {
-                "channel": channel,
                 'message': BasePubSubMessage(
                     category=PubSubCategory.ERROR,
                     message="Insufficient asks to fulfill bid order",
@@ -145,7 +154,6 @@ class FuturesEngine:
             },
             
             1: {
-                "channel": channel,
                 'message': OrderUpdatePubSubMessage(
                     category=PubSubCategory.ORDER_UPDATE,
                     message="Insufficient asks to fulfill bid order",
@@ -153,29 +161,44 @@ class FuturesEngine:
                     details=FuturesContractRead(**data).model_dump()
                 ).model_dump()
             },
-            
-            2: {
-                "channel": channel,
-                'message': BasePubSubMessage(
-                    category=PubSubCategory.SUCCESS,
-                    message="Order successfully placed",
-                    details=FuturesContractRead(**data).model_dump()
-                ).model_dump()
-            }
-        }[result[0]])
+        })
+        return return_value[result[0]]
         
     def _handle_limit(self, data: dict, contract: _FuturesContract, orderbook: OrderBook) -> None:
         contract.append_to_orderbook(orderbook, data['limit_price'])
         pos = FuturesPosition(data, contract)
-        orderbook.track(position=pos)
+        orderbook.track(position=pos, channel='position')
         self._place_tp_sl(contract, pos, orderbook)
 
     async def _close_contract(self, **kwargs) -> None:
+        
         pass
 
-    async def _modify_contract(self, **kwargs) -> None:
-        pass
-    
+    async def _modify_position(self, **kwargs) -> None:
+        try:
+            data = kwargs['data']
+            position: FuturesPosition = self._order_books[data['ticker']].fetch(data['order_id'], 'position')
+            position.alter_position(
+                self._order_books[data['ticker']], 
+                data['take_profit'], 
+                data['stop_loss']
+            )
+            return {
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.SUCCESS,
+                    message="Order successfully modified",
+                    on=UpdateScope.EXISTING,
+                    details=FuturesContractRead(**position.contract.data).model_dump(),
+                ).model_dump(),
+            }
+        except DoesNotExist:
+            return {
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.ERROR,
+                    message="Order not found",
+                ).model_dump()
+            }
+        
     def _match(self, **kwargs) -> Tuple[int, Optional[float]]:
         """Matches contract against opposite counterparties
 
@@ -238,7 +261,7 @@ class FuturesEngine:
                     
                     new_pos = FuturesPosition(ex_contract.data, ex_contract)
                     self._place_tp_sl(ex_contract, new_pos, orderbook)
-                    orderbook.track(position=new_pos,)
+                    orderbook.track(position=new_pos, channel='position')
             
             asyncio.create_task(batch_update([item.data for item in touched_cons]))
         except Exception as e:
@@ -335,6 +358,6 @@ class FuturesEngine:
                 new_pos = FuturesPosition(data, contract)
                 
                 self._place_tp_sl(contract, new_pos, orderbook)
-                orderbook.track(position=new_pos)
+                orderbook.track(position=new_pos, channel='position')
 
 ### End of Class ###

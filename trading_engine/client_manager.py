@@ -82,7 +82,7 @@ class ClientManager:
             OrderType.MARKET: self._handle_new_order,
             OrderType.LIMIT: self._handle_new_order,
             OrderType.CLOSE: self._handle_close_order,
-            OrderType.MODIFY: self._modify_order_handler,
+            OrderType.MODIFY: self._handle_modify,
         }
     
     async def _send_update_all(self, message: dict, category: PubSubCategory) -> None:
@@ -488,7 +488,7 @@ class ClientManager:
         })
         return final_dict
     
-    async def _modify_order_handler(self, message: ModifyOrder, user_id: str) -> dict:
+    async def _handle_modify(self, message: ModifyOrder, user_id: str) -> dict:
         async with get_db_session() as session:
             result = await session.execute(
                 select(DBOrder.order_status, DBOrder.ticker)

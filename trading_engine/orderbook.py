@@ -192,7 +192,7 @@ class OrderBook:
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
 
-    def fetch(self, order_id: str):        
+    def fetch(self, order_id: str, channel: str=None):        
         """
         Returns the entry channel value for the order_id
         Args:
@@ -205,7 +205,7 @@ class OrderBook:
             order: BaseSpotOrder | _FuturesContract
         """        
         try:
-            return self._tracker[order_id]['entry']
+            return self._tracker[order_id][channel or 'entry']
         except KeyError:
             raise DoesNotExist(message=f"{order_id} doesn't exist in tracker")
     

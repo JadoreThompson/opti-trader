@@ -55,7 +55,6 @@ class BaseOrder(Base):
     stop_loss: Optional[StopLoss] = Field(None)
 
 
-## New
 class TempBaseOrder(_OrderType, _MarketType):
     ticker: str
     quantity: int = Field(gt=0)
@@ -159,5 +158,4 @@ class BasePubSubMessage(Base):
 
 class OrderUpdatePubSubMessage(BasePubSubMessage):
     on: UpdateScope
-    
     

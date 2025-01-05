@@ -28,7 +28,7 @@ class _FuturesContract(Base):
         self._standing_quantity = self._quantity = data['quantity']
         self._margin: float = self._calculate_margin()
         
-    def remove_from_orderbook(self, orderbook: OrderBook, category: str=None) -> None:
+    def remove_from_orderbook(self, orderbook: OrderBook) -> None:
         """
 
         Args:
