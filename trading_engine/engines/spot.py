@@ -151,7 +151,7 @@ class SpotEngine:
                     asyncio.create_task(batch_update([data]))
                     await asyncio.sleep(0)
 
-                    orderbook.set_price(result[1])
+                    await orderbook.set_price(result[1])
                 except Exception as e:
                     logger.error(f'{type(e)} - {str(e)}')
         
@@ -398,7 +398,7 @@ class SpotEngine:
                     else:
                         order.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
                     
-                    orderbook.set_price(result[1])
+                    await orderbook.set_price(result[1])
                     await batch_update([order.data])
 
                 except Exception as e:

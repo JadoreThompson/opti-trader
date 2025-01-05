@@ -62,7 +62,7 @@ class FuturesPosition(Base):
                 price_change *= -1
             
             pnl = self.data[f'{category}_pnl'] = price_change * self.contract.margin
-            print(f'side={self.contract.side}, ogp={self.contract.price}, np={price}', end=' ')    
+            # print(f'side={self.contract.side}, ogp={self.contract.price}, np={price}', end=' ')    
         elif category == 'real':
             price_change = ((contract.price - self.contract.price) / self.contract.price)
             
@@ -70,8 +70,8 @@ class FuturesPosition(Base):
                 price_change *= -1
                 
             pnl = self.data[f'{category}_pnl'] = price_change * (self.contract.quantity * self.contract.price)
-            print(f'side={self.contract.side}, ogp={self.contract.price}, np={contract.price}', end=' ')
-        print(self, f'{category}ised_pnl={pnl}')
+            # print(f'side={self.contract.side}, ogp={self.contract.price}, np={contract.price}', end=' ')
+        # print(self, f'{category}ised_pnl={pnl}')
         
         return pnl
     

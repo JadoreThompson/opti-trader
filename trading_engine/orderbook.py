@@ -1,10 +1,11 @@
 import asyncio
 import json
+from pprint import pprint
 import random
 import logging 
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from faker import Faker
 from multiprocessing import Queue
 from sqlalchemy import insert
@@ -30,35 +31,49 @@ logger = logging.getLogger(__name__)
 
 class OrderBook:
     _MAX_PRICE_SEARCH_ATTEMPTS = 5
-
-    _bids: dict[float, list] = defaultdict(list)
-    _bid_levels = _bids.keys()
-    _asks: dict[float, list] = defaultdict(list)
-    _ask_levels = _asks.keys()
-    
-    _price = None
-    _tracker: dict[str, dict[str, object]] = defaultdict(dict)
-    _dom = defaultdict(dict)
+    _PRICE_RATE_LIMIT = timedelta(seconds=5)
 
     def __init__(self, ticker: str, queue: Queue) -> None:
-        self._ticker = ticker
         self.queue = queue
+        
+        self._ticker = ticker
+        self._bids: dict[float, list] = defaultdict(list)
+        self._bid_levels = self._bids.keys()
+        self._asks: dict[float, list] = defaultdict(list)
+        self._ask_levels = self._asks.keys()
+        self._price = None
+        self._tracker: dict[str, dict[str, object]] = defaultdict(dict)
+        self._dom = defaultdict(dict)
+        self._blocked: bool = False
+        self._lock = asyncio.Lock()
+        self._last_price_performance = None
 
-    def set_price(self, price: float) -> None:
-        if price == self._price:
-            return
+    async def set_price(self, price: float) -> None:
+        async with self._lock:
+            if price == self._price:
+                return
+            
+            if self._blocked:
+                if datetime.now() - self._last_price_performance >= self._PRICE_RATE_LIMIT:
+                    self._blocked = False
+                else:
+                    return
+            
+            self._price = price
+            self._blocked = True
+            self._last_price_performance = datetime.now()
+            
+            tasks = [
+                self._process_price(price),
+                self._update_unrealised_pnl(price),
+                self._update_dom(price),
+            ]
+            
+            for task in tasks:
+                asyncio.get_running_loop().create_task(task)
+            
+            await asyncio.sleep(3)
         
-        self._price = price
-        
-        tasks = [
-            self._process_price(price),
-            self._update_unrealised_pnl(price),
-            self._update_dom(price),
-        ]
-        
-        for task in tasks:
-            asyncio.get_running_loop().create_task(task)
-
     async def _process_price(self, price: float) -> None:
         """Persist price in DB and push to the client manager"""
         await self._persist_price_(price)
@@ -84,16 +99,24 @@ class OrderBook:
         
     async def _update_unrealised_pnl(self, price: float) -> None:
         """Update unrealisd pnl for all orders and publish to the clients"""
+        from .order.base_spot import BaseSpotOrder
+        from .order.contract import _FuturesContract
+        
+        complete = False
         for _, v in self._tracker.copy().items():
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.01)
+            
+            if not complete:
+                continue
             try:
                 if 'entry' not in v:
                     continue
                 
                 order = v['entry']
                 
-                if order.order_status in [OrderStatus.NOT_FILLED, OrderStatus.CLOSED]:
-                    continue
+                if isinstance(order, BaseSpotOrder):        
+                    if order.order_status in [OrderStatus.NOT_FILLED, OrderStatus.CLOSED]:
+                        continue
                 
                 # Only here for testing
                 if 'unrealised_pnl' not in order.data:
@@ -105,7 +128,8 @@ class OrderBook:
                 upl = (price / order.data['filled_price']) * (pos_size)
                 order.data['unrealised_pnl'] += -1 * (pos_size - round(upl, 2))
                 
-                if not order.data['unrealised_pnl'] == starting_upl:
+                
+                if not (order.data['unrealised_pnl'] == starting_upl):
                     await publish_update_to_client(**{
                         'channel': f'trades_{order.data['user_id']}',
                         'message': OrderUpdatePubSubMessage(
@@ -154,18 +178,21 @@ class OrderBook:
             logger.error('{} - {}'.format(type(e), str(e)))
             dom['bids'] = {}
         
-        
-        if dom != self._dom:
-            await publish_update_to_client(
-                **{
-                    'channel': 'dom',
-                    'message':
-                        BasePubSubMessage(
-                            category=PubSubCategory.DOM_UPDATE,
-                            details=dom
-                        ).model_dump()
-                }
-            )
+        try:
+            if dom != self._dom:
+                self._dom = dom
+                await publish_update_to_client(
+                    **{
+                        'channel': 'dom',
+                        'message':
+                            BasePubSubMessage(
+                                category=PubSubCategory.DOM_UPDATE,
+                                details=dom
+                            ).model_dump()
+                    }
+                )
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
 
     def fetch(self, order_id: str):        
         """

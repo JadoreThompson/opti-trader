@@ -6,12 +6,10 @@ from typing import (
     Optional, 
     Tuple, 
     List, 
-    Dict
 )
 
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
-from enums import OrderStatus, PubSubCategory, Side, UpdateScope
-from models.socket_models import BasePubSubMessage, FuturesContract, OrderUpdatePubSubMessage
+from enums import OrderStatus, Side
 from ..order.position import FuturesPosition
 from ..utils import publish_update_to_client
 from ..order.contract import _FuturesContract
@@ -26,7 +24,7 @@ class FuturesEngine:
             host=REDIS_HOST
         )
         
-    def start(
+    async def start(
         self, 
         tickers: List[str], 
         price_queue: multiprocessing.Queue, 
@@ -42,8 +40,13 @@ class FuturesEngine:
              - price_queue (multiprocessing.Queue): Used for the orderbook creation
         """
         for t in tickers:
+            await asyncio.sleep(0.01)
             self._order_books[t] = OrderBook(t, price_queue)
-            self._config_bid_ask(self._order_books[t], quantity=quantity, divider=divider)
+            self._config_bid_ask(
+                self._order_books[t], 
+                quantity=quantity, 
+                divider=divider
+            )
     
     def _config_bid_ask(self, orderbook: OrderBook, quantity: int=10_000, divider: int=5) -> None:
         import random 
@@ -89,7 +92,7 @@ class FuturesEngine:
                 new_pos = FuturesPosition(data, contract)
                 
                 self._place_tp_sl(contract, new_pos, orderbook)
-                orderbook.track(position=new_pos, channel='position')
+                orderbook.track(position=new_pos)
         
     async def _match_handler(self, data: dict, channel: str) -> None: 
         contract: _FuturesContract = _FuturesContract(
@@ -107,27 +110,19 @@ class FuturesEngine:
             Side.LONG: self._match_long,
             Side.SHORT: self._match_short
         }[contract.side](contract)
-        # print(result)
-        
+
         if result[0] == 2:
+            await orderbook.set_price(result[1])
             contract.status = OrderStatus.FILLED
             contract.data['filled_price'] = result[1]
             
             pos = FuturesPosition(data, contract)
-            orderbook.track(position=pos, channel='position')
+            orderbook.track(position=pos)
             self._place_tp_sl(contract, pos, orderbook)
         
         else:
             contract.append_to_orderbook(orderbook)
-            
-            # Only in testing
-            # if pos.sl_contract:
-            #     print('sl')
-            #     print(pos.sl_contract.tag)
-            # if pos.tp_contract:
-            #     print('tp')
-            #     print(pos.tp_contract.tag)
-        
+
         # await publish_update_to_client(**{
         #     0: {
         #         "channel": channel,
@@ -160,7 +155,7 @@ class FuturesEngine:
     def _handle_limit(self, data: dict, contract: _FuturesContract, orderbook: OrderBook) -> None:
         contract.append_to_orderbook(orderbook, data['limit_price'])
         pos = FuturesPosition(data, contract)
-        orderbook.track(position=pos, channel='position')
+        orderbook.track(position=pos)
         self._place_tp_sl(contract, pos, orderbook)
 
     def _match_long(self, contract: _FuturesContract) -> Tuple[int, Optional[float]]:
@@ -202,7 +197,7 @@ class FuturesEngine:
                 ex_contract.remove_from_orderbook(orderbook)
                 new_pos = FuturesPosition(ex_contract.data, ex_contract)
                 self._place_tp_sl(ex_contract, new_pos, orderbook)
-                orderbook.track(position=new_pos, channel='position')
+                orderbook.track(position=new_pos)
         
         if contract.standing_quantity == 0:
             return (2, ask_price)
@@ -245,7 +240,7 @@ class FuturesEngine:
                 ex_contract.remove_from_orderbook(orderbook)
                 new_pos = FuturesPosition(ex_contract.data, ex_contract)
                 self._place_tp_sl(ex_contract, new_pos, orderbook)
-                orderbook.track(position=new_pos, channel='position')
+                orderbook.track(position=new_pos,)
         
         if contract.standing_quantity == 0:
             return (2, bid_price)
