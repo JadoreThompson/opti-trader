@@ -7,6 +7,7 @@ import queue
 
 from datetime import datetime
 from typing import Optional
+from multiprocessing import Queue
 
 # Local
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
@@ -33,7 +34,7 @@ class SpotEngine:
     _MAX_MATCHING_ATTEMPTS = 20
     _MAX_PRICE_LEVEL_ATTEMPTS = 5
 
-    def __init__(self, queue=None) -> None:
+    def __init__(self, queue=Queue) -> None:
         self.queue = queue
         self._order_books: dict[str, OrderBook] = {}
         self._redis = redis.asyncio.client.Redis(
@@ -57,23 +58,14 @@ class SpotEngine:
              - price_queue (multiprocessing.Queue): Used for the orderbook creation
         """
         try: 
-            self._order_books.setdefault('APPL', OrderBook('APPL', kwargs['price_queue']))
-            self._order_books['APPL']._configure_bid_asks(100_000, 2)
+            self._order_books['APPL'] = OrderBook('APPL', kwargs['price_queue'])
+            self._order_books['APPL']._configure_bid_asks(10_000, 2)
 
             logger.info('Initialising Engine')
             await self._listen()
         except Exception as e:
             logger.error(f'{type(e)} - {str(e)}')
             
-    async def _handle_incoming_message(self, message: dict) -> None:        
-        try:
-            await self._handlers[message['type']](
-                data=message, 
-                channel=f"trades_{message['user_id']}"
-            )
-        except Exception as e:
-            logger.error(f'{message['type']} - {type(e)} - {str(e)}')
-    
     async def _listen(self) -> None:
         """
         Perpetually queries the queue for any incoming orders
@@ -84,12 +76,20 @@ class SpotEngine:
         while True:
             try:
                 message = self.queue.get_nowait()
-                if isinstance(message, dict):
-                    asyncio.create_task(self._handle_incoming_message(message))
+                asyncio.create_task(self._handle_incoming_message(message))
             except queue.Empty:
                 pass
             
             await asyncio.sleep(0.001)
+    
+    async def _handle_incoming_message(self, message: dict) -> None:        
+        try:
+            await self._handlers[message['type']](
+                data=message, 
+                channel=f"trades_{message['user_id']}"
+            )
+        except Exception as e:
+            logger.error(f'{message['type']} - {type(e)} - {str(e)}')
 
     async def _handle_market_order(self, data: dict, channel: str) -> None:
         """
@@ -106,11 +106,12 @@ class SpotEngine:
         try:       
             order = BidOrder(data, _OrderType.MARKET_ORDER)
             orderbook.track(order=order) 
-            order.append_to_orderbook(orderbook)
             result: tuple = self._match_bid_order(
                 order=order, 
                 orderbook=orderbook
             )
+            
+            # print(result)
             
             async def not_filled(**kwargs):
                 return
@@ -207,8 +208,8 @@ class SpotEngine:
         """
         orderbook: OrderBook = kwargs['orderbook']
         order: BidOrder = kwargs['order']
-        bid_price: float = order.data['price'] if 'bid_price' not in kwargs else kwargs['bid_price']
-        attempts: int = 0 if 'attempts' not in kwargs else kwargs['attempts']
+        bid_price: float = kwargs.get('bid_price', None) or order.data['price']
+        attempts: int = kwargs.get('attempts', None) or 0
         
         ask_price = orderbook.find_closest_price(bid_price, 'ask')
         if ask_price is None:
@@ -220,6 +221,7 @@ class SpotEngine:
         ex_order: AskOrder
         for ex_order in orderbook.asks[ask_price]:
             try:
+                print(ex_order)
                 touched_orders.append(ex_order)
                 leftover_quant = order.standing_quantity - ex_order.standing_quantity
                 

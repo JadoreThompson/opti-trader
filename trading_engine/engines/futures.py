@@ -1,6 +1,8 @@
 import asyncio
 import multiprocessing
 import redis
+import logging
+import queue
 
 from typing import (
     Optional, 
@@ -9,11 +11,13 @@ from typing import (
 )
 
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
-from enums import OrderStatus, Side
+from enums import OrderStatus, OrderType, Side
 from ..order.position import FuturesPosition
 from ..utils import publish_update_to_client
 from ..order.contract import _FuturesContract
 from ..orderbook import OrderBook
+
+logger = logging.getLogger(__name__)
 
 class FuturesEngine:
     def __init__(self, queue: multiprocessing.Queue) -> None:
@@ -23,6 +27,12 @@ class FuturesEngine:
             connection_pool=ASYNC_REDIS_CONN_POOL, 
             host=REDIS_HOST
         )
+        self._handlers = {
+            OrderType.MARKET: self._create_contract,
+            OrderType.LIMIT: self._create_contract,
+            OrderType.CLOSE: self._close_contract,
+            OrderType.MODIFY: self._modify_contract,
+        }
         
     async def start(
         self, 
@@ -40,61 +50,41 @@ class FuturesEngine:
              - price_queue (multiprocessing.Queue): Used for the orderbook creation
         """
         for t in tickers:
-            await asyncio.sleep(0.01)
             self._order_books[t] = OrderBook(t, price_queue)
             self._config_bid_ask(
                 self._order_books[t], 
                 quantity=quantity, 
                 divider=divider
             )
+        
+        await self._listen()
     
-    def _config_bid_ask(self, orderbook: OrderBook, quantity: int=10_000, divider: int=5) -> None:
-        import random 
-        from uuid import uuid4
+    async def _listen(self) -> None:
+        await asyncio.sleep(0.1)
+        logger.info("Listening for messages")
         
-        quantity = quantity or 10_000
-        divider = divider or 5
+        while True:
+            try:
+                message = self.queue.get_nowait()
+                if isinstance(message, dict):
+                    asyncio.create_task(self._route(message))
+            except queue.Empty:
+                pass
+            except Exception as e:
+                logger.error('{} - {}'.format(type(e), str(e)))
+                
+            await asyncio.sleep(0.01)
         
-        op_range = [i for i in range(60, 200, 10)]
-        tp_range = [i for i in range(200, 310, 10)]
-        sl_range = [i for i in range(0, 60, 10)]
-        
-        for i in range(quantity):
-            data = {
-                'user_id': uuid4(),
-                'ticker': 'BTC',
-                'side': random.choice([Side.LONG, Side.SHORT]),
-                'quantity': 10,
-                'standing_quantity': 10,
-                'filled_price': None,
-                'limit_price': None,
-                'entry_price': random.choice([None, random.choice(op_range)]),
-                'take_profit': random.choice([None, random.choice(tp_range)]),
-                'stop_loss': random.choice([None, random.choice(sl_range)]),
-                'status': OrderStatus.NOT_FILLED,
-            }
-            
-            if data['entry_price'] is None:
-                data['limit_price'] = random.choice(op_range)
-            
-            contract = _FuturesContract(
-                data, 
-                data['limit_price'] or data['entry_price'], 
-                side=data['side'],
+    async def _route(self, data: dict) -> None: 
+        try:
+            await self._handlers[data['type']](
+                data=data, 
+                channel=f"trades_{data['user_id']}"
             )
-            
-            contract.append_to_orderbook(orderbook)
-            
-            if i % divider == 0:
-                contract.remove_from_orderbook(orderbook)
-                contract.status = OrderStatus.FILLED
-                
-                new_pos = FuturesPosition(data, contract)
-                
-                self._place_tp_sl(contract, new_pos, orderbook)
-                orderbook.track(position=new_pos)
-        
-    async def _match_handler(self, data: dict, channel: str) -> None: 
+        except Exception as e:
+            logger.error('{} - {}'.format(type(e), str(e)))
+    
+    async def _create_contract(self, data: dict, channel: str) -> None:
         contract: _FuturesContract = _FuturesContract(
             data, 
             data['entry_price'] or data['limit_price'], 
@@ -157,6 +147,12 @@ class FuturesEngine:
         pos = FuturesPosition(data, contract)
         orderbook.track(position=pos)
         self._place_tp_sl(contract, pos, orderbook)
+
+    async def _close_contract(self, **kwargs) -> None:
+        pass
+
+    async def _modify_contract(self, **kwargs) -> None:
+        pass
 
     def _match_long(self, contract: _FuturesContract) -> Tuple[int, Optional[float]]:
         """Matches against the contracts within the ask book"""
@@ -274,4 +270,51 @@ class FuturesEngine:
             _contract.append_to_orderbook(orderbook)
             _contract.position = position
             position.sl_contract = _contract
+    
+    def _config_bid_ask(self, orderbook: OrderBook, quantity: int=10_000, divider: int=5) -> None:
+        import random 
+        from uuid import uuid4
+        
+        quantity = quantity or 10_000
+        divider = divider or 5
+        
+        op_range = [i for i in range(60, 200, 10)]
+        tp_range = [i for i in range(200, 310, 10)]
+        sl_range = [i for i in range(0, 60, 10)]
+        
+        for i in range(quantity):
+            data = {
+                'user_id': uuid4(),
+                'ticker': 'BTC',
+                'side': random.choice([Side.LONG, Side.SHORT]),
+                'quantity': 10,
+                'standing_quantity': 10,
+                'filled_price': None,
+                'limit_price': None,
+                'entry_price': random.choice([None, random.choice(op_range)]),
+                'take_profit': random.choice([None, random.choice(tp_range)]),
+                'stop_loss': random.choice([None, random.choice(sl_range)]),
+                'status': OrderStatus.NOT_FILLED,
+            }
             
+            if data['entry_price'] is None:
+                data['limit_price'] = random.choice(op_range)
+            
+            contract = _FuturesContract(
+                data, 
+                data['limit_price'] or data['entry_price'], 
+                side=data['side'],
+            )
+            
+            contract.append_to_orderbook(orderbook)
+            
+            if i % divider == 0:
+                contract.remove_from_orderbook(orderbook)
+                contract.status = OrderStatus.FILLED
+                
+                new_pos = FuturesPosition(data, contract)
+                
+                self._place_tp_sl(contract, new_pos, orderbook)
+                orderbook.track(position=new_pos)
+
+### End of Class ###

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 class OrderBook:
     _MAX_PRICE_SEARCH_ATTEMPTS = 5
-    _PRICE_RATE_LIMIT = timedelta(seconds=5)
+    _PRICE_RATE_LIMIT = timedelta(seconds=2)
 
     def __init__(self, ticker: str, queue: Queue) -> None:
         self.queue = queue
@@ -50,29 +50,28 @@ class OrderBook:
 
     async def set_price(self, price: float) -> None:
         async with self._lock:
+            print(len(self._bids[price]), 'bids')
+            print(len(self.asks[price]), 'asks')
             if price == self._price:
                 return
             
-            if self._blocked:
-                if datetime.now() - self._last_price_performance >= self._PRICE_RATE_LIMIT:
-                    self._blocked = False
-                else:
-                    return
-            
             self._price = price
-            self._blocked = True
-            self._last_price_performance = datetime.now()
             
             tasks = [
                 self._process_price(price),
                 self._update_unrealised_pnl(price),
-                self._update_dom(price),
             ]
             
             for task in tasks:
                 asyncio.get_running_loop().create_task(task)
             
-            await asyncio.sleep(3)
+            try:
+                if datetime.now() - self._last_price_performance >= self._PRICE_RATE_LIMIT:        
+                    self._last_price_performance = datetime.now()
+                else:
+                    asyncio.get_running_loop().create_task(self._update_dom(price))
+            except TypeError:
+                pass
         
     async def _process_price(self, price: float) -> None:
         """Persist price in DB and push to the client manager"""

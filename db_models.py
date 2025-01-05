@@ -63,7 +63,7 @@ class Users(Base):
     # pfp: Mapped[str] = mapped_column(String)
 
     # Relationships
-    spot_orders = relationship("Orders", back_populates='users', cascade="all, delete-orphan")
+    orders = relationship("DBOrder", back_populates='users', cascade="all, delete-orphan")
     watchlist_master = relationship("UserWatchlist", back_populates="master_user", cascade="all, delete-orphan", foreign_keys=[UserWatchlist.master])
     watchlist_watcher = relationship("UserWatchlist", back_populates="watcher_user", cascade="all, delete-orphan", foreign_keys=[UserWatchlist.watcher])
 
@@ -167,7 +167,7 @@ class DBOrder(Base):
     )
 
     # Relationships
-    users = relationship("Users", back_populates='spot_orders', )
+    users = relationship("Users", back_populates='orders', )
 
     def __init__(self, **kwargs: Any) -> None:
         kwargs['standing_quantity'] = kwargs['quantity']

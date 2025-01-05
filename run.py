@@ -1,9 +1,11 @@
+import time
 import uvicorn
 import asyncio
 import logging
 from multiprocessing import Process, Queue
 
 from config import DB_URL
+from trading_engine.engines.futures import FuturesEngine
 from trading_engine.engines.spot import SpotEngine
 from trading_engine.db_listener import DBListener
 
@@ -15,13 +17,21 @@ def db_listener():
     asyncio.run(DBListener(DB_URL).start())    
 
 
-def engine(order_queue: Queue, price_queue: Queue) -> None:
+def futures_engine(order_queue: Queue, price_queue):
+    asyncio.run(
+        FuturesEngine(order_queue)\
+            .start(['BTC'], price_queue)
+    )
+
+
+def spot_engine(order_queue: Queue, price_queue: Queue) -> None:
     asyncio.run(SpotEngine(order_queue).start(price_queue=price_queue))
 
 
-def server(order_queue: Queue, price_queue: Queue) -> None:
+def server(spot_queue: Queue, futures_queue: Queue, price_queue: Queue) -> None:
     from routes.stream import MANAGER
-    MANAGER.order_queue = order_queue
+    MANAGER.spot_queue = spot_queue
+    MANAGER.futures_queue = futures_queue
     MANAGER.price_queue = price_queue
     
     logger.info('Initialising API server')
@@ -35,21 +45,37 @@ def server(order_queue: Queue, price_queue: Queue) -> None:
 
 
 def main() -> None:
-    order_queue = Queue()
+    spot_queue = Queue()
+    futures_queue = Queue()
     price_queue = Queue()
     
     funcs = [
-        (server, (order_queue, price_queue)), 
-        (engine, (order_queue, price_queue)), 
-        (db_listener, ())
+        (spot_engine, (spot_queue, price_queue), "Spot Engine"), 
+        (futures_engine, (futures_queue, price_queue), "Futures Engine"),
+        (server, (spot_queue, futures_queue, price_queue), 'Server'), 
+        (db_listener, (), "DB Listener"),
     ]
-    ps = [Process(target=func, args=args) for func, args in funcs]
+    
+    ps = [Process(target=func, args=args, name=name) for func, args, name in funcs]
     
     for p in ps:
         p.start()
     
-    for p in ps:
-        p.join()
+    while True:
+        try:
+            for p in ps:
+                if not p.is_alive():
+                    logger.error(f"Process ({p.name}) has died unexpectedly")
+                    p.join()
+                    raise KeyboardInterrupt
+                time.sleep(1)
+        except KeyboardInterrupt:
+            for p in ps:
+                p.terminate()
+                p.join()
+            
+            logger.info('All processes terminated')
+            raise
 
 
 if __name__ == '__main__':

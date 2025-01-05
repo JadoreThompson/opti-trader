@@ -9,7 +9,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from enums import OrderType
+from enums import MarketType, OrderType
 from config import PH
 from db_models import Base, Users
 from models import socket_models
@@ -34,30 +34,47 @@ async def generate_order_requests(quantity: int = 10) -> list:
     orders = []
     
     for _ in range(quantity):
-        order_obj = random.choice([
-            socket_models.MarketOrder(
-                ticker='APPL',
-                quantity=random.randint(1, 50),
-            ),
+        make_limit = random.choice([True, False])
+        
+        data = {
+            'market_type': MarketType.SPOT,
+            'type': OrderType.MARKET,
+            'ticker': 'APPL',
+            'quantity': random.randint(1, 10),
+            'take_profit': None,
+            'stop_loss': None,
+            'limit_price': None,
+        }
+        
+        if make_limit:
+            data['type'] = OrderType.LIMIT
+            data['limit_price'] = random.choice([i for i in range(10, 210, 10)])
+        
+        # order_obj = random.choice([
+        #     socket_models.MarketOrder(
+        #         ticker='APPL',
+        #         quantity=random.randint(1, 50),
+        #     ),
             
-            socket_models.LimitOrder(
-                ticker='APPL',
-                quantity=random.randint(1, 50),
-                limit_price=random.choice([n for n in range(20, 1000, 10)])
-            )
-        ])
+        #     socket_models.LimitOrder(
+        #         ticker='APPL',
+        #         quantity=random.randint(1, 50),
+        #         limit_price=random.choice([n for n in range(20, 1000, 10)])
+        #     )
+        # ])
 
-        order_type = {
-            socket_models.MarketOrder: OrderType.MARKET,
-            socket_models.LimitOrder: OrderType.LIMIT
-        }[type(order_obj)]
+        # order_type = {
+        #     socket_models.MarketOrder: OrderType.MARKET,
+        #     socket_models.LimitOrder: OrderType.LIMIT
+        # }[type(order_obj)]
             
-        order_req = socket_models.Request(
-            type=order_type, 
-            market_order=order_obj if order_type == OrderType.MARKET else None,
-            limit_order=order_obj if order_type == OrderType.LIMIT else None
-        )
-        orders.append(order_req)
+        # order_req = socket_models.Request(
+        #     type=order_type, 
+        #     market_order=order_obj if order_type == OrderType.MARKET else None,
+        #     limit_order=order_obj if order_type == OrderType.LIMIT else None
+        # )
+        
+        orders.append(socket_models.TempBaseOrder(**data))
         
     return orders
 
@@ -105,7 +122,7 @@ async def test_socket(
         print(f'{num_orders} orders in queue for {kwargs['name']}')
     
     i = 0
-    while i < len(orders):
+    while True:
         try:
             async with websockets.connect(SOCKET_URL) as socket:
                 await socket.send(json.dumps({'token': token}))
@@ -117,20 +134,22 @@ async def test_socket(
                 while i < len(orders):
                     await socket.send(json.dumps(orders[i].model_dump()))
                     
-                    if divider and i > 0:
+                    if divider > 1 and i > 0:
                         if i % divider == 0:
                             await socket.send(json.dumps({
                                 'type': OrderType.CLOSE,
-                                'close_order': {
-                                    'quantity': close_quantity,
-                                    'ticker': 'APPL'
-                                }
+                                'market_type': MarketType.SPOT,
+                                'quantity': close_quantity,
+                                'ticker': 'APPL',
                             }))
-                    await asyncio.sleep(1)
                     i += 1
+                    await asyncio.sleep(1)
+                    
         except websockets.exceptions.ConnectionClosedError:
             if kwargs.get('name', None):
                 print(f'[{kwargs['name']}] Disconnect - {i}')
+            print('Reconnecting')
+            await asyncio.sleep(1)
 
 from random import randint
 

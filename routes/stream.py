@@ -35,6 +35,7 @@ async def trade(websocket: WebSocket):
             await asyncio.sleep(0.1)
             
     except (StarletteWebSocketDisconnect, RuntimeError, FastAPIWebSockDisconnect) as e:
+        print(e)
         MANAGER.cleanup(user_id)
     except Exception as e:
         logger.error(f'{type(e)} - {str(e)}')

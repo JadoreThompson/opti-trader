@@ -99,12 +99,12 @@ class LimitOrder(BaseOrder):
         return limit_price
 
 
-class CloseOrder(_MarketType):
+class CloseOrder(_MarketType, _OrderType):
     ticker: str
     quantity: Optional[float] = Field(None, gt=0)
 
 
-class ModifyOrder(Base):
+class ModifyOrder(_MarketType, _OrderType):
     order_id: UUID
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
@@ -141,16 +141,6 @@ class FuturesContractWrite(TempBaseOrder):
 
 class FuturesContractRead(FuturesContractWrite):
     standing_quantity: int = Field(ge=0)
-
-
-class TradeRequest(Base):
-    market_type: MarketType
-    spot: Optional[Request] = None
-    futures: Optional[FuturesContractWrite] = None
-
-    @field_validator('spot', check_fields=False)
-    def spot_validator(cls, value):
-        print(value)
     
 
 class BasePubSubMessage(Base):
