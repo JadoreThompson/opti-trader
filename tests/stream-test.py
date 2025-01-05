@@ -40,7 +40,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             'market_type': MarketType.FUTURES,
             'type': OrderType.MARKET,
             'ticker': 'APPL',
-            'quantity': random.randint(1, 10),
+            'quantity': random.randint(10, 15),
             'take_profit': None,
             'stop_loss': None,
             'limit_price': None,

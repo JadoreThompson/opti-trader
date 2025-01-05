@@ -1,5 +1,6 @@
 import logging
 
+from datetime import datetime
 from uuid import uuid4, UUID
 
 from enums import OrderStatus, Side
@@ -80,6 +81,7 @@ class _FuturesContract(Base):
     
     @property
     def data(self) -> dict:
+        # print('type' in self._data)
         return self._data
     
     @property
@@ -92,7 +94,10 @@ class _FuturesContract(Base):
     
     @status.setter
     def status(self, value: OrderStatus) -> None:
-        self._status = self.data['status'] = value
+        self._status = self.data['order_status'] = value
+        
+        if value == OrderStatus.CLOSED:
+            self.data['closed_at'] = datetime.now()
         
     @property
     def standing_quantity(self) -> int:

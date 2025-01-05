@@ -316,13 +316,13 @@ class OrderBook:
             float: Closest price level to the original price passed in param
             None: No price could be found
         """         
-        if side not in ['ask', 'bid']:
-            raise ValueError('Book must be either ask or bid')
+        if side not in ['asks', 'bids']:
+            raise ValueError('Book must be either asks or bids')
 
-        price_levels = self.ask_levels if side == 'ask' else self.bid_levels
+        price_levels = self.ask_levels if side == 'asks' else self.bid_levels
         
         try:
-            if side == 'ask':    
+            if side == 'asks':    
                 cleaned_prices = {
                     key: abs(price - key)
                     for key in list(price_levels)
@@ -330,7 +330,7 @@ class OrderBook:
                     and len(self.asks[key]) > 0
                 }
                 
-            elif side == 'bid':
+            elif side == 'bids':
                 cleaned_prices = {
                     key: abs(price - key)
                     for key in list(price_levels)
@@ -347,7 +347,7 @@ class OrderBook:
                 count += 1
                 return self.find_closest_price(
                     price, 
-                    'ask' if side == 'bid' else 'bid', 
+                    'asks' if side == 'bids' else 'bids', 
                     count
                 )
             return None
@@ -410,6 +410,14 @@ class OrderBook:
                     new_order = AskOrder(order.data, OrderType.STOP_LOSS_ORDER)
                     new_order.append_to_orderbook(self)
                     self.track(order=new_order, channel='stop_loss')
+
+    def __getitem__(self, key: str):
+        if key not in ['asks', 'bids']:
+            raise ValueError("key must be asks or bids")
+        
+        if key == 'asks':
+            return self.asks
+        return self.bids
         
     @property
     def ticker(self) -> str:

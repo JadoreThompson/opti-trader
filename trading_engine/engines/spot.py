@@ -209,7 +209,7 @@ class SpotEngine:
         bid_price: float = kwargs.get('bid_price', None) or order.data['price']
         attempts: int = kwargs.get('attempts', None) or 0
         
-        ask_price = orderbook.find_closest_price(bid_price, 'ask')
+        ask_price = orderbook.find_closest_price(bid_price, 'asks')
         if ask_price is None:
             return (0,)
 
@@ -468,7 +468,7 @@ class SpotEngine:
         quantity: int = kwargs['quantity']
         attempts = 0 if 'attempts' not in kwargs else kwargs['attempts']
         
-        bid_price = orderbook.find_closest_price(kwargs['bid_price'], 'bid')
+        bid_price = orderbook.find_closest_price(kwargs['bid_price'], 'bids')
         
         if not bid_price:
             return (0, )

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import multiprocessing
 import redis
@@ -12,17 +13,21 @@ from typing import (
 )
 
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
-from enums import OrderStatus, OrderType, PubSubCategory, Side, UpdateScope
+from enums import MarketType, OrderStatus, OrderType, PubSubCategory, Side, UpdateScope
 from models.socket_models import BasePubSubMessage, FuturesContractRead, OrderUpdatePubSubMessage
 from ..order.position import FuturesPosition
-from ..utils import publish_update_to_client
+from ..utils import batch_update, publish_update_to_client
 from ..order.contract import _FuturesContract
 from ..orderbook import OrderBook
 
 logger = logging.getLogger(__name__)
 
 class FuturesEngine:
+    _MAX_MATCHING_ATTEMPTS = 20
+    _MAX_PRICE_LEVEL_ATTEMPTS = 5
+    
     def __init__(self, queue: multiprocessing.Queue) -> None:
+        self.count = 0
         self.queue = queue
         self._order_books: dict[str, OrderBook] = {}
         self._redis = redis.asyncio.client.Redis(
@@ -30,8 +35,8 @@ class FuturesEngine:
             host=REDIS_HOST
         )
         self._handlers = {
-            OrderType.MARKET: self._create_contract,
-            OrderType.LIMIT: self._create_contract,
+            OrderType.MARKET: self._handle_match,
+            OrderType.LIMIT: self._handle_match,
             OrderType.CLOSE: self._close_contract,
             OrderType.MODIFY: self._modify_contract,
         }
@@ -77,6 +82,7 @@ class FuturesEngine:
             await asyncio.sleep(0.01)
         
     async def _route(self, data: dict) -> None: 
+        og = data['type']
         try:
             await self._handlers[data['type']](
                 data=data, 
@@ -84,36 +90,51 @@ class FuturesEngine:
             )
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
-    
-    async def _create_contract(self, data: dict, channel: str) -> None:
+
+    async def _handle_match(self, data: dict, channel: str) -> None:
         contract: _FuturesContract = _FuturesContract(
             data, 
             data['price'] or data['limit_price'], 
             side=data['side'],
         )
+        
         orderbook: OrderBook = self._order_books[data['ticker']]
 
         if data['limit_price']:
             result = self._handle_limit(data, contract, orderbook)
             return
         
-        result = {
-            Side.LONG: self._match_long,
-            Side.SHORT: self._match_short
-        }[contract.side](contract)
+        self.count += 1
         
-        if result[0] == 2:
-            await orderbook.set_price(result[1])
-            contract.data['filled_price'] = result[1]
-            contract.status = OrderStatus.FILLED
-            
-            pos = FuturesPosition(data, contract)
-            orderbook.track(position=pos)
-            self._place_tp_sl(contract, pos, orderbook)
+        result = self._match(
+            contract=contract,
+            orderbook=orderbook
+        )
         
-        else:
-            contract.append_to_orderbook(orderbook)
+        try:
+            if result[0] == 2:
+                await orderbook.set_price(result[1])
+                contract.data['filled_price'] = result[1]
+                contract.status = OrderStatus.FILLED
+                
+                pos = FuturesPosition(data, contract)
+                orderbook.track(position=pos)
+                self._place_tp_sl(contract, pos, orderbook)
+            else:
+                contract.status = {
+                    1: OrderStatus.PARTIALLY_FILLED,
+                    0: OrderStatus.NOT_FILLED,
+                }[result[0]]
+                contract.append_to_orderbook(
+                    orderbook, 
+                    contract.data['price'] or contract.data['limit_price']
+                )
 
+        except Exception as e:
+            logger.error('Error during handling of match result {} {} - {}'.format(result[0], type(e), str(e)))    
+        
+        await batch_update([contract.data])
+        
         await publish_update_to_client(**{
             0: {
                 "channel": channel,
@@ -154,99 +175,87 @@ class FuturesEngine:
 
     async def _modify_contract(self, **kwargs) -> None:
         pass
-
-    def _match_long(self, contract: _FuturesContract) -> Tuple[int, Optional[float]]:
-        """Matches against the contracts within the ask book"""
-        # Current Implementation: FIFO
-        
-        orderbook: OrderBook = self._order_books[contract.data['ticker']]
-        ask_price = orderbook.find_closest_price(contract.data['price'], 'ask')
-        
-        if not ask_price:
-            return (0,)
-        
-        touched_cons: List[_FuturesContract] = []
-        filled_cons: List[_FuturesContract] = []
-        
-        ex_contract: _FuturesContract
-        for ex_contract in orderbook.asks[ask_price]:
-            touched_cons.append(ex_contract)
-            leftover_quantity = contract._standing_quantity - ex_contract._standing_quantity
-            
-            if leftover_quantity >= 0: 
-                filled_cons.append(ex_contract)
-                contract.reduce_standing_quantity(ex_contract._standing_quantity)
-                ex_contract.reduce_standing_quantity(ex_contract._standing_quantity)
-            
-            else:
-                ex_contract.reduce_standing_quantity(contract.standing_quantity)
-                contract.reduce_standing_quantity(contract.standing_quantity)
-
-            if contract.standing_quantity == 0:
-                break
-            
-        for ex_contract in filled_cons:
-            if ex_contract.tag in ['stop_loss', 'take_profit']:
-                orderbook.rtrack(position=ex_contract.position, channel='all')
-                ex_contract.position.remove_from_orderbook(orderbook, 'all')
-                ex_contract.position.calculate_pnl('real', contract=contract)
-            else:
-                ex_contract.remove_from_orderbook(orderbook)
-                ex_contract['filled_price'] = ask_price
-                ex_contract.status = OrderStatus.FILLED
-
-                new_pos = FuturesPosition(ex_contract.data, ex_contract)
-                self._place_tp_sl(ex_contract, new_pos, orderbook)
-                orderbook.track(position=new_pos)
-        
-        if contract.standing_quantity == 0:
-            return (2, ask_price)
-
-        return (1,)
     
-    def _match_short(self, contract: _FuturesContract) -> Tuple[int, Optional[float]]:
+    def _match(self, **kwargs) -> Tuple[int, Optional[float]]:
+        """Matches contract against opposite counterparties
+
+        Args:
+            kwargs:
+                - contract (_FuturesContract): Contract to be matcher
+                - orderbook (OrderBook): OrderBook to find orders in
+        Returns:
+            Tuple[int, Optional[float]]: _description_
+        """        
+        contract: _FuturesContract = kwargs['contract']
+        book: str = \
+            kwargs.get('book', None) or \
+            ('bids' if contract.side == Side.SHORT else 'asks')
+            
+        price = kwargs.get('price', None) or contract.data['price']
         orderbook: OrderBook = self._order_books[contract.data['ticker']]
-        bid_price = orderbook.find_closest_price(contract.data['price'], 'bid')
+        attempts: int = kwargs.get('attempts', None) or 0 
         
-        if not bid_price:
+        price = orderbook.find_closest_price(price, book)
+    
+        if not price:
             return (0,)
         
         touched_cons: List[_FuturesContract] = []
         filled_cons: List[_FuturesContract] = []
         
         ex_contract: _FuturesContract
-        for ex_contract in orderbook.bids[bid_price]:
-            touched_cons.append(ex_contract)
-            leftover_quantity = contract._standing_quantity - ex_contract._standing_quantity
-            
-            if leftover_quantity >= 0: 
-                filled_cons.append(ex_contract)
-                contract.reduce_standing_quantity(ex_contract._standing_quantity)
-                ex_contract.reduce_standing_quantity(ex_contract._standing_quantity)
-            
-            else:
-                ex_contract.reduce_standing_quantity(contract.standing_quantity)
-                contract.reduce_standing_quantity(ex_contract.standing_quantity)
-            
-            if contract.standing_quantity == 0:
-                break
-        
-        for ex_contract in filled_cons:
-            if ex_contract.tag in ['stop_loss', 'take_profit']:
-                orderbook.rtrack(position=ex_contract.position, channel='all')
-                ex_contract.position.remove_from_orderbook(orderbook, 'all')
-                ex_contract.position.calculate_pnl('real', contract=contract)
-            else:
-                ex_contract.remove_from_orderbook(orderbook)
-                ex_contract['filled_price'] = bid_price
-                ex_contract.status = OrderStatus.FILLED
+        for ex_contract in orderbook[book][price]:
+            try:
+                touched_cons.append(ex_contract)
+                leftover_quantity = contract._standing_quantity - ex_contract._standing_quantity
                 
-                new_pos = FuturesPosition(ex_contract.data, ex_contract)
-                self._place_tp_sl(ex_contract, new_pos, orderbook)
-                orderbook.track(position=new_pos,)
+                if leftover_quantity >= 0: 
+                    filled_cons.append(ex_contract)
+                    contract.reduce_standing_quantity(ex_contract._standing_quantity)
+                    ex_contract.reduce_standing_quantity(ex_contract._standing_quantity)
+                
+                else:
+                    ex_contract.reduce_standing_quantity(contract.standing_quantity)
+                    contract.reduce_standing_quantity(ex_contract.standing_quantity)
+                
+                if contract.standing_quantity == 0:
+                    break
+            except Exception as e:
+                logger.error('Error matching against a {} orders {} - {}'.format(book, type(e), str(e)))
+        
+        try:
+            for ex_contract in filled_cons:
+                if ex_contract.tag in ['stop_loss', 'take_profit']:
+                    orderbook.rtrack(position=ex_contract.position, channel='all')
+                    ex_contract.position.remove_from_orderbook(orderbook, 'all')
+                    ex_contract.position.calculate_pnl('real', contract=contract)
+                    ex_contract.status = OrderStatus.CLOSED
+                    ex_contract.data['close_price'] = price
+                else:
+                    ex_contract.remove_from_orderbook(orderbook)
+                    ex_contract.data['filled_price'] = price
+                    ex_contract.status = OrderStatus.FILLED
+                    
+                    new_pos = FuturesPosition(ex_contract.data, ex_contract)
+                    self._place_tp_sl(ex_contract, new_pos, orderbook)
+                    orderbook.track(position=new_pos,)
+            
+            asyncio.create_task(batch_update([item.data for item in touched_cons]))
+        except Exception as e:
+            logger.error('Error during handling of filled {} orders {} - {}'.format(book, type(e), str(e)))
         
         if contract.standing_quantity == 0:
-            return (2, bid_price)
+            return (2, price)
+
+        if attempts < self._MAX_MATCHING_ATTEMPTS:
+            attempts += 1
+            return self._match(
+                contract=contract,
+                book=book,
+                price=price,
+                orderbook=orderbook,
+                attempts=attempts,
+            )
 
         return (1,)
     
@@ -292,6 +301,8 @@ class FuturesEngine:
         for i in range(quantity):
             data = {
                 'user_id': uuid4(),
+                'market_type': MarketType.FUTURES,
+                'type': OrderType.MARKET,
                 'ticker': 'BTC',
                 'side': random.choice([Side.LONG, Side.SHORT]),
                 'quantity': 10,
@@ -302,11 +313,13 @@ class FuturesEngine:
                 'take_profit': random.choice([None, random.choice(tp_range)]),
                 'stop_loss': random.choice([None, random.choice(sl_range)]),
                 'order_status': OrderStatus.NOT_FILLED,
+                'created_at': datetime.datetime.now(),
             }
             
             if data['price'] is None:
                 data['limit_price'] = random.choice(op_range)
-            
+                data['type'] = OrderType.LIMIT
+                
             contract = _FuturesContract(
                 data, 
                 data['limit_price'] or data['price'], 

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import logging
 import redis
@@ -27,13 +28,24 @@ async def batch_update(orders: list[dict]) -> None:
     async with get_db_session() as session:
         for order in orders:
             try:
-                order.pop('type', None)
-                await session.execute(update(DBOrder),[order])
+                if isinstance(order['created_at'], str):
+                    order['created_at'] = datetime.datetime.strptime(order['created_at'], "%Y-%m-%d %H:%M:%S.%f")
+                    
+                await session.execute(
+                    update(DBOrder),
+                    [
+                        {
+                            k: v 
+                            for k, v in order.items() 
+                            if k != 'type'
+                        }
+                    ]
+                )
                 await session.commit()
             except Exception as e:
                 await session.rollback()
-            finally:
-                await asyncio.sleep(0.1)
+
+            await asyncio.sleep(0.001)
                 
                 
 async def publish_update_to_client(channel: str, message: str | dict) -> None:
