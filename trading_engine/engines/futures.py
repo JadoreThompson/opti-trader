@@ -1,4 +1,5 @@
 import asyncio
+import json
 import multiprocessing
 import redis
 import logging
@@ -11,7 +12,8 @@ from typing import (
 )
 
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
-from enums import OrderStatus, OrderType, Side
+from enums import OrderStatus, OrderType, PubSubCategory, Side, UpdateScope
+from models.socket_models import BasePubSubMessage, FuturesContractRead, OrderUpdatePubSubMessage
 from ..order.position import FuturesPosition
 from ..utils import publish_update_to_client
 from ..order.contract import _FuturesContract
@@ -66,8 +68,7 @@ class FuturesEngine:
         while True:
             try:
                 message = self.queue.get_nowait()
-                if isinstance(message, dict):
-                    asyncio.create_task(self._route(message))
+                asyncio.create_task(self._route(message))
             except queue.Empty:
                 pass
             except Exception as e:
@@ -87,11 +88,11 @@ class FuturesEngine:
     async def _create_contract(self, data: dict, channel: str) -> None:
         contract: _FuturesContract = _FuturesContract(
             data, 
-            data['entry_price'] or data['limit_price'], 
+            data['price'] or data['limit_price'], 
             side=data['side'],
         )
         orderbook: OrderBook = self._order_books[data['ticker']]
-        
+
         if data['limit_price']:
             result = self._handle_limit(data, contract, orderbook)
             return
@@ -100,11 +101,11 @@ class FuturesEngine:
             Side.LONG: self._match_long,
             Side.SHORT: self._match_short
         }[contract.side](contract)
-
+        
         if result[0] == 2:
             await orderbook.set_price(result[1])
-            contract.status = OrderStatus.FILLED
             contract.data['filled_price'] = result[1]
+            contract.status = OrderStatus.FILLED
             
             pos = FuturesPosition(data, contract)
             orderbook.track(position=pos)
@@ -113,34 +114,34 @@ class FuturesEngine:
         else:
             contract.append_to_orderbook(orderbook)
 
-        # await publish_update_to_client(**{
-        #     0: {
-        #         "channel": channel,
-        #         'message': BasePubSubMessage(
-        #             category=PubSubCategory.ERROR,
-        #             message="Insufficient asks to fulfill bid order",
-        #         ).model_dump()
-        #     },
+        await publish_update_to_client(**{
+            0: {
+                "channel": channel,
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.ERROR,
+                    message="Insufficient asks to fulfill bid order",
+                ).model_dump()
+            },
             
-        #     1: {
-        #         "channel": channel,
-        #         'message': OrderUpdatePubSubMessage(
-        #             category=PubSubCategory.ORDER_UPDATE,
-        #             message="Insufficient asks to fulfill bid order",
-        #             on=UpdateScope.NEW,
-        #             details=FuturesContract(**data).model_dump()
-        #         ).model_dump()
-        #     },
+            1: {
+                "channel": channel,
+                'message': OrderUpdatePubSubMessage(
+                    category=PubSubCategory.ORDER_UPDATE,
+                    message="Insufficient asks to fulfill bid order",
+                    on=UpdateScope.NEW,
+                    details=FuturesContractRead(**data).model_dump()
+                ).model_dump()
+            },
             
-        #     2: {
-        #         "channel": channel,
-        #         'message': BasePubSubMessage(
-        #             category=PubSubCategory.SUCCESS,
-        #             message="Order successfully placed",
-        #             details=FuturesContract(**data).model_dump()
-        #         ).model_dump()
-        #     }
-        # }[result[0]])
+            2: {
+                "channel": channel,
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.SUCCESS,
+                    message="Order successfully placed",
+                    details=FuturesContractRead(**data).model_dump()
+                ).model_dump()
+            }
+        }[result[0]])
         
     def _handle_limit(self, data: dict, contract: _FuturesContract, orderbook: OrderBook) -> None:
         contract.append_to_orderbook(orderbook, data['limit_price'])
@@ -159,7 +160,7 @@ class FuturesEngine:
         # Current Implementation: FIFO
         
         orderbook: OrderBook = self._order_books[contract.data['ticker']]
-        ask_price = orderbook.find_closest_price(contract.data['entry_price'], 'ask')
+        ask_price = orderbook.find_closest_price(contract.data['price'], 'ask')
         
         if not ask_price:
             return (0,)
@@ -191,6 +192,9 @@ class FuturesEngine:
                 ex_contract.position.calculate_pnl('real', contract=contract)
             else:
                 ex_contract.remove_from_orderbook(orderbook)
+                ex_contract['filled_price'] = ask_price
+                ex_contract.status = OrderStatus.FILLED
+
                 new_pos = FuturesPosition(ex_contract.data, ex_contract)
                 self._place_tp_sl(ex_contract, new_pos, orderbook)
                 orderbook.track(position=new_pos)
@@ -202,7 +206,7 @@ class FuturesEngine:
     
     def _match_short(self, contract: _FuturesContract) -> Tuple[int, Optional[float]]:
         orderbook: OrderBook = self._order_books[contract.data['ticker']]
-        bid_price = orderbook.find_closest_price(contract.data['entry_price'], 'bid')
+        bid_price = orderbook.find_closest_price(contract.data['price'], 'bid')
         
         if not bid_price:
             return (0,)
@@ -234,6 +238,9 @@ class FuturesEngine:
                 ex_contract.position.calculate_pnl('real', contract=contract)
             else:
                 ex_contract.remove_from_orderbook(orderbook)
+                ex_contract['filled_price'] = bid_price
+                ex_contract.status = OrderStatus.FILLED
+                
                 new_pos = FuturesPosition(ex_contract.data, ex_contract)
                 self._place_tp_sl(ex_contract, new_pos, orderbook)
                 orderbook.track(position=new_pos,)
@@ -291,18 +298,18 @@ class FuturesEngine:
                 'standing_quantity': 10,
                 'filled_price': None,
                 'limit_price': None,
-                'entry_price': random.choice([None, random.choice(op_range)]),
+                'price': random.choice([None, random.choice(op_range)]),
                 'take_profit': random.choice([None, random.choice(tp_range)]),
                 'stop_loss': random.choice([None, random.choice(sl_range)]),
-                'status': OrderStatus.NOT_FILLED,
+                'order_status': OrderStatus.NOT_FILLED,
             }
             
-            if data['entry_price'] is None:
+            if data['price'] is None:
                 data['limit_price'] = random.choice(op_range)
             
             contract = _FuturesContract(
                 data, 
-                data['limit_price'] or data['entry_price'], 
+                data['limit_price'] or data['price'], 
                 side=data['side'],
             )
             

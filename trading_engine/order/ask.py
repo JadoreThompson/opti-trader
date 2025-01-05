@@ -10,7 +10,15 @@ class AskOrder(BaseSpotOrder):
             'stop_loss' if self.order_type == OrderType.STOP_LOSS_ORDER \
             else 'take_profit'
 
-    def remove_from_orderbook(self, orderbook: OrderBook) -> None:
+    def remove_from_orderbook(self, orderbook: OrderBook, category: str=None) -> None:
+        """
+
+        Args:
+            orderbook (OrderBook):
+            category (str, optional): Defaults to None.
+        Note:
+            - DO NOT PASS category
+        """
         try:
             orderbook.asks[self.data[f'{self._price_key}']].remove(self)
             

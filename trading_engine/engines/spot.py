@@ -111,8 +111,6 @@ class SpotEngine:
                 orderbook=orderbook
             )
             
-            # print(result)
-            
             async def not_filled(**kwargs):
                 return
             

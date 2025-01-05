@@ -23,6 +23,20 @@ class FuturesPosition(Base):
         self._side: Side = contract.side
     
     def remove_from_orderbook(self, orderbook: OrderBook, category: str) -> None:
+        """
+        Removes the contracts from orderbook
+        
+        Args:
+            orderbook (OrderBook): 
+            category (str):
+                - all: Removes all associating contracts from the orderbook
+                - entry: Removes the initial opening contracy from the orderbook
+                - take_profit: Removes the take_profit contract from the orderbook
+                - stop_loss: Removes the stop_loss contract from the orderbook
+
+        Raises:
+            ValueError: Invalid category
+        """        
         if category not in ['entry', 'take_profit', 'stop_loss', 'all']:
             raise ValueError("Must pass a category in ['entry', 'take_profit', 'stop_loss', 'all']")
         

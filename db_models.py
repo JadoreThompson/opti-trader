@@ -151,7 +151,7 @@ class DBOrder(Base):
         nullable=False,
         default=MarketType.SPOT,
     )
-    side: Mapped[str] = mapped_column(
+    side: Mapped[Side] = mapped_column(
         Enum(Side, name='side'),
         nullable=True,
     )

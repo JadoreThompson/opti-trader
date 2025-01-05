@@ -50,8 +50,8 @@ class OrderBook:
 
     async def set_price(self, price: float) -> None:
         async with self._lock:
-            print(len(self._bids[price]), 'bids')
-            print(len(self.asks[price]), 'asks')
+            # print(len(self._bids[price]), 'bids')
+            # print(len(self.asks[price]), 'asks')
             if price == self._price:
                 return
             
@@ -68,7 +68,6 @@ class OrderBook:
             try:
                 if datetime.now() - self._last_price_performance >= self._PRICE_RATE_LIMIT:        
                     self._last_price_performance = datetime.now()
-                else:
                     asyncio.get_running_loop().create_task(self._update_dom(price))
             except TypeError:
                 pass
@@ -275,7 +274,7 @@ class OrderBook:
         if channel == 'all':
             for key in self._tracker[id_key].copy():
                 try:
-                    self._tracker[id_key][key].remove_from_orderbook(self)
+                    self._tracker[id_key][key].remove_from_orderbook(self, 'all')
                 except ValueError:
                     pass
                 del self._tracker[id_key][key]

@@ -7,7 +7,15 @@ class BidOrder(BaseSpotOrder):
     def __init__(self, data: dict, order_type: OrderType, **kwargs) -> None:
         super().__init__(data, order_type, **kwargs)
 
-    def remove_from_orderbook(self, orderbook: OrderBook) -> None:
+    def remove_from_orderbook(self, orderbook: OrderBook, category: str=None) -> None:
+        """
+
+        Args:
+            orderbook (OrderBook):
+            category (str, optional): Defaults to None.
+        Note:
+            - DO NOT PASS category
+        """
         try:
             price = self.data['limit_price'] or self.data['price']
             

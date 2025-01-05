@@ -23,12 +23,19 @@ class _FuturesContract(Base):
         self._contract_id = uuid4()
         self._data = data
         self._side: Side = side or data['side']
-        self._status: OrderStatus = data['status']
-        self._standing_quantity: int = data['standing_quantity']
-        self._quantity: int = data['quantity']
+        self._status: OrderStatus = data['order_status']
+        self._standing_quantity = self._quantity = data['quantity']
         self._margin: float = self._calculate_margin()
         
-    def remove_from_orderbook(self, orderbook: OrderBook) -> None:
+    def remove_from_orderbook(self, orderbook: OrderBook, category: str=None) -> None:
+        """
+
+        Args:
+            orderbook (OrderBook):
+            category (str, optional): Defaults to None.
+        Note:
+            - DO NOT PASS category
+        """
         try:
             if self.side == Side.LONG:
                 orderbook.bids[self.price].remove(self)
@@ -59,7 +66,10 @@ class _FuturesContract(Base):
         self._margin = self._standing_quantity * self.price
             
     def __repr__(self) -> str:
-        return f'Contract(side={self.side})'
+        return f"""Contract(
+            side={self.side}, 
+            status={self.status}, 
+            standing_quantity={self.standing_quantity})"""
 
     def __str__(self) -> str:
         return self.__repr__()

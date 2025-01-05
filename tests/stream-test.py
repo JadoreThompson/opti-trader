@@ -9,7 +9,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from enums import MarketType, OrderType
+from enums import MarketType, OrderType, Side
 from config import PH
 from db_models import Base, Users
 from models import socket_models
@@ -37,44 +37,21 @@ async def generate_order_requests(quantity: int = 10) -> list:
         make_limit = random.choice([True, False])
         
         data = {
-            'market_type': MarketType.SPOT,
+            'market_type': MarketType.FUTURES,
             'type': OrderType.MARKET,
             'ticker': 'APPL',
             'quantity': random.randint(1, 10),
             'take_profit': None,
             'stop_loss': None,
             'limit_price': None,
+            'side': random.choice([Side.LONG, Side.SHORT])
         }
         
         if make_limit:
             data['type'] = OrderType.LIMIT
             data['limit_price'] = random.choice([i for i in range(10, 210, 10)])
-        
-        # order_obj = random.choice([
-        #     socket_models.MarketOrder(
-        #         ticker='APPL',
-        #         quantity=random.randint(1, 50),
-        #     ),
             
-        #     socket_models.LimitOrder(
-        #         ticker='APPL',
-        #         quantity=random.randint(1, 50),
-        #         limit_price=random.choice([n for n in range(20, 1000, 10)])
-        #     )
-        # ])
-
-        # order_type = {
-        #     socket_models.MarketOrder: OrderType.MARKET,
-        #     socket_models.LimitOrder: OrderType.LIMIT
-        # }[type(order_obj)]
-            
-        # order_req = socket_models.Request(
-        #     type=order_type, 
-        #     market_order=order_obj if order_type == OrderType.MARKET else None,
-        #     limit_order=order_obj if order_type == OrderType.LIMIT else None
-        # )
-        
-        orders.append(socket_models.TempBaseOrder(**data))
+        orders.append(data)
         
     return orders
 
@@ -118,6 +95,8 @@ async def test_socket(
     _, token = await create_user()
     orders = await generate_order_requests(num_orders)
     
+    print(f'trades_{_.user_id}')
+    
     if kwargs.get('name', None):
         print(f'{num_orders} orders in queue for {kwargs['name']}')
     
@@ -132,7 +111,7 @@ async def test_socket(
                     print(f'[{kwargs['name']}]: ', m)
                 
                 while i < len(orders):
-                    await socket.send(json.dumps(orders[i].model_dump()))
+                    await socket.send(json.dumps(orders[i]))
                     
                     if divider > 1 and i > 0:
                         if i % divider == 0:
