@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import Optional
-from uuid import UUID, uuid4
 from pydantic import (
     BaseModel,
     Field,
     field_validator
 )
+from typing import Optional
+from uuid import UUID
 
 from enums import (
     MarketType,
@@ -21,7 +21,6 @@ class Base(BaseModel):
     class Config:
         use_enum_values = True
 
-# New
 class _OrderType(Base):
     """Represents the order_type key: value in JSON"""
     type: OrderType
@@ -32,50 +31,13 @@ class _MarketType(Base):
     market_type: MarketType
 
 
-class TakeProfit(Base):
-    price: float = Field(gt=0)
-
-
-class StopLoss(Base):
-    price: float = Field(gt=0)
-    
-
-class BaseOrder(Base):
-    """Represents a base order with ticker, take profit, and stop loss settings.
-
-    Attributes:
-        ticker (str): The symbol of the security.
-        take_profit (Optional[float]): The take-profit price, must be positive.
-        stop_loss (Optional[float]): The stop-loss price, must be positive.
-    """
-    ticker: str
-    quantity: int = Field(gt=0)
-    take_profit: Optional[TakeProfit] = Field(None)
-    stop_loss: Optional[StopLoss] = Field(None)
-
-
 class TempBaseOrder(_OrderType, _MarketType):
     ticker: str
     quantity: int = Field(gt=0)
-    take_profit: Optional[TakeProfit] = Field(None)
-    stop_loss: Optional[StopLoss] = Field(None)
+    take_profit: Optional[float] = Field(None)
+    stop_loss: Optional[float] = Field(None)
     limit_price: Optional[float] = Field(None, gt=0)
 
-
-class MarketOrder(BaseOrder):
-    """Represents a spot market order"""
-    @field_validator('take_profit', check_fields=False)
-    def take_profit_validator(cls, take_profit, values) -> float:
-        stop_loss = values.data.get('stop_loss', None)
-        
-        try:    
-            if stop_loss and take_profit:
-                if take_profit.price <= stop_loss.price:
-                    raise ValueError('Take profit price must be greater than stop loss price')
-        except AttributeError:
-            pass
-        finally:
-            return take_profit
 
 class SpotCloseOrder(_MarketType, _OrderType):
     ticker: str

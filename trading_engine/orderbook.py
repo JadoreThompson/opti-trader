@@ -46,7 +46,7 @@ class OrderBook:
         self._dom = defaultdict(dict)
         self._blocked: bool = False
         self._lock = asyncio.Lock()
-        self._last_price_performance = None
+        self._last_update_time = None
 
     async def set_price(self, price: float) -> None:
         async with self._lock:
@@ -66,11 +66,16 @@ class OrderBook:
                 asyncio.get_running_loop().create_task(task)
             
             try:
-                if datetime.now() - self._last_price_performance >= self._PRICE_RATE_LIMIT:        
-                    self._last_price_performance = datetime.now()
+                if datetime.now() - self._last_update_time >= self._PRICE_RATE_LIMIT:        
+                    self._last_update_time = datetime.now()
                     asyncio.get_running_loop().create_task(self._update_dom(price))
+
             except TypeError:
-                pass
+                self._last_update_time = datetime.now()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                logger.error('{} - {}'.format(type(e), str(e)))
         
     async def _process_price(self, price: float) -> None:
         """Persist price in DB and push to the client manager"""
@@ -179,6 +184,7 @@ class OrderBook:
         try:
             if dom != self._dom:
                 self._dom = dom
+                print(json.dumps(dom, indent=4))
                 await publish_update_to_client(
                     **{
                         'channel': 'dom',

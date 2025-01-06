@@ -1,5 +1,4 @@
 import asyncio
-import asyncpg
 import json
 import logging
 import redis
@@ -7,7 +6,6 @@ import queue
 
 from datetime import datetime
 from uuid import UUID
-from random import randint
 from multiprocessing import Queue
 
 # FA
