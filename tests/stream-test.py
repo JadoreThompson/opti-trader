@@ -172,7 +172,7 @@ async def main():
             name=fkr.first_name(), 
             divider=randint(2, 5), 
             num_orders=randint(10_000, 30_000), 
-            close_quantity=randint(50, 100)
+            close_quantity=randint(1, 10)
         ) for _ in range(TEST_SIZE)
     ])
 

@@ -108,49 +108,50 @@ class FuturesEngine:
                 details=FuturesContractRead(**data).model_dump()
             ).model_dump()
         }
-        
-        contract: _FuturesContract = _FuturesContract(
-            data, 
-            data['price'] or data['limit_price'], 
-            Tag.ENTRY,
-            data['side'],
-        )
         orderbook: OrderBook = self._order_books[data['ticker']]
+        position = FuturesPosition(
+            data, 
+            _FuturesContract(
+                data, 
+                data['price'] or data['limit_price'], 
+                Tag.ENTRY,
+                data['side'],
+            )
+        )
+        position.contract.position = position
+        orderbook.track(position=position, channel='position')
+        # contract: _FuturesContract = _FuturesContract(
+        #     data, 
+        #     data['price'] or data['limit_price'], 
+        #     Tag.ENTRY,
+        #     data['side'],
+        # )
 
         if data['limit_price']:
-            result = self._handle_limit(data, contract, orderbook)
+            # result = self._handle_limit(data, contract, orderbook)
+            self._handle_limit(position, orderbook)
             return return_value
         
-        self.count += 1
-        
         result = self._match(
-            contract=contract,
-            orderbook=orderbook
+            contract=position.contract,
+            orderbook=orderbook,
         )
         
         try:
             if result[0] == 2:
                 await orderbook.set_price(result[1])
-                contract.data['filled_price'] = result[1]
-                contract.order_status = OrderStatus.FILLED
+                position.contract.data['filled_price'] = result[1]
                 
-                pos = FuturesPosition(data, contract)
-                orderbook.track(position=pos, channel='position')
-                self._place_tp_sl(contract, pos, orderbook)
+                # pos = FuturesPosition(data, contract)
+                # orderbook.track(position=pos, channel='position')
+                self._place_tp_sl(position.contract, position, orderbook)
             else:
-                contract.order_status = {
-                    1: OrderStatus.PARTIALLY_FILLED,
-                    0: OrderStatus.NOT_FILLED,
-                }[result[0]]
-                contract.append_to_orderbook(
-                    orderbook, 
-                    contract.data['price'] or contract.data['limit_price']
-                )
+                position.contract.append_to_orderbook(orderbook, )
 
         except Exception as e:
             logger.error('Error during handling of match result {} {} - {}'.format(result[0], type(e), str(e)))    
         
-        await batch_update([contract.data])
+        await batch_update([position.contract.data])
         
         return_value = {2: return_value}
 
@@ -173,11 +174,11 @@ class FuturesEngine:
         })
         return return_value[result[0]]
         
-    def _handle_limit(self, data: dict, contract: _FuturesContract, orderbook: OrderBook) -> None:
-        contract.append_to_orderbook(orderbook, data['limit_price'])
-        pos = FuturesPosition(data, contract)
-        orderbook.track(position=pos, channel='position')
-        self._place_tp_sl(contract, pos, orderbook)
+    # def _handle_limit(self, data: dict, contract: _FuturesContract, orderbook: OrderBook) -> None:
+    def _handle_limit(self, position: FuturesPosition, orderbook: OrderBook) -> None:
+        position.contract.append_to_orderbook(orderbook,)
+        # orderbook.track(position=position, channel='position')
+        self._place_tp_sl(position.contract, position, orderbook)
 
     async def _close(self, **kwargs) -> None:
         data = kwargs['data']
@@ -285,12 +286,11 @@ class FuturesEngine:
         contract: _FuturesContract = kwargs['contract']
         book: str = \
             kwargs.get('book', None) or \
-            ('bids' if contract.side == Side.SHORT else 'asks')
-            
+            ('bids' if contract.side == Side.SHORT else 'asks')    
         price = kwargs.get('price', None) or contract.data['price']
-        orderbook: OrderBook = self._order_books[contract.data['ticker']]
         attempts: int = kwargs.get('attempts', None) or 0 
         
+        orderbook: OrderBook = self._order_books[contract.data['ticker']]
         price = orderbook.find_closest_price(price, book)
     
         if not price:
@@ -303,19 +303,21 @@ class FuturesEngine:
         for ex_contract in orderbook[book][price]:
             try:
                 touched_cons.append(ex_contract)
-                leftover_quantity = contract._standing_quantity - ex_contract._standing_quantity
+                leftover_quantity = contract.standing_quantity - ex_contract.standing_quantity
                 
                 if leftover_quantity >= 0: 
                     filled_cons.append(ex_contract)
-                    contract.reduce_standing_quantity(ex_contract._standing_quantity)
-                    ex_contract.reduce_standing_quantity(ex_contract._standing_quantity)
+                    contract.reduce_standing_quantity(ex_contract.standing_quantity)
+                    ex_contract.reduce_standing_quantity(ex_contract.standing_quantity)
                 
                 else:
                     ex_contract.reduce_standing_quantity(contract.standing_quantity)
-                    contract.reduce_standing_quantity(ex_contract.standing_quantity)
+                    contract.reduce_standing_quantity(contract.standing_quantity)
                 
                 if contract.standing_quantity == 0:
                     break
+                if contract.standing_quantity < 0:
+                    raise ValueError('Negative standing quantity')
             except Exception as e:
                 logger.error(
                     'Error matching against a {} orders {} - {}'.format(book, type(e), str(e)),
@@ -324,20 +326,20 @@ class FuturesEngine:
         
         try:
             for ex_contract in filled_cons:
+                # print(ex_contract.data['order_status'])
+                
                 if ex_contract.order_status == OrderStatus.CLOSED:
-                    orderbook.rtrack(position=ex_contract.position, channel='all')
                     ex_contract.position.remove_from_orderbook(orderbook, 'all')
+                    orderbook.rtrack(position=ex_contract.position, channel='all')
                     ex_contract.data['close_price'] = price
-                    ex_contract.position.calculate_pnl('real', contract=contract)
-                    
+                    ex_contract.position.calculate_pnl('real', closing_contract=contract)
                 else:
                     ex_contract.remove_from_orderbook(orderbook)
                     
-                    if ex_contract.tag == Tag.ENTRY:
+                    if ex_contract.order_status == OrderStatus.FILLED:
                         ex_contract.data['filled_price'] = price
-                        new_pos = FuturesPosition(ex_contract.data, ex_contract)
-                        self._place_tp_sl(ex_contract, new_pos, orderbook)
-                        orderbook.track(position=new_pos, channel='position')
+                        ex_contract._standing_quantity = ex_contract.data['standing_quantity'] = ex_contract.data['quantity']
+                        self._place_tp_sl(ex_contract, ex_contract.position, orderbook)
             
             asyncio.create_task(batch_update([item.data for item in touched_cons]))
         except Exception as e:
@@ -368,26 +370,24 @@ class FuturesEngine:
         orderbook: OrderBook
     ) -> None:
         if contract.data['take_profit']:
-            _contract: _FuturesContract = _FuturesContract(
+            position.tp_contract = _FuturesContract(
                 contract.data, 
                 contract.data['take_profit'], 
                 Tag.TAKE_PROFIT,
                 contract.side.invert(),
             )
-            _contract.append_to_orderbook(orderbook)
-            _contract.position = position
-            position.tp_contract = _contract
+            position.tp_contract.append_to_orderbook(orderbook)
+            position.tp_contract.position = position
         
         if contract.data['stop_loss']:
-            _contract: _FuturesContract = _FuturesContract(
+            position.sl_contract = _FuturesContract(
                 contract.data, 
                 contract.data['stop_loss'], 
                 Tag.STOP_LOSS,
                 contract.side.invert(),
             )
-            _contract.append_to_orderbook(orderbook)
-            _contract.position = position
-            position.sl_contract = _contract
+            position.sl_contract.append_to_orderbook(orderbook)
+            position.sl_contract.position = position
     
     def _config_bid_ask(self, orderbook: OrderBook, quantity: int=10_000, divider: int=5) -> None:
         import random 
@@ -422,24 +422,27 @@ class FuturesEngine:
             if data['price'] is None:
                 data['limit_price'] = random.choice(op_range)
                 data['type'] = OrderType.LIMIT
-                
-            contract = _FuturesContract(
+            
+            position = FuturesPosition(
                 data, 
-                data['limit_price'] or data['price'], 
-                tag=Tag.ENTRY,
-                side=data['side'],
+                _FuturesContract(
+                    data, 
+                    data['price'] or data['limit_price'], 
+                    Tag.ENTRY, 
+                    data['side']
+                )
             )
             
+            position.contract.position = position
+            orderbook.track(position=position, channel='position')
+            
             if data['limit_price']:
-                contract.append_to_orderbook(orderbook, data['limit_price'])
+                self._handle_limit(position, orderbook)
+                continue
             
             if i % divider == 0:
-                contract.remove_from_orderbook(orderbook)
-                contract.order_status = OrderStatus.FILLED
-                
-                new_pos = FuturesPosition(data, contract)
-                
-                self._place_tp_sl(contract, new_pos, orderbook)
-                orderbook.track(position=new_pos, channel='position')
+                position.contract.remove_from_orderbook(orderbook)
+                position.contract.order_status = OrderStatus.FILLED
+                self._place_tp_sl(position.contract, position, orderbook)
 
 ### End of Class ###

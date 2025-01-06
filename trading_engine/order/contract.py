@@ -40,7 +40,7 @@ class _FuturesContract(Base):
 
         Args:
             orderbook (OrderBook):
-            category (str, optional): Defaults to None.
+            category (str, optional): Redundant param.
         """
         try:
             if self.side == Side.LONG:
@@ -58,6 +58,7 @@ class _FuturesContract(Base):
                 self._standing_quantity = 0
                 self.data['standing_quantity'] = self.data['quantity']
                 self.order_status = OrderStatus.FILLED
+                print('ENTRY CONTRACT FILLED, STANDING_QUANTITY:', self.data['standing_quantity'],)
             else:
                 self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
                 self.order_status = OrderStatus.PARTIALLY_FILLED
@@ -85,11 +86,12 @@ class _FuturesContract(Base):
                 else:
                     self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
                     self.data['standing_quantity'] -= quantity
+                    # print('[TRUE][ORPHAN] ID:', self.data['order_id'], 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
             else:
-                print('STANDING_QUANTITY:', self.data['standing_quantity'], 'QUANTITY:', self.quantity)
                 self._standing_quantity -= quantity
                 self.data['standing_quantity'] -= quantity
                 self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
+                # print('[FALSE][ORPHAN] ID:', self.data['order_id'], 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
                 # if self.data['standing_quantity'] < 0:
                 #     print('Standing quant < 0')
             # print('[AFTER]', 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)

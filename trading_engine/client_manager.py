@@ -497,7 +497,7 @@ class ClientManager:
                             | (DBOrder.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
                         )
                         & (DBOrder.market_type == message.market_type)
-                        & (DBOrder.standing_quantity <= message.quantity)
+                        & (DBOrder.standing_quantity >= message.quantity)
                     )
                 )
                 

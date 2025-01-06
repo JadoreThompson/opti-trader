@@ -94,7 +94,7 @@ class FuturesPosition(Base):
             except Exception as e:
                 logger.error('Error whilst changing sl contract position {} - {}'.format(type(e), str(e)))
                 
-    def calculate_pnl(self, category: str, price: float=None, contract: _FuturesContract=None) -> float:
+    def calculate_pnl(self, category: str, price: float=None, closing_contract: _FuturesContract=None) -> float:
         if category not in ['real', 'unreal']:
             raise ValueError("Category must be real or unreal")
         
@@ -110,7 +110,7 @@ class FuturesPosition(Base):
             pnl = self.data[f'{category}_pnl'] = price_change * self.contract.margin
             # print(f'side={self.contract.side}, ogp={self.contract.price}, np={price}', end=' ')    
         elif category == 'real':
-            price_change = ((contract.price - self.contract.price) / self.contract.price)
+            price_change = ((closing_contract.price - self.contract.price) / self.contract.price)
             
             if self._side == Side.SHORT:
                 price_change *= -1
