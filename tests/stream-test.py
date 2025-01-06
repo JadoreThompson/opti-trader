@@ -92,7 +92,14 @@ async def listen_to_socket(websocket, box):
         await asyncio.sleep(1)
 
 
-async def push_to_socket(websocket, orders, divider, close_quantity, counter, box):
+async def push_to_socket(**kwargs):
+    orders = kwargs['orders']
+    websocket = kwargs['websocket']
+    divider = kwargs['divider']
+    order_ids = kwargs['order_ids']
+    counter = kwargs['counter']
+    oid_pointer = kwargs['oid_pointer']
+    
     while counter < len(orders):
         await websocket.send(json.dumps(orders[counter]))
         
@@ -102,9 +109,10 @@ async def push_to_socket(websocket, orders, divider, close_quantity, counter, bo
                     await websocket.send(json.dumps({
                         'type': OrderType.CLOSE,
                         'market_type': MarketType.FUTURES,
-                        'order_id': box.pop(),
-                        'quantity': close_quantity,
+                        'order_id': order_ids[oid_pointer],
+                        'quantity': kwargs['close_quantity'],
                     }))
+                    oid_pointer += 1
                 except IndexError:
                     pass
         counter += 1
@@ -126,7 +134,7 @@ async def test_socket(
     """
     _, token = await create_user()
     orders = await generate_order_requests(num_orders)
-    box: list = []
+    order_ids: list = []
     
     # print(f'trades_{_.user_id}')
     
@@ -134,6 +142,7 @@ async def test_socket(
         print(f'{num_orders} orders in queue for {kwargs['name']}')
     
     counter = 0
+    oid_pointer = 0
     
     while True:
         try:
@@ -146,14 +155,15 @@ async def test_socket(
                 
                 await asyncio.gather(*[
                     push_to_socket(
-                        websocket,
-                        orders,
-                        divider,
-                        close_quantity,
-                        counter,
-                        box,
+                        websocket=websocket,
+                        orders=orders,
+                        divider=divider,
+                        close_quantity=close_quantity,
+                        counter=counter,
+                        order_ids=order_ids,
+                        oid_pointer=oid_pointer
                     ), 
-                    listen_to_socket(websocket, box)
+                    listen_to_socket(websocket, order_ids)
                 ])
                     
         except websockets.exceptions.ConnectionClosedError:

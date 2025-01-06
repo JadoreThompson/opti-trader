@@ -58,7 +58,6 @@ class _FuturesContract(Base):
                 self._standing_quantity = 0
                 self.data['standing_quantity'] = self.data['quantity']
                 self.order_status = OrderStatus.FILLED
-                print('ENTRY CONTRACT FILLED, STANDING_QUANTITY:', self.data['standing_quantity'],)
             else:
                 self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
                 self.order_status = OrderStatus.PARTIALLY_FILLED
@@ -70,12 +69,10 @@ class _FuturesContract(Base):
             else:
                 self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
                 self.order_status = OrderStatus.PARTIALLY_CLOSED_INACTIVE
-                # print('TP/SL CONTRACT PARTIALLY CLOSED INACTIVE')
             
             self.position._notify_change('standing_quantity', self.standing_quantity)
         
         elif self._tag == Tag.ORPHAN:
-            # print('[BEFORE]', 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
             if clause:
                 self._standing_quantity = 0
                 
@@ -86,15 +83,10 @@ class _FuturesContract(Base):
                 else:
                     self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
                     self.data['standing_quantity'] -= quantity
-                    # print('[TRUE][ORPHAN] ID:', self.data['order_id'], 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
             else:
                 self._standing_quantity -= quantity
                 self.data['standing_quantity'] -= quantity
                 self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
-                # print('[FALSE][ORPHAN] ID:', self.data['order_id'], 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
-                # if self.data['standing_quantity'] < 0:
-                #     print('Standing quant < 0')
-            # print('[AFTER]', 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
 
         self._calculate_margin()
         

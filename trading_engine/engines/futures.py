@@ -101,6 +101,7 @@ class FuturesEngine:
 
     async def _handle_match(self, **kwargs) -> None:
         data = kwargs['data']
+        
         return_value = {
             'message': BasePubSubMessage(
                 category=PubSubCategory.SUCCESS,
@@ -120,15 +121,8 @@ class FuturesEngine:
         )
         position.contract.position = position
         orderbook.track(position=position, channel='position')
-        # contract: _FuturesContract = _FuturesContract(
-        #     data, 
-        #     data['price'] or data['limit_price'], 
-        #     Tag.ENTRY,
-        #     data['side'],
-        # )
 
         if data['limit_price']:
-            # result = self._handle_limit(data, contract, orderbook)
             self._handle_limit(position, orderbook)
             return return_value
         
@@ -141,9 +135,6 @@ class FuturesEngine:
             if result[0] == 2:
                 await orderbook.set_price(result[1])
                 position.contract.data['filled_price'] = result[1]
-                
-                # pos = FuturesPosition(data, contract)
-                # orderbook.track(position=pos, channel='position')
                 self._place_tp_sl(position.contract, position, orderbook)
             else:
                 position.contract.append_to_orderbook(orderbook, )
@@ -174,10 +165,8 @@ class FuturesEngine:
         })
         return return_value[result[0]]
         
-    # def _handle_limit(self, data: dict, contract: _FuturesContract, orderbook: OrderBook) -> None:
     def _handle_limit(self, position: FuturesPosition, orderbook: OrderBook) -> None:
         position.contract.append_to_orderbook(orderbook,)
-        # orderbook.track(position=position, channel='position')
         self._place_tp_sl(position.contract, position, orderbook)
 
     async def _close(self, **kwargs) -> None:
@@ -202,15 +191,15 @@ class FuturesEngine:
             try:
                 if result[0] == 2:
                     await orderbook.set_price(result[1])
+                    if position.orphan_contract.order_status == OrderStatus.CLOSED:
+                        position.orphan_contract.data['close_price'] = result[1]
+
                 else:
                     position.orphan_contract.append_to_orderbook(orderbook)
                     
             except Exception as e:
                 logger.error('Error during handling of close order {} - {}'.format(type(e), str(e)))
-            
-            # print('[CLOSE] Result:', result)
-            # print('[CLOSE] - Order Status:', position.contract.data['order_status'])
-            # print('[CLOSE] - Standing Quantity:', position.contract.data['standing_quantity'])
+                
             await batch_update([position.contract.data])
             
             return {
@@ -326,8 +315,6 @@ class FuturesEngine:
         
         try:
             for ex_contract in filled_cons:
-                # print(ex_contract.data['order_status'])
-                
                 if ex_contract.order_status == OrderStatus.CLOSED:
                     ex_contract.position.remove_from_orderbook(orderbook, 'all')
                     orderbook.rtrack(position=ex_contract.position, channel='all')
