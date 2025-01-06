@@ -48,8 +48,6 @@ from models.socket_models import (
     SpotCloseOrder,
     FuturesContractWrite,
     ModifyOrder, 
-    Request,
-    SpotOrderWrite,
     TempBaseOrder
 )
 from utils.auth import (

@@ -31,27 +31,27 @@ class _FuturesContract(Base):
         self._margin: float = self._calculate_margin()
         
         if tag == Tag.ORPHAN:
+            if 'orphan_quantity' not in kwargs:
+                raise ValueError("Must pass orphan_quantity for orphan contracts")
             self._standing_quantity = kwargs['orphan_quantity']
         
-    def remove_from_orderbook(self, orderbook: OrderBook) -> None:
+    def remove_from_orderbook(self, orderbook: OrderBook, category: str=None) -> None:
         """
 
         Args:
             orderbook (OrderBook):
             category (str, optional): Defaults to None.
-        Note:
-            - DO NOT PASS category
         """
         try:
             if self.side == Side.LONG:
                 orderbook.bids[self.price].remove(self)
             else:
                 orderbook.asks[self.price].remove(self)
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError):
             pass
     
     def reduce_standing_quantity(self, quantity: int) -> None:
-        clause: bool = self.standing_quantity - quantity <= 0
+        clause: bool = self._standing_quantity - quantity <= 0
         
         if self._tag == Tag.ENTRY:
             if clause:
@@ -60,6 +60,7 @@ class _FuturesContract(Base):
                 self.order_status = OrderStatus.FILLED
             else:
                 self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
+                self.order_status = OrderStatus.PARTIALLY_FILLED
         
         elif self._tag in [Tag.TAKE_PROFIT, Tag.STOP_LOSS]:
             if clause:
@@ -67,21 +68,32 @@ class _FuturesContract(Base):
                 self.order_status = OrderStatus.CLOSED
             else:
                 self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
+                self.order_status = OrderStatus.PARTIALLY_CLOSED_INACTIVE
+                # print('TP/SL CONTRACT PARTIALLY CLOSED INACTIVE')
             
             self.position._notify_change('standing_quantity', self.standing_quantity)
         
         elif self._tag == Tag.ORPHAN:
+            # print('[BEFORE]', 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
             if clause:
                 self._standing_quantity = 0
                 
                 if self.data['standing_quantity'] - quantity <= 0:
                     self.data['standing_quantity'] = 0
                     self.order_status = OrderStatus.CLOSED
+                    self.position._notify_change('standing_quantity', self._standing_quantity)
                 else:
                     self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
+                    self.data['standing_quantity'] -= quantity
             else:
+                print('STANDING_QUANTITY:', self.data['standing_quantity'], 'QUANTITY:', self.quantity)
                 self._standing_quantity -= quantity
-    
+                self.data['standing_quantity'] -= quantity
+                self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
+                # if self.data['standing_quantity'] < 0:
+                #     print('Standing quant < 0')
+            # print('[AFTER]', 'STANDING_QUANTITY:', self._standing_quantity, 'QUANTITY:', self.quantity)
+
         self._calculate_margin()
         
     def append_to_orderbook(self, orderbook: OrderBook, price: float = None) -> None:
@@ -97,10 +109,7 @@ class _FuturesContract(Base):
         self._margin = self._standing_quantity * self.price
             
     def __repr__(self) -> str:
-        return f"""Contract(
-            side={self.side}, 
-            status={self.order_status}, 
-            standing_quantity={self.standing_quantity})"""
+        return f"""Contract(side={self.side}, status={self.order_status}, standing_quantity={self.standing_quantity})"""
 
     def __str__(self) -> str:
         return self.__repr__()

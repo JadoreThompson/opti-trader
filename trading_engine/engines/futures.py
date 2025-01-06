@@ -13,7 +13,14 @@ from typing import (
 )
 
 from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
-from enums import MarketType, OrderStatus, OrderType, PubSubCategory, Side, UpdateScope
+from enums import (
+    MarketType, 
+    OrderStatus, 
+    OrderType, 
+    PubSubCategory, 
+    Side, 
+    UpdateScope
+)
 from exceptions import DoesNotExist
 from models.socket_models import BasePubSubMessage, FuturesContractRead, OrderUpdatePubSubMessage
 from ..enums import Tag
@@ -174,34 +181,35 @@ class FuturesEngine:
 
     async def _close(self, **kwargs) -> None:
         data = kwargs['data']
-        # print(json.dumps({k: str(v) for k, v in data.items()}, indent=4))
         orderbook = self._order_books[data['ticker']]
+        
         try:
             position: FuturesPosition = orderbook.fetch(data['order_id'], 'position')
-            orphan_contract = _FuturesContract(
+            position.orphan_contract = _FuturesContract(
                 position.contract.data, 
                 data['price'], 
                 Tag.ORPHAN,
                 Side(position.contract.side).invert(),
                 orphan_quantity=data['quantity'],
             )
+            position.orphan_contract.position = position
             result = self._match(
-                contract=orphan_contract,
+                contract=position.orphan_contract,
                 orderbook=orderbook,
             )
             
             try:
                 if result[0] == 2:
                     await orderbook.set_price(result[1])
-                    orphan_contract.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
-                elif result[0] == 1:
-                    orphan_contract.order_status = OrderStatus.PARTIALLY_CLOSED_INACTIVE
-                    position.orphan_contract = orphan_contract
-                    orphan_contract.append_to_orderbook(orderbook)
+                else:
+                    position.orphan_contract.append_to_orderbook(orderbook)
                     
             except Exception as e:
                 logger.error('Error during handling of close order {} - {}'.format(type(e), str(e)))
             
+            # print('[CLOSE] Result:', result)
+            # print('[CLOSE] - Order Status:', position.contract.data['order_status'])
+            # print('[CLOSE] - Standing Quantity:', position.contract.data['standing_quantity'])
             await batch_update([position.contract.data])
             
             return {
@@ -316,20 +324,20 @@ class FuturesEngine:
         
         try:
             for ex_contract in filled_cons:
-                if ex_contract.tag in [Tag.TAKE_PROFIT, Tag.STOP_LOSS]:
+                if ex_contract.order_status == OrderStatus.CLOSED:
                     orderbook.rtrack(position=ex_contract.position, channel='all')
                     ex_contract.position.remove_from_orderbook(orderbook, 'all')
-                    ex_contract.position.calculate_pnl('real', contract=contract)
-                    ex_contract.order_status = OrderStatus.CLOSED
                     ex_contract.data['close_price'] = price
+                    ex_contract.position.calculate_pnl('real', contract=contract)
+                    
                 else:
                     ex_contract.remove_from_orderbook(orderbook)
-                    ex_contract.data['filled_price'] = price
-                    ex_contract.order_status = OrderStatus.FILLED
                     
-                    new_pos = FuturesPosition(ex_contract.data, ex_contract)
-                    self._place_tp_sl(ex_contract, new_pos, orderbook)
-                    orderbook.track(position=new_pos, channel='position')
+                    if ex_contract.tag == Tag.ENTRY:
+                        ex_contract.data['filled_price'] = price
+                        new_pos = FuturesPosition(ex_contract.data, ex_contract)
+                        self._place_tp_sl(ex_contract, new_pos, orderbook)
+                        orderbook.track(position=new_pos, channel='position')
             
             asyncio.create_task(batch_update([item.data for item in touched_cons]))
         except Exception as e:
@@ -422,7 +430,8 @@ class FuturesEngine:
                 side=data['side'],
             )
             
-            contract.append_to_orderbook(orderbook)
+            if data['limit_price']:
+                contract.append_to_orderbook(orderbook, data['limit_price'])
             
             if i % divider == 0:
                 contract.remove_from_orderbook(orderbook)

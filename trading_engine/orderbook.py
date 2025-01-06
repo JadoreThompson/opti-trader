@@ -233,9 +233,7 @@ class OrderBook:
         if order is None:
             raise ValueError("An order (or equivalent) must be provided")
         
-        if isinstance(order, _FuturesContract):
-            id_key = order.contract_id
-        elif isinstance(order, BaseSpotOrder):
+        if isinstance(order, (_FuturesContract, BaseSpotOrder)):
             id_key = order.data['order_id']
         elif isinstance(order, FuturesPosition):
             id_key = order.contract.data['order_id']

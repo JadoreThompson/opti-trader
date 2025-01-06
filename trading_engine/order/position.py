@@ -129,7 +129,10 @@ class FuturesPosition(Base):
             field (str): Name of the attribute to change
             value (any): New value to set
         """        
-        temp_field = f"_{field}" if field == 'standing_quantity' else field
+        temp_field = f"_{field}" \
+            if field == 'standing_quantity' \
+                or field == 'order_status' \
+            else field
         
         if self.sl_contract:
             if hasattr(self.sl_contract, temp_field):
