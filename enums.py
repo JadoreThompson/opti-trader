@@ -26,7 +26,7 @@ class OrderStatus(str, Enum):
     CLOSED = 'closed'
 
     # The order has some quantity remaining, but it is now inactive 
-    # and cannot be called within a CLOSE request again.
+    # The client cannot perform any action on it.
     PARTIALLY_CLOSED_INACTIVE = 'partially_closed_inactive'
 
     # The order has remaining quantity to be consumed but can still be 

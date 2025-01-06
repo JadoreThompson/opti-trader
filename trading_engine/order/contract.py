@@ -6,6 +6,7 @@ from uuid import uuid4, UUID
 from enums import OrderStatus, Side
 from trading_engine.orderbook import OrderBook
 from .base import Base
+from ..enums import Tag
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,8 @@ class _FuturesContract(Base):
         data: dict, 
         price: float, 
         tag: str=None, 
-        side: Side=None
+        side: Side=None,
+        **kwargs,
     ) -> None:
         self.price = price
         self.position = None
@@ -24,9 +26,12 @@ class _FuturesContract(Base):
         self._contract_id = uuid4()
         self._data = data
         self._side: Side = side or data['side']
-        self._status: OrderStatus = data['order_status']
+        self._order_status: OrderStatus = data['order_status']
         self._standing_quantity = self._quantity = data['quantity']
         self._margin: float = self._calculate_margin()
+        
+        if tag == Tag.ORPHAN:
+            self._standing_quantity = kwargs['orphan_quantity']
         
     def remove_from_orderbook(self, orderbook: OrderBook) -> None:
         """
@@ -46,12 +51,37 @@ class _FuturesContract(Base):
             pass
     
     def reduce_standing_quantity(self, quantity: int) -> None:
-        if self._standing_quantity - quantity <= 0:
-            self._standing_quantity = self.data['standing_quantity'] = 0
-            self.status = OrderStatus.FILLED
-        else:
-            self._standing_quantity -= quantity
+        clause: bool = self.standing_quantity - quantity <= 0
+        
+        if self._tag == Tag.ENTRY:
+            if clause:
+                self._standing_quantity = 0
+                self.data['standing_quantity'] = self.data['quantity']
+                self.order_status = OrderStatus.FILLED
+            else:
+                self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
+        
+        elif self._tag in [Tag.TAKE_PROFIT, Tag.STOP_LOSS]:
+            if clause:
+                self._standing_quantity = self.data['standing_quantity'] = 0
+                self.order_status = OrderStatus.CLOSED
+            else:
+                self._standing_quantity = self.data['standing_quantity'] = self._standing_quantity - quantity
             
+            self.position._notify_change('standing_quantity', self.standing_quantity)
+        
+        elif self._tag == Tag.ORPHAN:
+            if clause:
+                self._standing_quantity = 0
+                
+                if self.data['standing_quantity'] - quantity <= 0:
+                    self.data['standing_quantity'] = 0
+                    self.order_status = OrderStatus.CLOSED
+                else:
+                    self.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
+            else:
+                self._standing_quantity -= quantity
+    
         self._calculate_margin()
         
     def append_to_orderbook(self, orderbook: OrderBook, price: float = None) -> None:
@@ -69,7 +99,7 @@ class _FuturesContract(Base):
     def __repr__(self) -> str:
         return f"""Contract(
             side={self.side}, 
-            status={self.status}, 
+            status={self.order_status}, 
             standing_quantity={self.standing_quantity})"""
 
     def __str__(self) -> str:
@@ -81,7 +111,6 @@ class _FuturesContract(Base):
     
     @property
     def data(self) -> dict:
-        # print('type' in self._data)
         return self._data
     
     @property
@@ -89,15 +118,29 @@ class _FuturesContract(Base):
         return self._side
 
     @property
-    def status(self) -> OrderStatus:
-        return self._status
+    def order_status(self) -> OrderStatus:
+        return self._order_status
     
-    @status.setter
-    def status(self, value: OrderStatus) -> None:
-        self._status = self.data['order_status'] = value
+    @order_status.setter
+    def order_status(self, value: OrderStatus) -> None:
+        if value == self._order_status:
+            return
+        
+        if value == OrderStatus.CLOSED:
+            if self.position:
+                if self.position.orphan_contract:
+                    if self.position.orphan_contract != self and \
+                        self.position.orphan_contract.order_status == OrderStatus.PARTIALLY_CLOSED_INACTIVE \
+                    :
+                        return
+                    
+        self._order_status = self.data['order_status'] = value
         
         if value == OrderStatus.CLOSED:
             self.data['closed_at'] = datetime.now()
+        
+        if self.position:
+            self.position._notify_change('order_status', self.order_status)
         
     @property
     def standing_quantity(self) -> int:

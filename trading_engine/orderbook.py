@@ -238,7 +238,7 @@ class OrderBook:
         elif isinstance(order, BaseSpotOrder):
             id_key = order.data['order_id']
         elif isinstance(order, FuturesPosition):
-            id_key = order.contract.contract_id
+            id_key = order.contract.data['order_id']
         
         self._tracker[id_key][channel] = order
         
@@ -418,6 +418,12 @@ class OrderBook:
         if key == 'asks':
             return self.asks
         return self.bids
+    
+    def __repr__(self) -> str:
+        return f"OrderBook(ticker={self.ticker}, price={self.price}, Asks={sum([len(i) for i in self.asks.values()])}, Bids={sum([len(i) for i in self.bids.values()])})"
+        
+    def __str__(self) -> str:
+        return self.__repr__()
         
     @property
     def ticker(self) -> str:

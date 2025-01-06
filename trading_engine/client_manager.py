@@ -44,7 +44,8 @@ from enums import (
 )
 from models.socket_models import (
     BasePubSubMessage,
-    CloseOrder,
+    FuturesCloseOrder,
+    SpotCloseOrder,
     FuturesContractWrite,
     ModifyOrder, 
     Request,
@@ -335,12 +336,15 @@ class ClientManager:
             og_message = json.loads(og_message)
             
             if og_message['market_type'] == MarketType.FUTURES:
-                message = FuturesContractWrite(**og_message)
+                if og_message['type'] == OrderType.CLOSE:
+                    message = FuturesCloseOrder(**og_message)
+                else:
+                    message = FuturesContractWrite(**og_message)
             else:
                 message = {
                     OrderType.MARKET: TempBaseOrder,
                     OrderType.LIMIT: TempBaseOrder,
-                    OrderType.CLOSE: CloseOrder,    
+                    OrderType.CLOSE: SpotCloseOrder,    
                     OrderType.MODIFY: ModifyOrder,
                 }[og_message['type']](**og_message)
                 
@@ -350,6 +354,8 @@ class ClientManager:
             ))
             
         except ValidationError as e:
+            if hasattr(e, 'errors'):
+                print(e.errors)
             await socket.send_text(json.dumps(
                 BasePubSubMessage(
                     category=PubSubCategory.ERROR,
@@ -367,9 +373,8 @@ class ClientManager:
                 (message=message, user_id=user_id)
             
             if order:
-                if 'order_status' in order:
-                    if order['order_status'] == OrderStatus.CLOSED:
-                        raise InvalidAction("Cannot perform operations on closed orders")
+                if order.get('order_status', None) == OrderStatus.CLOSED:
+                    raise InvalidAction("Cannot perform operations on closed orders")
 
                 order.update({'type': message.type, 'user_id': user_id})
                 
@@ -454,38 +459,59 @@ class ClientManager:
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
     
-    async def _handle_close_order(self, message: CloseOrder, user_id: str) -> dict:
-        async with get_db_session() as session:
-            r = await session.execute(
-                select(DBOrder.order_id, DBOrder.standing_quantity)
-                .where(
-                    (DBOrder.user_id == user_id) 
-                    & (DBOrder.ticker == message.ticker) 
-                    & (
-                        (DBOrder.order_status == OrderStatus.FILLED) |
-                        (DBOrder.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
-                    )
-                    & (DBOrder.market_type == message.market_type)
-                )
-            )
-            
-            all_orders = r.all()
-        
-        if not all_orders:
-            raise InvalidAction("Insufficient assets to perform action")
-
-        target_quantity = message.quantity
-        order_ids = []
-        
-        for o in all_orders:
-            target_quantity -= o[1]
-            order_ids.append(str(o[0]))
-        
+    async def _handle_close_order(self, message: SpotCloseOrder | FuturesCloseOrder, user_id: str) -> dict:
         final_dict = message.model_dump()
-        final_dict.update({
-            'order_ids': order_ids,
-            'price': self._ticker_quotes[message.ticker]
-        })
+        
+        async with get_db_session() as session:
+            if isinstance(message, SpotCloseOrder):
+                r = await session.execute(
+                    select(DBOrder.order_id, DBOrder.standing_quantity)
+                    .where(
+                        (DBOrder.user_id == user_id) 
+                        & (DBOrder.ticker == message.ticker) 
+                        & (
+                            (DBOrder.order_status == OrderStatus.FILLED) 
+                            | (DBOrder.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
+                        )
+                        & (DBOrder.market_type == message.market_type)
+                    )
+                )
+                
+                order = r.all()
+            
+                if not order:
+                    raise InvalidAction("Insufficient assets to perform action")
+            
+                final_dict = message.model_dump()
+                final_dict.update({
+                    'order_ids': [str(o[0]) for o in order],
+                    'price': self._ticker_quotes[message.ticker]
+                })
+            
+            else:
+                r = await session.execute(
+                    select(DBOrder.order_id, DBOrder.ticker)
+                    .where(
+                        (DBOrder.user_id == user_id) 
+                        & (DBOrder.order_id == message.order_id) 
+                        & (
+                            (DBOrder.order_status == OrderStatus.FILLED) 
+                            | (DBOrder.order_status == OrderStatus.PARTIALLY_CLOSED_ACTIVE)
+                        )
+                        & (DBOrder.market_type == message.market_type)
+                        & (DBOrder.standing_quantity <= message.quantity)
+                    )
+                )
+                
+                order = r.first()
+            
+                if not order:
+                    raise InvalidAction("Action can't be completed")
+            
+                final_dict.update({
+                    'ticker': order[1],
+                    'price': self._ticker_quotes[order[1]]
+                })
         return final_dict
     
     async def _handle_modify(self, message: ModifyOrder, user_id: str) -> dict:
@@ -511,5 +537,6 @@ class ClientManager:
             'order_id': str(final_dict['order_id']),
             'ticker': order_details[1],
         })
+        
         return final_dict
     

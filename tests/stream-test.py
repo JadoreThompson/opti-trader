@@ -79,6 +79,38 @@ async def create_user():
         return user, create_jwt_token({'sub': str(user.user_id)})
 
 
+async def listen_to_socket(websocket, box):
+    while True:
+        m = await websocket.recv()
+        try:
+            m = json.loads(m)
+            if m.get('category', None) == 'success':
+                if (oid := m.get('details', {}).get('order_id', None)):
+                    box.append(oid)
+        except json.JSONDecodeError:
+            pass
+        await asyncio.sleep(1)
+
+
+async def push_to_socket(websocket, orders, divider, close_quantity, counter, box):
+    while counter < len(orders):
+        await websocket.send(json.dumps(orders[counter]))
+        
+        if divider > 1 and counter > 0:
+            if counter % divider == 0:
+                try:
+                    await websocket.send(json.dumps({
+                        'type': OrderType.CLOSE,
+                        'market_type': MarketType.FUTURES,
+                        'order_id': box.pop(),
+                        'quantity': close_quantity,
+                    }))
+                except IndexError:
+                    pass
+        counter += 1
+        await asyncio.sleep(1)
+
+
 async def test_socket(
     divider: int = None,
     close_quantity: int = 20,
@@ -94,40 +126,40 @@ async def test_socket(
     """
     _, token = await create_user()
     orders = await generate_order_requests(num_orders)
+    box: list = []
     
-    print(f'trades_{_.user_id}')
+    # print(f'trades_{_.user_id}')
     
     if kwargs.get('name', None):
         print(f'{num_orders} orders in queue for {kwargs['name']}')
     
-    i = 0
+    counter = 0
+    
     while True:
         try:
-            async with websockets.connect(SOCKET_URL) as socket:
-                await socket.send(json.dumps({'token': token}))
-                m = await socket.recv()
+            async with websockets.connect(SOCKET_URL) as websocket:
+                await websocket.send(json.dumps({'token': token}))
+                m = await websocket.recv()
                 
                 if 'name' in kwargs:
                     print(f'[{kwargs['name']}]: ', m)
                 
-                while i < len(orders):
-                    await socket.send(json.dumps(orders[i]))
-                    
-                    if divider > 1 and i > 0:
-                        if i % divider == 0:
-                            await socket.send(json.dumps({
-                                'type': OrderType.CLOSE,
-                                'market_type': MarketType.SPOT,
-                                'quantity': close_quantity,
-                                'ticker': 'APPL',
-                            }))
-                    i += 1
-                    await asyncio.sleep(1)
+                await asyncio.gather(*[
+                    push_to_socket(
+                        websocket,
+                        orders,
+                        divider,
+                        close_quantity,
+                        counter,
+                        box,
+                    ), 
+                    listen_to_socket(websocket, box)
+                ])
                     
         except websockets.exceptions.ConnectionClosedError:
             if kwargs.get('name', None):
-                print(f'[{kwargs['name']}] Disconnect - {i}')
-            print('Reconnecting')
+                print(f'[{kwargs['name']}] Reconnecting - Count={counter}')
+            
             await asyncio.sleep(1)
 
 from random import randint

@@ -98,8 +98,13 @@ class LimitOrder(BaseOrder):
         return limit_price
 
 
-class CloseOrder(_MarketType, _OrderType):
+class SpotCloseOrder(_MarketType, _OrderType):
     ticker: str
+    quantity: Optional[float] = Field(None, gt=0)
+
+
+class FuturesCloseOrder(_MarketType, _OrderType):
+    order_id: str
     quantity: Optional[float] = Field(None, gt=0)
 
 
@@ -125,7 +130,7 @@ class Request(Base):
     type: OrderType
     market_order: Optional[MarketOrder] = None
     limit_order: Optional[LimitOrder] = None
-    close_order: Optional[CloseOrder] = None
+    close_order: Optional[SpotCloseOrder] = None
     modify_order: Optional[ModifyOrder] = None
 
 
@@ -140,6 +145,7 @@ class FuturesContractWrite(TempBaseOrder):
 
 class FuturesContractRead(FuturesContractWrite):
     standing_quantity: int = Field(ge=0)
+    order_id: str
     
 
 class BasePubSubMessage(Base):

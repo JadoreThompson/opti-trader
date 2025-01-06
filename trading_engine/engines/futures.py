@@ -16,10 +16,11 @@ from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
 from enums import MarketType, OrderStatus, OrderType, PubSubCategory, Side, UpdateScope
 from exceptions import DoesNotExist
 from models.socket_models import BasePubSubMessage, FuturesContractRead, OrderUpdatePubSubMessage
-from ..order.position import FuturesPosition
+from ..enums import Tag
+from ..orderbook import OrderBook
 from ..utils import batch_update, publish_update_to_client
 from ..order.contract import _FuturesContract
-from ..orderbook import OrderBook
+from ..order.position import FuturesPosition
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class FuturesEngine:
         self._handlers = {
             OrderType.MARKET: self._handle_match,
             OrderType.LIMIT: self._handle_match,
-            OrderType.CLOSE: self._close_contract,
+            OrderType.CLOSE: self._close,
             OrderType.MODIFY: self._modify_position,
         }
         
@@ -85,16 +86,14 @@ class FuturesEngine:
     async def _route(self, data: dict) -> None: 
         try:
             pub_params = {'channel': f"trades_{data['user_id']}"}
-            pub_params.update(await self._handlers[data['type']](
-                data=data, 
-                channel=f"trades_{data['user_id']}"
-            ))
+            pub_params.update(await self._handlers[data['type']](data=data, ))
             
             await publish_update_to_client(**pub_params)
         except Exception as e:
-            logger.error('{} - {}'.format(type(e), str(e)))
+            logger.error('{} - {}'.format(type(e), str(e)), exc_info=True)  
 
-    async def _handle_match(self, data: dict) -> None:
+    async def _handle_match(self, **kwargs) -> None:
+        data = kwargs['data']
         return_value = {
             'message': BasePubSubMessage(
                 category=PubSubCategory.SUCCESS,
@@ -106,7 +105,8 @@ class FuturesEngine:
         contract: _FuturesContract = _FuturesContract(
             data, 
             data['price'] or data['limit_price'], 
-            side=data['side'],
+            Tag.ENTRY,
+            data['side'],
         )
         orderbook: OrderBook = self._order_books[data['ticker']]
 
@@ -125,13 +125,13 @@ class FuturesEngine:
             if result[0] == 2:
                 await orderbook.set_price(result[1])
                 contract.data['filled_price'] = result[1]
-                contract.status = OrderStatus.FILLED
+                contract.order_status = OrderStatus.FILLED
                 
                 pos = FuturesPosition(data, contract)
                 orderbook.track(position=pos, channel='position')
                 self._place_tp_sl(contract, pos, orderbook)
             else:
-                contract.status = {
+                contract.order_status = {
                     1: OrderStatus.PARTIALLY_FILLED,
                     0: OrderStatus.NOT_FILLED,
                 }[result[0]]
@@ -145,6 +145,8 @@ class FuturesEngine:
         
         await batch_update([contract.data])
         
+        return_value = {2: return_value}
+
         return_value.update({
             0: {
                 'message': BasePubSubMessage(
@@ -170,9 +172,72 @@ class FuturesEngine:
         orderbook.track(position=pos, channel='position')
         self._place_tp_sl(contract, pos, orderbook)
 
-    async def _close_contract(self, **kwargs) -> None:
-        
-        pass
+    async def _close(self, **kwargs) -> None:
+        data = kwargs['data']
+        # print(json.dumps({k: str(v) for k, v in data.items()}, indent=4))
+        orderbook = self._order_books[data['ticker']]
+        try:
+            position: FuturesPosition = orderbook.fetch(data['order_id'], 'position')
+            orphan_contract = _FuturesContract(
+                position.contract.data, 
+                data['price'], 
+                Tag.ORPHAN,
+                Side(position.contract.side).invert(),
+                orphan_quantity=data['quantity'],
+            )
+            result = self._match(
+                contract=orphan_contract,
+                orderbook=orderbook,
+            )
+            
+            try:
+                if result[0] == 2:
+                    await orderbook.set_price(result[1])
+                    orphan_contract.order_status = OrderStatus.PARTIALLY_CLOSED_ACTIVE
+                elif result[0] == 1:
+                    orphan_contract.order_status = OrderStatus.PARTIALLY_CLOSED_INACTIVE
+                    position.orphan_contract = orphan_contract
+                    orphan_contract.append_to_orderbook(orderbook)
+                    
+            except Exception as e:
+                logger.error('Error during handling of close order {} - {}'.format(type(e), str(e)))
+            
+            await batch_update([position.contract.data])
+            
+            return {
+                0: {
+                    'message': BasePubSubMessage(
+                        category=PubSubCategory.ERROR,
+                        message="Insufficient liquidity to perform close",
+                    ).model_dump()
+                },
+                
+                1: {
+                    'message': OrderUpdatePubSubMessage(
+                        category=PubSubCategory.ORDER_UPDATE,
+                        message="Close order partially filled",
+                        on=UpdateScope.EXISTING,
+                        details=FuturesContractRead(**position.contract.data).model_dump()
+                    ).model_dump()
+                },
+                
+                2: {
+                    'message': OrderUpdatePubSubMessage(
+                        category=PubSubCategory.ORDER_UPDATE,
+                        message="Close order filled",
+                        on=UpdateScope.EXISTING,
+                        details=FuturesContractRead(**position.contract.data).model_dump()
+                    ).model_dump()
+                },
+            }[result[0]]
+            
+        except DoesNotExist:
+            return {
+                'message': BasePubSubMessage(
+                    category=PubSubCategory.ERROR,
+                    message="Order not found",
+                ).model_dump()
+            }
 
     async def _modify_position(self, **kwargs) -> None:
         try:
@@ -244,20 +309,23 @@ class FuturesEngine:
                 if contract.standing_quantity == 0:
                     break
             except Exception as e:
-                logger.error('Error matching against a {} orders {} - {}'.format(book, type(e), str(e)))
+                logger.error(
+                    'Error matching against a {} orders {} - {}'.format(book, type(e), str(e)),
+                    exc_info=True
+                )
         
         try:
             for ex_contract in filled_cons:
-                if ex_contract.tag in ['stop_loss', 'take_profit']:
+                if ex_contract.tag in [Tag.TAKE_PROFIT, Tag.STOP_LOSS]:
                     orderbook.rtrack(position=ex_contract.position, channel='all')
                     ex_contract.position.remove_from_orderbook(orderbook, 'all')
                     ex_contract.position.calculate_pnl('real', contract=contract)
-                    ex_contract.status = OrderStatus.CLOSED
+                    ex_contract.order_status = OrderStatus.CLOSED
                     ex_contract.data['close_price'] = price
                 else:
                     ex_contract.remove_from_orderbook(orderbook)
                     ex_contract.data['filled_price'] = price
-                    ex_contract.status = OrderStatus.FILLED
+                    ex_contract.order_status = OrderStatus.FILLED
                     
                     new_pos = FuturesPosition(ex_contract.data, ex_contract)
                     self._place_tp_sl(ex_contract, new_pos, orderbook)
@@ -265,7 +333,10 @@ class FuturesEngine:
             
             asyncio.create_task(batch_update([item.data for item in touched_cons]))
         except Exception as e:
-            logger.error('Error during handling of filled {} orders {} - {}'.format(book, type(e), str(e)))
+            logger.error(
+                'Error during handling of filled {} orders {} - {}'.format(book, type(e), str(e)),
+                exc_info=True
+            )
         
         if contract.standing_quantity == 0:
             return (2, price)
@@ -292,7 +363,7 @@ class FuturesEngine:
             _contract: _FuturesContract = _FuturesContract(
                 contract.data, 
                 contract.data['take_profit'], 
-                'take_profit',
+                Tag.TAKE_PROFIT,
                 contract.side.invert(),
             )
             _contract.append_to_orderbook(orderbook)
@@ -303,7 +374,7 @@ class FuturesEngine:
             _contract: _FuturesContract = _FuturesContract(
                 contract.data, 
                 contract.data['stop_loss'], 
-                'stop_loss',
+                Tag.STOP_LOSS,
                 contract.side.invert(),
             )
             _contract.append_to_orderbook(orderbook)
@@ -324,6 +395,7 @@ class FuturesEngine:
         for i in range(quantity):
             data = {
                 'user_id': uuid4(),
+                'order_id': uuid4(),
                 'market_type': MarketType.FUTURES,
                 'type': OrderType.MARKET,
                 'ticker': 'BTC',
@@ -346,6 +418,7 @@ class FuturesEngine:
             contract = _FuturesContract(
                 data, 
                 data['limit_price'] or data['price'], 
+                tag=Tag.ENTRY,
                 side=data['side'],
             )
             
@@ -353,7 +426,7 @@ class FuturesEngine:
             
             if i % divider == 0:
                 contract.remove_from_orderbook(orderbook)
-                contract.status = OrderStatus.FILLED
+                contract.order_status = OrderStatus.FILLED
                 
                 new_pos = FuturesPosition(data, contract)
                 

@@ -18,6 +18,7 @@ class FuturesPosition(Base):
         self.contract: _FuturesContract = contract
         self.tp_contract: _FuturesContract = None
         self.sl_contract: _FuturesContract = None
+        self.orphan_contract: _FuturesContract = None
         
         self._entry_price: float = contract.price
         self._side: Side = contract.side
@@ -120,8 +121,33 @@ class FuturesPosition(Base):
         
         return pnl
     
+    def _notify_change(self, field: str, value: any) -> None:
+        """
+        Notifies all contracts of a change in the position
+        
+        Args:
+            field (str): Name of the attribute to change
+            value (any): New value to set
+        """        
+        temp_field = f"_{field}" if field == 'standing_quantity' else field
+        
+        if self.sl_contract:
+            if hasattr(self.sl_contract, temp_field):
+                setattr(self.sl_contract, temp_field, value)
+        
+        if self.tp_contract:
+            if hasattr(self.tp_contract, temp_field):
+                setattr(self.tp_contract, temp_field, value)
+        
+        if self.orphan_contract:
+            if hasattr(self.orphan_contract, temp_field):
+                setattr(self.orphan_contract, temp_field, value)
+        
+        if field in self.contract.data:
+            self.contract.data[field] = value
+    
     def __repr__(self) -> str:
-        return f'Position(cid={self.contract.contract_id})'
+        return f'Position(cid={self.contract.contract_id}, side={self._side}, status={self.contract.order_status})'
 
     def __str__(self) -> str:
         return self.__repr__()
