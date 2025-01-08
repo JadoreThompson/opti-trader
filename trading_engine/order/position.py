@@ -1,6 +1,7 @@
+import json
 import logging
 
-from enums import OrderStatus, Side
+from enums import OrderStatus, PnlCategory, Side
 from trading_engine.orderbook import OrderBook
 from ..order.base import Base
 from ..order.contract import _FuturesContract
@@ -94,11 +95,11 @@ class FuturesPosition(Base):
             except Exception as e:
                 logger.error('Error whilst changing sl contract position {} - {}'.format(type(e), str(e)))
                 
-    def calculate_pnl(self, category: str, price: float=None, closing_contract: _FuturesContract=None) -> float:
-        if category not in ['real', 'unreal']:
-            raise ValueError("Category must be real or unreal")
+    def calculate_pnl(self, category: PnlCategory, price: float=None, closing_contract: _FuturesContract=None, **kwargs) -> float:
+        if not isinstance(category, PnlCategory):
+            raise ValueError("Category must be of enum type PnlCategory")
         
-        if category == 'unreal': 
+        if category == PnlCategory.UNREALISED: 
             if not price:
                 raise ValueError('price must be provided')
             
@@ -107,16 +108,17 @@ class FuturesPosition(Base):
             if self._side == Side.SHORT:
                 price_change *= -1
             
-            pnl = self.data[f'{category}_pnl'] = price_change * self.contract.margin
+            pnl = self.data[f'{category.value}_pnl'] = price_change * self.contract.margin
         
-        elif category == 'real':
-            price_change = ((closing_contract.price - self.contract.price) / self.contract.price)
+        elif category == PnlCategory.REALISED:
+            price = price or closing_contract.price
+            price_change = ((price - self.contract.price) / self.contract.price)
             
             if self._side == Side.SHORT:
                 price_change *= -1
                 
-            pnl = self.data[f'{category}_pnl'] = price_change * (self.contract.quantity * self.contract.price)
-        
+            pnl = self.data[f'{category.value}_pnl'] = round(price_change * (self.contract.quantity * self.contract.price), 2)
+            
         return pnl
     
     def _notify_change(self, field: str, value: any) -> None:
@@ -187,5 +189,5 @@ if __name__ == '__main__':
     
     op_pos = FuturesPosition(op_data, op_contract)
     op_pos.closing_contract = cl_contract
-    rpl = op_pos.calculate_pnl('real')
+    rpl = op_pos.calculate_pnl('realised')
     

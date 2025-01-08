@@ -154,6 +154,7 @@ class DBOrder(Base):
     side: Mapped[Side] = mapped_column(
         Enum(Side, name='side'),
         nullable=True,
+        default=Side.LONG,
     )
     
 
@@ -176,45 +177,6 @@ class DBOrder(Base):
         super().__init__(**kwargs)
 
 
-# class FuturesContracts(Base):
-#     __tablename__ = 'future_contracts'
-    
-#     side: Mapped[Side] = mapped_column(
-#         Enum(Side, name='side'),
-#         nullable=False
-#     )
-#     ticker: Mapped[str] = mapped_column(String, nullable=False)
-#     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-#     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=True)
-#     limit_price: Mapped[float] = mapped_column(Float, nullable=True)
-#     entry_price: Mapped[float] = mapped_column(Float, nullable=True)
-#     filled_price: Mapped[float] = mapped_column(Float, nullable=True)
-#     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
-#     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
-#     unrealised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
-#     realised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
-#     status: Mapped[OrderStatus] = mapped_column(
-#         Enum(OrderStatus, name='order_status'),
-#         nullable=True,
-#         default=OrderStatus.NOT_FILLED
-#     )
-    
-#     # Relationships
-#     users = relationship('Users', back_populates='future_contracts', )
-    
-#     # Constraints
-#     __tableargs__ = (
-#         CheckConstraint(quantity > 0, name='quantity_minimum_value'),
-#         CheckConstraint(take_profit > 0, name='take_profit_minimum_value'),
-#         CheckConstraint(stop_loss > 0, name='stop_loss_minimum_value'),
-#         CheckConstraint(limit_price > 0, name='limit_price_minimum_value')
-#     )
-
-#     def __init__(self, **kwargs) -> None: 
-#         kwargs['standing_quantity'] = kwargs['quantity']
-#         super().__init__(**kwargs)
-
-
 class MarketData(Base):
     """Database Model for Market data"""
     __tablename__ = 'market_data'
@@ -223,4 +185,3 @@ class MarketData(Base):
     ticker: Mapped[str] = mapped_column(String)
     date: Mapped[int] = mapped_column(Integer, nullable=False, primary_key=True)
     price: Mapped[float] = mapped_column(Float)
-    

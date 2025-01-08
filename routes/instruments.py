@@ -21,7 +21,7 @@ from utils.db import get_db_session
 instruments = APIRouter(prefix="/instruments", tags=["instrument"])
 
 
-@instruments.get("/", response_model=List[TickerData])
+@instruments.get("", response_model=List[TickerData])
 async def get_data(
     ticker: str,
     interval: IntervalTypes,

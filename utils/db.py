@@ -184,5 +184,8 @@ async def check_visible_user(username: str) -> str:
                 (Users.visible == True)
             )
         )
-        return res.first()[0]
+        try:
+            return str(res.first()[0])
+        except TypeError:
+            return ''
         

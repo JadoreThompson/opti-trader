@@ -202,17 +202,28 @@ async def modify(body: ModifyAccountBody, user_id: str=Depends(verify_jwt_token_
 @accounts.get("/metrics", response_model=UserMetrics)
 async def metrics(
     user_id: str = Depends(verify_jwt_token_http),
-    username: Optional[str] = None,
+    username: str = None,
     page: Optional[int] = 0,
 ) -> UserMetrics:
     PAGE_SIZE = 5
     
-    try:
-        if username:
-            user_id = await check_visible_user(username)            
-            if not user_id:
-                raise HTTPException(status_code=403)
+    data = {
+        'followers': {
+            'count': 0,
+            'entities': [],
+        },
+        'following': {
+            'count':0,
+            'entities': [],
+        }
+    }
+    
+    if username is not None and username != 'null':
+        user_id = await check_visible_user(username)            
+        if not user_id:
+            raise HTTPException(status_code=403)
         
+    try:
         async def get_follwers(user_id: str, page_num: int):
             async with get_db_session() as session:
                 count = await session.execute(
@@ -253,20 +264,16 @@ async def metrics(
                 get_following(user_id, page)
             ]
         )
-        
-        return UserMetrics(**{
-            'followers': {
-                'count': follower_result[0],
-                'entities': [item[0] for item in follower_result[1]]
-            },
-            'following': {
-                'count': following_result[0],
-                'entities': [item[0] for item in following_result[1]]
-            }
-        })
-        
+
+        data['followers']['count'] = follower_result[0]
+        data['followers']['entities'] = [item[0] for item in follower_result[1]]
+        data['following']['count'] = following_result[0]
+        data['following']['entities'] = [item[0] for item in following_result[1]]
+
     except Exception as e: 
         logger.error(f'{type(e)} - {str(e)}')
+    finally:
+        return UserMetrics(**data)
 
 
 @accounts.get("/search")

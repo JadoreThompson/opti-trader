@@ -16,13 +16,15 @@ from config import REDIS_HOST, ASYNC_REDIS_CONN_POOL
 from enums import (
     MarketType, 
     OrderStatus, 
-    OrderType, 
+    OrderType,
+    PnlCategory, 
     PubSubCategory, 
     Side, 
     UpdateScope
 )
 from exceptions import DoesNotExist
-from models.socket_models import BasePubSubMessage, FuturesContractRead, OrderUpdatePubSubMessage
+from models.models import FuturesContractRead
+from models.socket_models import BasePubSubMessage, OrderUpdatePubSubMessage
 from ..enums import Tag
 from ..orderbook import OrderBook
 from ..utils import batch_update, publish_update_to_client
@@ -193,7 +195,7 @@ class FuturesEngine:
                     await orderbook.set_price(result[1])
                     if position.orphan_contract.order_status == OrderStatus.CLOSED:
                         position.orphan_contract.data['close_price'] = result[1]
-
+                        position.calculate_pnl(PnlCategory.REALISED, result[1], tag=position.orphan_contract.data['order_id'])
                 else:
                     position.orphan_contract.append_to_orderbook(orderbook)
                     
@@ -319,7 +321,7 @@ class FuturesEngine:
                     ex_contract.position.remove_from_orderbook(orderbook, 'all')
                     orderbook.rtrack(position=ex_contract.position, channel='all')
                     ex_contract.data['close_price'] = price
-                    ex_contract.position.calculate_pnl('real', closing_contract=contract)
+                    ex_contract.position.calculate_pnl(PnlCategory.REALISED, closing_contract=contract)
                 else:
                     ex_contract.remove_from_orderbook(orderbook)
                     
@@ -383,9 +385,9 @@ class FuturesEngine:
         quantity = quantity or 10_000
         divider = divider or 5
         
-        op_range = [i for i in range(60, 200, 10)]
-        tp_range = [i for i in range(200, 310, 10)]
-        sl_range = [i for i in range(0, 60, 10)]
+        op_range = [i for i in range(300, 700, 10)]
+        tp_range = [i for i in range(700, 1500, 10)]
+        sl_range = [i for i in range(10, 300, 10)]
         
         for i in range(quantity):
             data = {

@@ -358,6 +358,13 @@ class ClientManager:
                     message=str(e)
                 ).model_dump()
             ))
+        except KeyError as e:
+            await socket.send_text(json.dumps(
+                BasePubSubMessage(
+                    category=PubSubCategory.ERROR,
+                    message='Key missing: ' + str(e)
+                ).model_dump()
+            ))
         except (TypeError, RuntimeError, StarletteWebSocketDisconnect) as e:
             raise WebSocketDisconnect
         except Exception as e:

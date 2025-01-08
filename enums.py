@@ -113,3 +113,7 @@ class MarketType(str, Enum):
     """Different types of markets the user can enter positions in """
     FUTURES = 'futures'
     SPOT = 'spot'
+    
+class PnlCategory(str, Enum):
+    REALISED = 'realised'
+    UNREALISED = 'unrealised'

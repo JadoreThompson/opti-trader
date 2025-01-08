@@ -17,7 +17,7 @@ from enums import (
     OrderStatus, 
     UpdateScope
 )
-from models.models import APIOrder
+from models.models import SpotOrderRead
 from exceptions import DoesNotExist
 from models.socket_models import BasePubSubMessage, OrderUpdatePubSubMessage
 from ..enums import OrderType as _OrderType
@@ -175,7 +175,7 @@ class SpotEngine:
                             category=PubSubCategory.ORDER_UPDATE,
                             message="Order partially filled",
                             on=UpdateScope.NEW,
-                            details=APIOrder(**data).model_dump()
+                            details=SpotOrderRead(**data).model_dump()
                         ).model_dump()
                     },
                     
@@ -184,7 +184,7 @@ class SpotEngine:
                         'message': BasePubSubMessage(
                             category=PubSubCategory.SUCCESS,
                             message="Order successfully placed",
-                            details=APIOrder(**data).model_dump()
+                            details=SpotOrderRead(**data).model_dump()
                         ).model_dump()
                     }
                 }[result[0]])
@@ -293,7 +293,7 @@ class SpotEngine:
                 message=BasePubSubMessage(
                     category=PubSubCategory.SUCCESS,
                     message="Limit order placed succesfully",
-                    details=APIOrder(**data).model_dump()
+                    details=SpotOrderRead(**data).model_dump()
                 ).model_dump()
             )
         except Exception as e:
@@ -436,7 +436,7 @@ class SpotEngine:
                         category=PubSubCategory.ORDER_UPDATE,
                         on=UpdateScope.EXISTING,
                         message='Order closed successfully',
-                        details=APIOrder(**order.data).model_dump()
+                        details=SpotOrderRead(**order.data).model_dump()
                     ).model_dump()
                 }
             }[result[0]])

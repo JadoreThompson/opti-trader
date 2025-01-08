@@ -46,8 +46,8 @@ def get_benchmark_returns(months_ago: int = 6, ticker: str = BENCHMARK_TICKER) -
             for i in range(1, len(monthly_returns))
         ]
     
-    except ValueError:
-        raise InvalidAction('Ticker not supported')
+    except ValueError as e:
+        raise InvalidAction(str(e))
 
 
 def std(returns: List[float]) -> float:
@@ -63,12 +63,25 @@ def std(returns: List[float]) -> float:
         return 0.0
 
 
-def sharpe(returns: List[float], risk_free: float = None) -> float:
-    """Sharpe Ratio"""
-    risk_free = RISK_FREE if not risk_free else risk_free
+def sharpe(returns: List[float], risk_free_returns: List[float]=None) -> float:
+    """
+    Calculates sharpe ratio
+
+    Args:
+        returns (List[float]): List of periodic returns 
+        risk_free_returns (List[float], optional): List of period risk free returns. Defaults to 4.0
+
+    Returns:
+        float: _description_
+    """    
+    risk_free_returns = \
+        risk_free_returns\
+        or [RISK_FREE] * len(returns)
+    risk_free_returns = risk_free_returns[:len(returns)]
+    
     try:
         std_dev = std(returns)
-        return round((sum(returns) - (risk_free * len(returns))) / std_dev, 3)
+        return round((sum(returns) - sum(risk_free_returns)) / std_dev, 3)
     except ZeroDivisionError:
         return 0.0
 
@@ -97,7 +110,7 @@ def sortino(returns: List[float], risk_free: float = None) -> float:
         return 0.0
         
 
-def beta(portfolio_returns: list[float], benchmark_returns: list[float]) -> float:
+def beta(returns: list[float], benchmark_returns: list[float]=None) -> float:
     """
     Returns the Beta for a portfolio against a benchmark
     
@@ -109,13 +122,13 @@ def beta(portfolio_returns: list[float], benchmark_returns: list[float]) -> floa
         float: Beta
     """
     try:
-        length = len(portfolio_returns)
+        length = len(returns)
         benchmark_returns = benchmark_returns[:length]
         
-        avg_portfolio_return = sum(portfolio_returns) / length
+        avg_portfolio_return = sum(returns) / length
         avg_benchmark_returns = sum(benchmark_returns) / length
         
-        port_variations = [item - avg_portfolio_return for item in portfolio_returns]
+        port_variations = [item - avg_portfolio_return for item in returns]
         benchmark_variations = [item - avg_benchmark_returns for item in benchmark_returns]
         
         covariation = round(sum(port_variations[i] * benchmark_variations[i] for i in range(length)) / length, 2)
@@ -138,7 +151,7 @@ def treynor(avg_pf_return: float, avg_bm_return: float, pf_beta: float) -> float
         float: Treyno Ratio
     """    
     try:
-        (avg_pf_return - avg_bm_return) / pf_beta
+        return (avg_pf_return - avg_bm_return) / pf_beta
     except ZeroDivisionError:
         return 0.0
 
@@ -166,27 +179,23 @@ def get_ghpr(pf_returns: list[float]) -> float:
 def risk_of_ruin(
     win_rate: float,
     risk_per_trade: float,
-    total_trades: int
+    num_trades: int
 ) -> float:
     """
     Returns the risk of ruin for a portfolio
     Args:
         win_rate (float):
         risk_per_trade (float): The Average percentage of an account's balance that's risked per trade
-        total_trades (int): The total amount of trades you want to calculate the risk of ruin for. E.g.
+        num_trades (int): The total amount of trades you want to calculate the risk of ruin for. E.g.
         I want to calculte the risk of ruin over 100 trades so I pass in 100
 
     Returns:
         float: Risk of ruin as a percentage
     """   
-    if win_rate > 1:
-        win_rate /= 100
-        
     try:
-        return ((1 - win_rate) / (1 - win_rate)) ** (total_trades * risk_per_trade)
+        return ((1 - win_rate) / (1 - win_rate)) ** (num_trades * risk_per_trade)
     except ZeroDivisionError:
         return 0.0
-
 
 
 def get_quantitative_metrics(

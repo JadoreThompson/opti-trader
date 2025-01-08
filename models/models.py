@@ -1,12 +1,18 @@
-from typing import Any, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 
 # Local
-from enums import GrowthInterval, OrderStatus, OrderType
+from enums import (
+    GrowthInterval, 
+    OrderStatus, 
+    OrderType,
+    MarketType,
+    Side,
+)
 
 # Pydantic
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, root_validator
 
 
 class Base(BaseModel):
@@ -78,13 +84,12 @@ class QuantitativeMetrics(BaseModel):
     beta: Optional[float] = None
     sharpe: Optional[float] = None
     treynor: Optional[float] = None
-    ahpr: Optional[float] = None
-    ghpr: Optional[float] = None
     risk_of_ruin: Optional[float] = None
+    winrate: Optional[float | str] = None
     
     @field_validator(
         "std", "beta", "sharpe", "treynor",
-        "ahpr", "ghpr", "risk_of_ruin",
+        "risk_of_ruin", "winrate",
         mode="before"
     )
     def validator(cls, value):
@@ -93,55 +98,53 @@ class QuantitativeMetrics(BaseModel):
         return value
     
 
-class PerformanceMetrics(QuantitativeMetrics):
+class PerformanceMetrics(Base):
     daily: Optional[float | str] = None
     balance: Optional[float | str] = None
     total_profit: Optional[float | str] = None
+    std: Optional[float] = None
+    beta: Optional[float] = None
+    sharpe: Optional[float] = None
+    treynor: Optional[float] = None
+    risk_of_ruin: Optional[float] = None
     winrate: Optional[float | str] = None
     
+    @model_validator(mode='before')
+    def validate_fields(cls, values):
+        for field, value in values.items():
+            values[field] = round(value, 2)
+        return values
     
-    @field_validator("daily", "balance", "total_profit", "winrate", mode="before")
-    def convert_to_float(cls, value, name):
-        field = name.field_name
-        
-        if field in ['daily', 'balance', 'total_profit']:
-            chunks = []
-            value_list = list(str(value).split('.')[0])
-            i = len(value_list)
-            
-            while i >= 1:
-                splitter = i - 3
-                if splitter >= 0:
-                    chunks.append(value_list[splitter: i])
-                else:
-                    chunks.append(value_list[0: i])
-                i -= 3
-            
-            value = '$' + ",".join(["".join(chunk) for chunk in chunks[::-1]])
-            
-        elif field == 'winrate':
-            value = f"{value}%"
-        
-        return value
-    
+class WinsLosses(Base):
+    """
+    JSON Schema for the Frontend bar chart showcasing each weekday's gaisn
+    """    
+    wins: Optional[List[int]] = []
+    losses: Optional[List[int]] = []
 
-class APIOrder(Base):
+class SpotOrderRead(Base):
     """Client facing schema for an order"""    
     ticker: str
+    market_type: Optional[MarketType] = None
     order_type: OrderType
     limit_price: Optional[float] = None
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
-    quantity: float
+    quantity: int
+    standing_quantity: int
     order_status: OrderStatus
     price: Optional[float] = None
     created_at: datetime
     filled_price: Optional[float] = None
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
-    realised_pnl: Optional[float] = None
-    unrealised_pnl: Optional[float] = None
+    realised_pnl: Optional[float] = 0
+    unrealised_pnl: Optional[float] = 0
     order_id: UUID
+    
+
+class FuturesContractRead(SpotOrderRead):
+    side: Side | str
 
 
 class TickerData(BaseModel):
@@ -156,8 +159,8 @@ class TickerData(BaseModel):
     
 
 class GrowthModel(Base):
-    time: int
-    value: float
+    time: Optional[int] = None
+    value: Optional[float] = None
     
 
 class TickerDistribution(Base):

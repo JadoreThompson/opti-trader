@@ -14,7 +14,7 @@ from sqlalchemy import insert
 from db_models import MarketData
 from enums import PubSubCategory, UpdateScope
 from exceptions import DoesNotExist
-from models.models import APIOrder
+from models.models import SpotOrderRead
 from models.socket_models import (
     OrderUpdatePubSubMessage, 
     BasePubSubMessage
@@ -138,7 +138,7 @@ class OrderBook:
                         'message': OrderUpdatePubSubMessage(
                             category=PubSubCategory.ORDER_UPDATE,
                             on=UpdateScope.EXISTING,
-                            details=APIOrder(**order.data).model_dump()
+                            details=SpotOrderRead(**order.data).model_dump()
                         ).model_dump()
                     })
                 
@@ -158,8 +158,7 @@ class OrderBook:
         )
         
         try:
-            prices = [i for i in self._bid_levels if i < price][-5:]
-            prices.sort(reverse=True)
+            prices = [i for i in self._bid_levels if i < price][-20:]
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
             prices = []
@@ -184,7 +183,6 @@ class OrderBook:
         try:
             if dom != self._dom:
                 self._dom = dom
-                print(json.dumps(dom, indent=4))
                 await publish_update_to_client(
                     **{
                         'channel': 'dom',

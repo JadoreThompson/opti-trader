@@ -44,6 +44,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             'take_profit': None,
             'stop_loss': None,
             'limit_price': None,
+            'realised_pnl': None,
             'side': random.choice([Side.LONG, Side.SHORT])
         }
         
@@ -63,14 +64,22 @@ import json
 async def create_user():
     async with get_db_session() as sess:
         pw = fkr.pystr()
-        creds = {'email': fkr.email(), 'password': pw, 'username': fkr.last_name(), 'visible': random.choice([True, False])}
+        creds = {
+            'email': fkr.email(), 
+            'password': pw, 
+            'username': fkr.last_name(), 
+            # 'visible': random.choice([True, False])
+            'visible': True,
+        }
+        print(json.dumps(creds, indent=4))
+        creds['password'] = PH.hash(creds['password'])
         # with open('myfile.txt', 'w') as f:
         #     f.write(f'Password: {pw}\n')
         #     f.write(f'{creds}')
         
         user = await sess.execute(
             sa.insert(Users)
-            .values(**creds, authenticated=True)
+            .values(**creds, authenticated=True,)
             .returning(Users)
         )
 
@@ -182,7 +191,7 @@ async def main():
             name=fkr.first_name(), 
             divider=randint(2, 5), 
             num_orders=randint(10_000, 30_000), 
-            close_quantity=randint(1, 10)
+            close_quantity=randint(8, 10)
         ) for _ in range(TEST_SIZE)
     ])
 

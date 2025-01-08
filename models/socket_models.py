@@ -58,11 +58,6 @@ class ModifyOrder(_MarketType, _OrderType):
 class FuturesContractWrite(TempBaseOrder):
     """"Core schema for futures contract"""
     side: Side
-
-
-class FuturesContractRead(FuturesContractWrite):
-    standing_quantity: int = Field(ge=0)
-    order_id: str
     
 
 class BasePubSubMessage(Base):

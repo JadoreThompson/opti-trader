@@ -60,4 +60,7 @@ async def invalid_action_handler(r: Request, e: InvalidAction):
 @app.exception_handler(RequestValidationError)
 async def validation_handler(r: Request, e: RequestValidationError):
     return JSONResponse(status_code=400, content={'error': e._errors[0]['msg'].replace('Value error, ', '')})
-        
+
+# @app.exception_handler(Exception)
+# async def exception_handler(r: Request, e: Exception):
+#     return JSONResponse(status_code=500, content={'error': str(type(e)), 'message': str(e)})

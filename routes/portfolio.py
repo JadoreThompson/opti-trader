@@ -6,6 +6,7 @@ from datetime import (
 import json
 import logging
 from typing import (
+    Dict,
     List, 
     Optional, 
     Annotated
@@ -25,25 +26,8 @@ from config import (
     REDIS_HOST,
     SYNC_REDIS_CONN_POOL,
 )
-from utils.arithemtic import (
-    get_quantitative_metrics,
-    beta,
-    get_benchmark_returns,
-    get_ghpr
-)
-
-from utils.db import (
-
-    get_active_orders,
-    get_orders,
-    get_db_session,    
-)
-from utils.auth import verify_jwt_token_http
-from utils.portfolio import (
-    get_balance,
-    get_monthly_returns
-)
 from enums import (
+    MarketType,
     OrderStatus,
     GrowthInterval
 )
@@ -55,193 +39,126 @@ from db_models import (
 )
 from models.models import (
     CopyTradeRequest,
+    FuturesContractRead,
     GrowthModel,
-    APIOrder,
     PerformanceMetrics,
     QuantitativeMetricsBody,
     QuantitativeMetrics,
+    SpotOrderRead,
     TickerDistribution,
-    Username
+    Username,
+    WinsLosses,
+)
+from utils.arithemtic import (
+    get_quantitative_metrics,
+    beta,
+    get_benchmark_returns,
+    get_ghpr,
+    risk_of_ruin,
+    sharpe,
+    std,
+    treynor
 )
 
+from utils.auth import verify_jwt_token_http
+from utils.db import (
+    check_visible_user,
+    get_active_orders,
+    get_orders,
+    get_db_session,    
+)
+from utils.portfolio import (
+    get_balance,
+    get_monthly_returns
+)
 
 # FA
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-async def get_quant_metrics_handler(
-    user_id: str,
-    benchmark_ticker: str = "^GSPC",
-    months_ago: int = 6,
-    total_trades: int = 100,
-    all_orders: list[dict] = None,
-    balance: float = None,
-    all_dates: set = None,
-    **kwargs
-) -> dict:
-    """
-    Handles the retrieval of common quantitative metrics
 
+def calculate_cumulative_return(starting_balance: float, orders: List[float]) -> List[float]:
+    balance = starting_balance
+    return [
+        {
+            f'{order['created_at']:%Y-%m}': round(
+                order['realised_pnl'] / (balance := balance - order['realised_pnl']) * 100
+            , 2)
+        }
+        for order in orders
+    ]
+    
+
+def calcualte_risk_per_trade(starting_balane: float, orders: List[dict]) -> List[float]:
+    """
+    Returns the percentage risk per trade as a float list
     Args:
-        user_id (str).
-        benchmark_ticker (str, optional): Risk Free Rate or Benchmark. Defaults to "^GSPC".
-        months_ago (int, optional): How far ago to retrieve benchmark_ticker returns. Defaults to 6.
-        total_trades (int, optional): The total span of trades to consider for risk of ruin. Defaults to 100.
-        all_orders (list[dict], optional): List of all orders. Defaults to None.
-        balance (float, optional): Defaults to None.
-        all_dates (set, optional): All unique days YYYY-MM-DD for all_orders. Defaults to None.
+        starting_balane (float): _description_
+        orders (List[dict]): _description_
 
     Returns:
-        dict: Quantitative Metrics.
+        List: _description_
     """    
-    params = {k: v for k, v in locals().items() if v}
-    params['order_status'] = OrderStatus.CLOSED
+    balance = starting_balane
+    return [
+        (margin := order['quantity'] * order['filled_price']) / (balance := balance - margin)
+        for order in orders
+    ]
+
+
+async def calculate_quant_metrics(user_id: str) -> dict:
+    async with get_db_session() as session:
+        r = await session.execute(
+            select(DBOrder)
+            .where(
+                (DBOrder.user_id == user_id)
+                & (DBOrder.order_status == OrderStatus.CLOSED)
+            )
+        )
+        all_orders: List[DBOrder] = r.scalars().all()
     
-    if not balance:
-        balance = await get_balance(user_id)
+        r = await session.execute(
+            select(Users.balance)
+            .where(Users.user_id == user_id)
+        )
+        balance = r.first()[0]
     
+    # Calculations
     if not all_orders:
-        all_orders = await get_orders(user_id=user_id, order_status=OrderStatus.CLOSED)
-    
-    if not all_dates:
-        all_dates = set([order['created_at'].date() for order in all_orders])    
-    
-    monthly_returns: dict = get_monthly_returns(all_orders, all_dates)
-    _, _, winrate = get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
-    risk_per_trade = get_avg_risk_per_trade(all_orders, balance)
-    
-    data: dict = get_quantitative_metrics(
-        risk_per_trade=risk_per_trade,
-        winrate=winrate,
-        monthly_returns=monthly_returns,
-        balance=balance,
-        benchmark_ticker=benchmark_ticker,
-        months_ago=months_ago,
-        total_num_trades=total_trades
+        return {}
+        
+    date_returns: List[Dict[str, float]] = calculate_cumulative_return(
+        balance, 
+        [vars(order) for order in all_orders]
     )
     
-    data.update({
-        'ahpr': get_ahpr(all_orders, all_dates, balance),
-        'ghpr': get_ghpr([v for _, v in monthly_returns.items()]),
-    })
+    benchmark_returns = get_benchmark_returns()
+    
+    returns = []
+    for item in date_returns:
+        returns.append(list(item.values())[0])
+    
+    data = {
+        'balance': balance,
+        'std': std(returns),
+        'sharpe': sharpe(returns,),
+        'beta': beta(returns, benchmark_returns),
+        'winrate': sum(1 for order in all_orders if order.realised_pnl > 0) / len(all_orders)
+    }
+    
+    data['treynor'] = treynor(
+        sum(returns) / len(returns),
+        sum(benchmark_returns) / len(benchmark_returns),
+        data['beta']
+    )
+    pct_risk_per = calcualte_risk_per_trade(balance, [vars(order) for order in all_orders])
+    data['risk_of_ruin'] = risk_of_ruin(
+        balance, 
+        sum(pct_risk_per) / len(pct_risk_per),
+        100,
+    )
+    
     return data
-
-
-
-def beta_wrapper(months_ago: int, benchmark_ticker: str, portfolio_returns: list):
-    try:
-        benchmark_returns = get_benchmark_returns(months_ago, benchmark_ticker)
-        return beta(portfolio_returns, benchmark_returns)
-    except InvalidAction:
-        raise
-
-
-def get_ahpr(
-    orders: list[dict], 
-    all_dates: list, 
-    balance: float
-) -> float:
-    """
-    Returns the average monthly return
-
-    Args:
-        orders (list[dict]): _description_
-        all_dates (list): _description_
-
-    Returns:
-        dict[str, float]: The monthly return as a year-month for the key and the total
-                        return for the month as the value  {2024-01: 100} 
-    """    
-    all_dates = set(f"{date_item:%Y-%m}" for date_item in all_dates)
-    
-    date_return = {key: 0 for key in all_dates}
-    
-    for order in orders:        
-        start_price = (order.get('filled_price', None) or order.get('price', None))
-        initial_value = order['quantity'] * start_price
-        price_change = ((order['close_price'] - start_price) / start_price) + 1
-        date_return[f"{order['created_at']:%Y-%m}"] += (initial_value * price_change) - initial_value
-    
-    try:
-        return (((balance + sum(v for _, v in date_return.items()) / len(date_return)) - balance) / balance) * 100
-    except ZeroDivisionError:
-        return 0.0
-
-
-def get_average_daily_return_and_total_profit_and_winrate(
-    orders: list[dict], 
-    all_dates: list
-) -> tuple[float, float, float]:
-    """
-    Returns the return for all orders grouped by date
-    
-    Args:
-        orders (list[dict])
-        all_dates: List[datetime.date()] -> All must be unique
-
-    Returns:
-        dict
-    """    
-    date_return = {key: 0 for key in all_dates}
-    total_return = 0
-    wins = 0
-    
-    for order in orders:        
-        try:
-            realised_pnl = order['realised_pnl']
-            date_return[order['created_at'].date()] += realised_pnl
-            total_return += realised_pnl
-            
-            if realised_pnl > 0:
-                wins += 1
-        except TypeError:
-            pass
-    try:
-        average_daily_return = sum(v for _, v in date_return.items()) / len(date_return)
-    except ZeroDivisionError:
-        average_daily_return = 0.0
-    
-    try:
-        win_rate = (wins / len(orders)) * 100
-    except ZeroDivisionError:
-        win_rate = 0.0
-    
-    return average_daily_return, total_return, win_rate
-    
-    
-def get_avg_risk_per_trade(
-    all_orders: list[dict],
-    balance: float
-) -> float:
-    """
-    Returns the average percentage risk of a portfolio
-    across all orders
-    
-    Args:
-        all_orders (list[dict]): 
-        balance (float): 
-
-    Returns:
-        float: Average percentage risk across all orders
-    """    
-    total_risk: float = 0.0
-    
-    for order in all_orders:
-        q = order['quantity']
-        risk = q * (
-            order.get('filled_price', None) or order.get('price', None)
-            or order.get('limit_price', None)
-        )
-        
-        if order.get('stop_loss', None):
-            risk = risk - (q * order['stop_loss'])
-        
-        total_risk += (risk / balance) * 100
-    
-    try:
-        return round(total_risk / len(all_orders), 2)
-    except ZeroDivisionError:
-        return 0.0
 
 
 # Initialisation
@@ -253,74 +170,75 @@ REDIS_CLIENT = redis.Redis(
     connection_pool=SYNC_REDIS_CONN_POOL
 )
 
-@portfolio.get('/orders', response_model=List[APIOrder])
+@portfolio.get('/orders',)
 async def orders(
-    order_status: Annotated[list[OrderStatus], Query()],
-    username: Optional[str] = None,
     user_id: str = Depends(verify_jwt_token_http),
-):        
-    if username:
-        async with get_db_session() as session:
-            try:
-                user_id = await session.execute(
-                    select(Users.user_id)
-                    .where(
-                        (Users.username == username) &
-                        (Users.visible == True)
-                    )
-                )
-                user_id = user_id.first()[0]
-            except TypeError:
-                raise HTTPException(status_code=403)
-        
-    order_status = tuple(order_status)
-    existing_data = REDIS_CLIENT.get(user_id)
+    username: Optional[str] = None,
+    order_status: Annotated[List[OrderStatus], Query()] = None,
+    market_type: Annotated[List[MarketType], Query()] = None,
+    ticker: Annotated[List[str], Query()] = None
+):      
+    if username is not None and username != 'null':
+        user_id = await check_visible_user(username)
+        if not user_id:
+            raise HTTPException(status_code=403)
     
+    if not order_status:
+        order_status = []
+    if not market_type:
+        market_type = []
+    if not ticker:
+        ticker = []
+        
+    prim_cache_key = 'orders'
+    sec_cache_key = \
+        f"{''.join(order_status) + ''.join(market_type) + ''.join(ticker)}".strip() \
+        or 'all'
+    
+    existing_data = REDIS_CLIENT.get(user_id)
     if existing_data:
         existing_data = json.loads(existing_data)
-        if 'orders' in existing_data:      
-            if ''.join(order_status) in existing_data['orders']:
+        if prim_cache_key in existing_data:
+            if sec_cache_key in existing_data[prim_cache_key]:
                 return [
-                    APIOrder(**item) 
-                    for item in existing_data['orders'][''.join(order_status)]
+                    FuturesContractRead(**item) 
+                    for item in existing_data[prim_cache_key][sec_cache_key]
                 ]
     else:
         existing_data = {}
     
-    existing_data.setdefault('orders', {})
-                
-    try:    
-        async with get_db_session() as session:                
-            r = await session.execute(
-                select(DBOrder)
-                .where(
-                    (DBOrder.order_status.in_(order_status)) &
-                    (DBOrder.user_id == user_id))
-            )
-            
-            rs = [vars(item) for item in r.scalars().all()]
-            all_orders = [APIOrder(**item) for item in rs]
+    existing_data.setdefault(prim_cache_key, {})
+    all_orders = []
+    
+    # Retrieving
+    try:
+        query = \
+            select(DBOrder)\
+            .where(DBOrder.user_id == user_id)
         
-        existing_data['orders'][''.join(order_status)] = [
-            {
-                k: (str(v) if isinstance(v, (datetime, UUID)) else v)
-                for k, v in item.items()
-                if k != 'user_id' and k != '_sa_instance_state'
-            } 
-            for item in rs
-        ]
+        if order_status:
+            query = query.where(DBOrder.order_status.in_(order_status))
+        if market_type:
+            query = query.where(DBOrder.market_type.in_(market_type))
+        if ticker:
+            query = query.where(DBOrder.ticker.in_(ticker))
         
+        async with get_db_session() as s:
+            r = await s.execute(query)
+            all_orders = [vars(order) for order in r.scalars().all()]
+        
+        existing_data[prim_cache_key][sec_cache_key] = all_orders
         REDIS_CLIENT.set(user_id, json.dumps(existing_data))
-        return all_orders
-    except InvalidAction:
-        raise
+        
     except Exception as e:
-        logger.error(f'{type(e)} - {str(e)}')
-
+        logger.error('{} - {}'.format(type(e), str(e)))
+    finally:
+        return [FuturesContractRead(**order) for order in all_orders]
 
 
 @portfolio.get("/performance", response_model=PerformanceMetrics)
 async def performance(
+    market_type: MarketType,
     user_id: str = Depends(verify_jwt_token_http),
     username: Optional[str] = None,
 ) -> PerformanceMetrics:
@@ -328,234 +246,234 @@ async def performance(
     Returns performance metrics for the account
 
     Args:
-        user_id (str, optional): JWT Token in header
-
+        user_id (str): JWT Token in header
+        username (Optional[str])
     Returns:
-        PerformanceMetrics()
-    """
-    data = REDIS_CLIENT.get(user_id)
-    
-    if data:
-        data = json.loads(data)
-        if 'performance' in data:
-            return data['performance']
-    else:
-        data = {}
-        
-    if username:
-        try:
-            async with get_db_session() as session:
-                r = await session.execute(
-                    select(Users.user_id)
-                    .where(
-                        (Users.username == username) &
-                        (Users.visible == True)
-                    )
-                )
-                user_id = r.first()[0]
-        except TypeError:
-            raise HTTPException(status_code=403)
-        except Exception as e:
-            logger.error(f'{type(e)} - {str(e)}')
-
-    performance_dict = {}
-    
-    try:
-        performance_dict['balance'], all_orders = await asyncio.gather(*[
-            get_balance(user_id),
-            get_orders(**{'user_id': user_id, 'order_status': OrderStatus.CLOSED})
-        ])
-        
-        all_dates = set(order['created_at'].date() for order in all_orders)
-
-        quant_data: dict = await get_quant_metrics_handler(
-            user_id=user_id, 
-            all_orders=all_orders, 
-            all_dates=all_dates,
-            balance=performance_dict['balance']
-        )
-        
-        performance_dict.update(
-            dict(zip(
-                ['daily', 'total_profit', 'winrate'], 
-                get_average_daily_return_and_total_profit_and_winrate(all_orders, all_dates)
-            ))
-        )
-        
-        performance_dict.update(quant_data)
-        data.update({'performance': performance_dict})
-        REDIS_CLIENT.set(user_id, json.dumps(data))
-        return PerformanceMetrics(**performance_dict)
-            
-    except Exception as e:
-        logger.error(f'{type(e)} - {str(e)}')
-
-
-
-@portfolio.get("/quantitative", response_model=QuantitativeMetrics)
-async def quantitative_metrics(
-    username: Optional[str] = None,
-    user_id: str = Depends(verify_jwt_token_http),
-) -> QuantitativeMetrics:
-    """
-    Args:
-        user_id (str, optional): Depends(verify_jwt_token) Header JWT Verification.
-        risk_free (Optional[float], optional): The risk free rate or benchmark rate to be comapred to.
-
-    Returns:
-        QuantitativeMetrics()
+        JSON (PerformanceMetrics)
     """ 
-    data = {'user_id': user_id}
-    key_ = 'quantitative'
-    
-    if username is not None:
-        try:
-            async with get_db_session() as session:
-                r = await session.execute(
-                    select(Users.user_id)
-                    .where(
-                        (Users.username == username) &
-                        (Users.visible == True)
-                    )
-                )
-                data['user_id'] = str(r.first()[0])
-        except TypeError:
+    if username is not None and username != 'null':
+        user_id = await check_visible_user(username)
+        if not user_id:
             raise HTTPException(status_code=403)
-    
+
     existing_data = REDIS_CLIENT.get(user_id)
+    
     if existing_data:
         existing_data = json.loads(existing_data)
-        if key_ in existing_data:
-            return existing_data[key_]
+        if 'performance' in existing_data:
+            return existing_data['performance']
     else:
         existing_data = {}
+
+    existing_data['performance'] = {}
+    task = asyncio.create_task(calculate_quant_metrics(user_id))
     
-    data.update(QuantitativeMetricsBody().model_dump())    
-    data['benchmark_ticker'] = str(data['benchmark_ticker'][0])
-    data['months_ago'] = int(data['months_ago'][0])
-    data.update(await get_quant_metrics_handler(**data))
+    try:
+        async with get_db_session() as session:
+            r = await session.execute(
+                select(DBOrder)
+                .where(
+                    (DBOrder.user_id == user_id)
+                    & (DBOrder.order_status == OrderStatus.CLOSED)
+                    & (DBOrder.market_type == market_type)
+                )
+                .limit(1000)
+            )
+            
+            all_orders = [vars(order) for order in r.scalars().all()]
+            
+            r = await session.execute(
+                select(Users.balance)
+                .where(Users.user_id == user_id)
+            )
+            
+            existing_data['performance']['balance'] = r.first()[0]
+        
+        
+        existing_data['performance']['total_profit'] = sum(order['realised_pnl'] for order in all_orders)
+        all_dates = set(order['created_at'].date() for order in all_orders)
+        temp = {
+            item: 0
+            for item in all_dates
+        }
+        
+        for item in all_orders:
+            temp[item['created_at'].date()] += item['realised_pnl']
+        existing_data['performance']['daily'] = sum(v for _, v in temp.items())
+        
+        # Cache the data
+        await task
+        existing_data['performance'].update(task.result())
+        REDIS_CLIENT.set(user_id, json.dumps(existing_data))
+    except Exception as e:
+        logger.error(f'{type(e)} - {str(e)}')
+    finally:
+        return PerformanceMetrics(**existing_data['performance'])
+
+
+# @portfolio.get("/quantitative",)
+# async def quantitative_metrics(
+#     username: Optional[str] = None,
+#     user_id: str = Depends(verify_jwt_token_http),
+# ):
+#     """
+#     Args:
+#         user_id (str, optional): Depends(verify_jwt_token) Header JWT Verification.
+#         risk_free (Optional[float], optional): The risk free rate or benchmark rate to be comapred to.
+
+#     Returns:
+#         QuantitativeMetrics()
+#     """ 
+#     key_ = 'quantitative'
     
-    final_value = QuantitativeMetrics(**data)
-    existing_data.update({key_: final_value.model_dump()})
-    REDIS_CLIENT.set(user_id, json.dumps(data))
+#     if username is not None:
+#         user_id = await check_visible_user(username)
+#         if not user_id:
+#             raise HTTPException(status_code=403)
     
-    return final_value
+#     existing_data = REDIS_CLIENT.get(user_id)
+    
+#     if existing_data:
+#         existing_data = json.loads(existing_data)
+#         if key_ in existing_data:
+#             return QuantitativeMetrics(**existing_data[key_])
+#     else:
+#         existing_data = {}
+    
+#     return QuantitativeMetrics(**await calculate_quant_metrics(user_id))
 
 
 @portfolio.get("/growth", response_model=List[GrowthModel])
 async def growth(
     interval: GrowthInterval,
+    market_type: MarketType,
     username: Optional[str] = None,
     user_id: str = Depends(verify_jwt_token_http),
 ) -> List[GrowthModel]:    
     """
-    Returns growth list for the tradingview chart frontend
+    Returns JSON for building portfolio growth chart in frontend
+    
     Args:
-        interval (GrowthInterval): 
-        user_id (str, optional): Defaults to Depends(verify_jwt_token_http).
-
+        - user_id (JWTToken)
+        - interval (GrowthInterval)
+        - username (Optional[str]): Defaults to None
     Returns:
-        list
+        - JSON (List[GrowthInterval])
     """ 
-    if username is not None:
-        try:
-            async with get_db_session() as session:
-                r = await session.execute(
-                    select(Users.user_id)
-                    .where(
-                        (Users.username == username) &
-                        (Users.visible == True)
-                    )
-                )
-                user_id = r.first()[0]
-        except TypeError:
+    if username is not None and username != 'null':
+        user_id = await check_visible_user(username)
+        if not user_id:
             raise HTTPException(status_code=403)
     
     key_ = 'growth_data'
+    inner_key_ = interval.value + market_type.value
     existing_data = REDIS_CLIENT.get(user_id)
+    
     if existing_data:
         existing_data = json.loads(existing_data)
         if key_ in existing_data:
             if interval in existing_data[key_]:
-                return existing_data[key_][interval]
+                if inner_key_ in existing_data[key_]:
+                    return existing_data[key_][inner_key_]
     else:
         existing_data = {}
     
     existing_data.setdefault(key_, {})
-    
-    query = select(DBOrder).where((DBOrder.user_id == user_id) & (DBOrder.order_status == OrderStatus.CLOSED))
-    today = datetime.now()
-    today = datetime(day=today.day, month=today.month, year=today.year)
-    
-    if interval == GrowthInterval.DAY:
-        query = query.where(DBOrder.created_at >= today)
-
-    elif interval == GrowthInterval.WEEK:
-        start_of_week = today - timedelta(days=today.weekday())
-        query = query.where(DBOrder.created_at >= start_of_week)
-
-    elif interval == GrowthInterval.MONTH:
-        start_of_month = today.replace(day=1)
-        query = query.where(DBOrder.created_at >= start_of_month)
-    
-    elif interval == GrowthInterval.YEAR:
-        start_of_year = datetime(year=today.year, month=1, day=1)
-        query = query.where(DBOrder.created_at >= start_of_year)
-    
-    async def retrieve_orders(query) -> list:
-        async with get_db_session() as session:
-            r = await session.execute(query)
-            return r.scalars().all()
+    final_list = []
     
     try:
-        all_orders, current_balance = await asyncio.gather(*[retrieve_orders(query), get_balance(user_id)])
-    except Exception as e:
-        logger.error(f'{type(e)} - {str(e)}')
-            
-    starting_period_balance: float = current_balance
-    
-    all_orders_with_gain = []
-    return_list = []
         
-    for order in all_orders:
-        starting_period_balance += -1 * order.realised_pnl
-        all_orders_with_gain.append({'date': order.created_at, 'gain': order.realised_pnl})
+        # Constructing query to get orders
+        today = datetime.now()
+        today = datetime(
+            day=today.day, 
+            month=today.month, 
+            year=today.year
+        )
+        
+        query = \
+            select(DBOrder)\
+            .where(
+                (DBOrder.user_id == user_id) 
+                & (DBOrder.order_status == OrderStatus.CLOSED)
+                & (DBOrder.market_type == market_type)
+            )
+        
+        options = {
+            GrowthInterval.DAY: DBOrder.created_at >= today,
+            GrowthInterval.WEEK: DBOrder.created_at >= today - timedelta(days=today.weekday()),
+            GrowthInterval.MONTH: DBOrder.created_at >= today.replace(day=1),
+            GrowthInterval.YEAR: DBOrder.created_at >= datetime(year=today.year, month=1, day=1),
+        }
+        
+        clause = options.get(interval, None)
+        if clause is not None:
+            query = query.where(clause)
+        
+        async with get_db_session() as session:
+            r = await session.execute(query)
+            all_orders: List[DBOrder] = r.scalars().all()
+            
+            r = await session.execute(
+                select(Users.balance)
+                .where(Users.user_id == user_id)
+            )
+            current_balance = r.first()[0]
+            
+        # Performing calculations
+        starting_balance = current_balance
+        for order in all_orders:
+            starting_balance += -1 * order.realised_pnl
 
-    for order in all_orders_with_gain:
-        return_list.append({
-            'time': int(order['date'].timestamp()),
-            'value': round((order['gain'] / starting_period_balance) * 100, 2)
+        final_list = \
+            list(
+                sorted(
+                    [
+                        {
+                            'time': int(order.created_at.timestamp()),
+                            'value': round((order.realised_pnl / starting_balance) * 100, 2),
+                        }
+                        for order in all_orders
+                    ],
+                    key=lambda item: item['time']
+                )
+            )
+            
+        existing_data[key_].update({
+            inner_key_: final_list
         })
-    
-    return_list.sort(key= lambda item: item['time'])
-    return_list = [GrowthModel(**item) for item in return_list if return_list.count(item) == 1]
-    
-    existing_data.update({
-        interval: [item.model_dump() for item in return_list]
-    })
-    REDIS_CLIENT.set(user_id, json.dumps(existing_data))
-    
-    return return_list
+        REDIS_CLIENT.set(user_id, json.dumps(existing_data))    
+    except Exception as e:
+        logger.error('{} - {}'.format(type(e), str(e)))
+    finally:
+        return [
+            GrowthModel(**item) 
+            for item in final_list 
+            if final_list.count(item) == 1
+        ]
     
 
-@portfolio.get("/distribution", response_model=List[Optional[TickerDistribution]])
+@portfolio.get("/allocation", response_model=List[Optional[TickerDistribution]])
 async def distribution(
+    market_type: MarketType,
     user_id: str = Depends(verify_jwt_token_http),
     username: Optional[str] = None,
 ) -> List[Optional[TickerDistribution]]:
-    
+    """
+
+    Args:
+        user_id (str, optional): _description_. Defaults to Depends(verify_jwt_token_http).
+        username (Optional[str], optional): _description_. Defaults to None.
+
+    Raises:
+        HTTPException: Profile isn't visible
+
+    Returns:
+        List[Optional[TickerDistribution]]: _description_
+    """    
     if username:
-        try:
-            async with get_db_session() as session:
-                r = await session.execute(
-                    select(Users.user_id)
-                    .where(
-                        (Users.username == username) &
-                        (Users.visible == True)
-                    )
-                )
-                user_id = r.first()[0]
-        except TypeError:
+        user_id = await check_visible_user(username)
+        if not user_id:
             raise HTTPException(status_code=403)
     
     key_ = 'distribution'
@@ -564,106 +482,123 @@ async def distribution(
     if existing_data:
         existing_data = json.loads(existing_data)
         if key_ in existing_data:
-            return existing_data[key_]
+            return [
+                TickerDistribution(name=k, value=v) 
+                for k, v in existing_data[key_].items()
+            ]
     else:
         existing_data = {}
-    
-    all_orders = await get_active_orders(user_id)
-    ticker_map = {
-        ticker: 0
-        for ticker in 
-        set(order['ticker'] for order in all_orders)
-    }
-    
-    for order in all_orders:
-        price = order['price'] or order['filled_price']
-        ticker_map[order['ticker']] += price * order['quantity']
-    
-    total = sum(ticker_map.values())
-    ticker_map = {
-        k: (v / total)
-        for k, v in ticker_map.items()
-    }
-    
-    final_value = [
-        TickerDistribution(
-            name=key, 
-            value=value
-        ) 
-        for key, value in ticker_map.items()
-    ]
-    
-    existing_data.update({
-        key_: [
-            item.model_dump()
-            for item in final_value
+    existing_data[key_] = {}
+
+    try:
+        async with get_db_session() as session:
+            r = await session.execute(
+                select(DBOrder)
+                .where(
+                    (DBOrder.user_id == user_id)
+                    & (DBOrder.order_status != OrderStatus.CLOSED)
+                    & (DBOrder.order_status != OrderStatus.NOT_FILLED)
+                    # & (DBOrder.order_status != OrderStatus.EXPIRED)
+                    & (DBOrder.market_type == market_type)
+                )
+                .limit(1000)
+            )
+            
+            all_orders: List[DBOrder] = r.scalars().all()
+        
+        if not all_orders:
+            raise ValueError("No orders")
+
+        ticker_map = {
+            ticker: 0
+            for ticker in 
+            set(order.ticker for order in all_orders)
+        }
+        
+        for order in all_orders:
+            price = order.filled_price or order.limit_price or order.price
+            ticker_map[order.ticker] += price * order.quantity
+        
+        total = sum(ticker_map.values())
+        ticker_map = {
+            k: v / total
+            for k, v in ticker_map.items()
+        }
+        
+        existing_data[key_]  = ticker_map
+        REDIS_CLIENT.set(user_id, json.dumps(existing_data))    
+        
+    except Exception as e:
+        logger.error('{} - {}'.format(type(e), str(e)))
+    finally:
+        return [
+            TickerDistribution(name=k, value=v) 
+            for k, v in existing_data[key_].items()
         ]
-    })
-    REDIS_CLIENT.set(user_id, json.dumps(existing_data))    
-    
-    return final_value
 
     
 @portfolio.get('/weekday-results')
 async def weekday_results(
     user_id: str = Depends(verify_jwt_token_http),
-    username: Optional[Username] = None,
+    username: Optional[str] = None,
 ):
-    try:
-        constraints = {
-            'user_id': user_id, 
-            'order_status': OrderStatus.CLOSED
-        }
+    """
+    Returns data to weekday gains chart in frontend
 
-        if username:
-            try:
-                async with get_db_session() as session:
-                    r = await session.execute(
-                        select(Users.user_id)
-                        .where(
-                            (Users.username == username) &
-                            (Users.visible == True)
-                        )
-                    )
-                    constraints.update({'user_id': r.first()[0]})
-            except TypeError:
-                raise HTTPException(status_code=403)
+    Args:
+        user_id (str): Defaults to Depends(verify_jwt_token_http).
+        username (Optional[str],): _description_. Defaults to None.
+
+    Raises:
+        HTTPException: account with username=(username) isn't visible
+
+    Returns:
+        JSON (WinsLosses)
+    """    
+    if username is not None and username != 'null':
+        user_id = await check_visible_user(username)
+        if not user_id:
+            raise HTTPException(status_code=403)
         
-        key_ = 'weekday_results'
-        existing_data = REDIS_CLIENT.get(constraints['user_id'])
+    key_ = 'weekday_results'
+    existing_data = REDIS_CLIENT.get(user_id)
 
-        if existing_data:
-            existing_data = json.loads(existing_data)
-            if key_ in existing_data:
-                return JSONResponse(
-                    status_code=200, 
-                    content=existing_data[key_]
-                )
-        else:
-            existing_data = {}
+    if existing_data:
+        existing_data = json.loads(existing_data)
+        if key_ in existing_data:
+            return WinsLosses(**existing_data[key_])
+    else:
+        existing_data = {}
+    existing_data[key_] = {}
     
-        all_orders = await get_orders(**constraints)
+    try:
         num_range = range(7)
         wins = [0 for _ in num_range]    
         losses = [0 for _ in num_range]
+        
+        async with get_db_session() as session:
+            r = await session.execute(
+                select(DBOrder)
+                .where(
+                    (DBOrder.user_id == user_id)
+                    & (DBOrder.order_status == OrderStatus.CLOSED)
+                )
+            )
+            all_orders: List[DBOrder] = r.scalars().all()
     
         for order in all_orders:
-            realised_pnl = order['realised_pnl']
-            if realised_pnl < 0:
-                losses[order['created_at'].weekday()] += 1
-            elif realised_pnl > 0:
-                wins[order['created_at'].weekday()] += 1
+            if order.realised_pnl < 0:
+                losses[order.created_at.weekday()] += 1
+            elif order.realised_pnl > 0:
+                wins[order.created_at.weekday()] += 1
         
-        final_value = {'wins': wins, 'losses': losses}
-        existing_data.update({key_: final_value})
-        REDIS_CLIENT.set(constraints['user_id'], json.dumps(existing_data))
+        existing_data[key_] = {'wins': wins, 'losses': losses}        
+        REDIS_CLIENT.set(user_id, json.dumps(existing_data))
         
-        return JSONResponse(
-            status_code=200, 
-            content=final_value
-        )
     except Exception as e:
         logger.error('{} - {}'.format(type(e), str(e)))
+    finally:
+        return WinsLosses(**existing_data[key_])
 
 
 @portfolio.post("/copy")
