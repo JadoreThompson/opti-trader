@@ -620,8 +620,8 @@ async def copy_trades(
     Returns:
         None: body.username is invalid. This may be due to the user not existing or more than likely
         the target user has visible set to False
-    """    
-    try:
+    """   
+    try: 
         async with get_db_session() as session:
             r = await session.execute(
                 select(Users.user_id)
@@ -631,37 +631,23 @@ async def copy_trades(
                 )
             )
             
-            m_user = r.first()
-            if m_user is None:
+            master = r.first()
+
+            if not master:
                 raise HTTPException(status_code=403)
             
-            existing_entry = await session.execute(
-                select(UserWatchlist)
-                .where(
-                    (UserWatchlist.master == m_user[0])
-                    & (UserWatchlist.watcher == user_id)
-                )
-            )
+            payload = body.model_dump()
+            payload.update({
+                'master': master[0],
+                'watcher': user_id,
+            })
             
-            existing_entry = existing_entry.first()
-            if existing_entry is not None:
-                existing_entry = existing_entry[0]
-                existing_entry.limit_orders = body.limit_orders
-                existing_entry.market_orders = body.market_orders
-            else:
-                await session.execute(
-                    insert(UserWatchlist)
-                    .values(
-                        master=m_user[0], 
-                        watcher=UUID(f'{{{user_id}}}'),
-                        limit_orders=body.limit_orders,
-                        market_orders=body.market_orders 
-                    )
-                )
-                
-            await session.commit()
-    except InvalidAction:
+            record = UserWatchlist(**payload)
+            session.add(record)
+            
+            await session.commit()            
+    except HTTPException:
         raise
     except Exception as e:
-        logger.error(f'{type(e)} - {str(e)}')
+        logger.error('{} - {}'.format(type(e), str(e)))
         

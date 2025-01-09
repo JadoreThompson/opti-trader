@@ -211,9 +211,9 @@ class ClientManager:
             .where(UserWatchlist.master == user_id)
     
         if order_type == OrderType.MARKET:
-            query = query.where(UserWatchlist.market_orders == True)
+            query = query.where(UserWatchlist.market_order == True)
         elif order_type == OrderType.LIMIT:
-            query = query.where(UserWatchlist.limit_orders == True)
+            query = query.where(UserWatchlist.limit_order == True)
         
         try:
             async with get_db_session() as session:        
@@ -248,9 +248,9 @@ class ClientManager:
             .where(UserWatchlist.master == user_id)
                 
         if order_type == OrderType.LIMIT:
-            query = query.where(UserWatchlist.limit_orders == True)
+            query = query.where(UserWatchlist.limit_order == True)
         elif order_type == OrderType.MARKET:
-            query = query.where(UserWatchlist.market_orders == True)
+            query = query.where(UserWatchlist.market_order == True)
         
         async with get_db_session() as session:
             r = await session.execute(query)

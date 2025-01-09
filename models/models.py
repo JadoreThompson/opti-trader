@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import List, Optional
 from datetime import datetime
 
 # Local
@@ -12,7 +12,12 @@ from enums import (
 
 # Pydantic
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator, model_validator, root_validator
+from pydantic import (
+    BaseModel, 
+    Field, 
+    field_validator, 
+    model_validator
+)
 
 
 class Base(BaseModel):
@@ -180,11 +185,13 @@ class LeaderboardItem(Base):
 
 class CopyTradeRequest(Base):
     username: str
-    limit_orders: bool = False
-    market_orders: bool = False
+    spot: bool = False
+    futures: bool = False
+    limit_order: bool = False
+    market_order: bool = False
     
     def __init__(self, **kw):
-        if not kw.get('limit_orders', None) and not kw.get('market_orders', None):
+        if not kw.get('limit_order', None) and not kw.get('market_order', None):
             raise ValueError("Must specifiy either limit_orders or market_orders")
         super().__init__(**kw)
     

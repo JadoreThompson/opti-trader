@@ -34,8 +34,10 @@ class UserWatchlist(Base):
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True),primary_key=True, default=uuid4)
     master: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     watcher: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
-    limit_orders: Mapped[bool] = mapped_column(Boolean, default=False)
-    market_orders: Mapped[bool] = mapped_column(Boolean, default=False)
+    spot: Mapped[bool] = mapped_column(Boolean, default=False)
+    futures: Mapped[bool] = mapped_column(Boolean, default=False)
+    limit_order: Mapped[bool] = mapped_column(Boolean, default=False)
+    market_order: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -156,8 +158,6 @@ class DBOrder(Base):
         nullable=True,
         default=Side.LONG,
     )
-    
-
     
     # Constraints
     __tableargs__ = (

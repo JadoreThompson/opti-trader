@@ -40,13 +40,10 @@ async def get_db_session():
         try:
             yield session
         
-        except DoesNotExist:
-            raise
-        except Exception as e:
+        except Exception:
             await session.rollback()
-            raise e
-        finally:
             await session.close()
+            raise
             
 
 def constraints_to_tuple(constraints: dict) -> tuple:
