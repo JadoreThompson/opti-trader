@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import (
     datetime,
@@ -16,6 +17,7 @@ from db_models import (
     UserWatchlist,
     Users
 )
+from enums import MarketType
 from exceptions import (
     DuplicateError,
     DoesNotExist,
@@ -23,11 +25,14 @@ from exceptions import (
 )
 from models.models import (
     AuthResponse,
+    Email,
+    TokenBody,
     LoginUser,
     ModifyAccountBody,
     RegisterBodyWithToken,
     RegisterBody,
-    UserMetrics
+    UserMetrics,
+    UserProfileMetrics
 )
 from utils.auth import (
     check_user_exists,
@@ -65,7 +70,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 accounts = APIRouter(prefix="/accounts", tags=['accounts'])
 TOKENS = {}
-TOKENS_REQUEST_LIMIT = 2
+TOKENS_REQUEST_LIMIT = 10000
 TOKENS_RATE_LIMIT = timedelta(minutes=5)
 
 @accounts.post("/register")
@@ -82,15 +87,22 @@ async def register(body: RegisterBody):
         DuplicateError: If the user already exists.
         Exception: For unexpected errors.
     """
+    global TOKENS
     try:
         result = await check_user_exists(body)
+        
         if result:
             raise DuplicateError("An account already exists")
 
     except DoesNotExist:
         try:    
             token = generate_token()
-            TOKENS[body.email] = [token, datetime.now(), 1]
+            TOKENS[body.email] = {
+                'token': token,
+                'last_attempt': datetime.now(),
+                'count': 1,
+                'creds': body.model_dump()
+            }
             send_confirmation_email.delay(body.email, token)
         except IntegrityError as e:
             raise DuplicateError('User already exists')
@@ -137,26 +149,27 @@ async def login(body: LoginUser):
 
 
 @accounts.post("/authenticate")
-async def authenticate(body: RegisterBodyWithToken):
+async def authenticate(body: TokenBody):
+    global TOKENS
+    
     try:
         if body.email not in TOKENS:
-            raise InvalidAction("Register for account")
+            raise InvalidAction("Invalid Request")
 
         current = datetime.now()
-        og_token, creation_time, count = TOKENS[body.email]
         
-        if creation_time - current > TOKENS_RATE_LIMIT:
+        if TOKENS[body.email]['last_attempt'] - current > TOKENS_RATE_LIMIT:
             raise InvalidAction("Token has expired")
 
-        if og_token != body.token:
+        if TOKENS[body.email]['token'] != body.token:
             raise InvalidAction('Invalid token')
             
-        body.password = PH.hash(body.password)
+        TOKENS[body.email]['creds']['password'] = PH.hash(TOKENS[body.email]['creds']['password'])
 
         async with get_db_session() as session:
             result = await session.execute(
                 insert(Users).values(
-                    **{ k: v for k, v in vars(body).items() if k != 'token' },
+                    **TOKENS[body.email]['creds'],
                     authenticated=True
                 )
                 .returning(Users.user_id, Users.username)
@@ -177,6 +190,32 @@ async def authenticate(body: RegisterBodyWithToken):
         logger.error('{} - {}'.format(type(e), str(e)))
         raise HTTPException(status_code=500, detail='Internal server error')
         
+
+@accounts.post("/token")
+async def send_token(body: Email) -> None:
+    global TOKENS
+    
+    try:
+        current = datetime.now()
+        token = generate_token()
+        # count = 1
+        
+        if body.email in TOKENS:
+            if TOKENS[body.email]['count'] == TOKENS_REQUEST_LIMIT:
+                raise InvalidAction('Try again later')
+            
+            if current - TOKENS[body.email]['last_attempt'] < TOKENS_RATE_LIMIT:
+                TOKENS[body.email]['count'] += 1
+            
+            send_confirmation_email.delay(body.email, generate_token())
+        else:
+            raise InvalidAction('Must register first')
+    except InvalidAction:
+        raise
+    except Exception as e:
+        logger.error(f'{type(e)} - {str(e)}')
+        raise
+
 
 @accounts.post("/modify")
 async def modify(body: ModifyAccountBody, user_id: str=Depends(verify_jwt_token_http)):
@@ -279,42 +318,105 @@ async def metrics(
 @accounts.get("/search")
 async def search(
     prefix: str,
+    market_type: Optional[MarketType] = MarketType.SPOT,
     page: Optional[int] = 0,
     user_id: str = Depends(verify_jwt_token_http),
 ) -> list:
     PAGE_SIZE = 10
+    """
+    Used to fetch a collection of user metrics and performance data in a pagination format
+
+    Args:
+        user_id (str, optional): JWT. Defaults to Depends(verify_jwt_token_http).
+        page (Optional[int], optional):Defaults to 0. 
+    """
+    from .portfolio import performance
+    
+    final = []
+    
     try:
         async with get_db_session() as session:
-            resp = await session.execute(
+            r = await session.execute(
                 select(Users.username)
                 .where(Users.username.like(f"%{prefix}%"))
                 .offset(page * PAGE_SIZE)
                 .limit(PAGE_SIZE)
             )
-            return [item[0] for item in resp]
+            
+            usernames = [item[0] for item in r.all()]
+            
+        data = await asyncio.gather(*[
+            *[metrics(user_id, uname) for uname in usernames], 
+            *[performance(
+                market_type, 
+                user_id=user_id, 
+                username=uname
+                ) 
+            for uname in usernames
+            ]
+        ])
+        
+        metrics_data, performance_data = data[:len(data) // 2], data[len(data) // 2:]
+        
+        final = [
+            {**metrics_data[i].model_dump(), **performance_data[i].model_dump()}
+            for i in range(len(usernames))
+        ]
+        
+        for i in range(len(final)):
+            final[i]['username'] = usernames[i]
     except Exception as e:
         logger.error(f'{type(e)} - {str(e)}')
+    finally:
+        return [UserProfileMetrics(**item) for item in final]
 
 
-@accounts.post("/token")
-async def send_token(body: Dict[str, str]) -> None:
-    try:
-        current = datetime.now()
-        token = generate_token()
-        count = 1
+@accounts.get('/users')
+async def users(
+    market_type: MarketType,
+    user_id: str = Depends(verify_jwt_token_http), 
+    page: Optional[int] = 0,
+):
+    """
+    Used to fetch a collection of user metrics and performance data in a pagination format
+
+    Args:
+        user_id (str, optional): JWT. Defaults to Depends(verify_jwt_token_http).
+        page (Optional[int], optional):Defaults to 0.
+    """    
+    from .portfolio import performance
+    
+    PAGE_SIZE = 10
+    
+    async with get_db_session() as session:
+        r = await session.execute(
+            select(Users.username)
+            .where(Users.visible == True)
+            .limit(10)
+            .offset(page * PAGE_SIZE)
+        )
         
-        if body['email'] in TOKENS:
-            _, creation_time, count = TOKENS[body['email']]
-            
-            if count == TOKENS_REQUEST_LIMIT:
-                raise InvalidAction('Try again later')
-            
-            if current - creation_time < TOKENS_RATE_LIMIT:
-                count += 1
-        
-        TOKENS[body['email']] = [token, current, count]
-        send_confirmation_email.delay(body['email'], token)
-    except InvalidAction:
-        raise
-    except Exception as e:
-        logger.error(f'{type(e)} - {str(e)}')
+        usernames = [item[0] for item in r.all()]        
+
+    data = await asyncio.gather(*[
+        *[metrics(user_id, uname) for uname in usernames], 
+        *[performance(
+            market_type, 
+            user_id=user_id, 
+            username=uname
+            ) 
+          for uname in usernames
+        ]
+    ])
+    
+    metrics_data, performance_data = data[:len(data) // 2], data[len(data) // 2:]
+    
+    data = [
+        {**metrics_data[i].model_dump(), **performance_data[i].model_dump()}
+        for i in range(len(usernames))
+    ]
+    
+    for i in range(len(data)):
+        data[i]['username'] = usernames[i]
+    
+    return data

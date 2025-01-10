@@ -20,16 +20,24 @@ from pydantic import (
 )
 
 
-class Base(BaseModel):
+class CustomBase(BaseModel):
     class Config:
         use_enum_values = True
         
 
-class UserID(Base):
+class UserID(CustomBase):
     user_id: UUID
 
 
-class _User(Base):
+class Email(CustomBase):
+    email: str
+    
+
+class TokenBody(Email):
+    token: str
+
+
+class _User(CustomBase):
     """Represents a user with email and password attributes."""
     email: str
     password: str
@@ -43,7 +51,7 @@ class RegisterBody(_User):
     username: str
 
 
-class UserCount(Base):
+class UserCount(CustomBase):
     count: int
     entities: Optional[list[str]] = Field(
         None, 
@@ -51,12 +59,12 @@ class UserCount(Base):
     )
 
 
-class UserMetrics(Base):
+class UserMetrics(CustomBase):
     following: Optional[UserCount] = None
     followers: UserCount
 
 
-class Username(Base):
+class Username(CustomBase):
     username: Optional[str] = None
 
 
@@ -103,7 +111,7 @@ class QuantitativeMetrics(BaseModel):
         return value
     
 
-class PerformanceMetrics(Base):
+class PerformanceMetrics(CustomBase):
     daily: Optional[float | str] = None
     balance: Optional[float | str] = None
     total_profit: Optional[float | str] = None
@@ -117,17 +125,32 @@ class PerformanceMetrics(Base):
     @model_validator(mode='before')
     def validate_fields(cls, values):
         for field, value in values.items():
+            if not isinstance(value, (str, float, int)):
+                continue
+            
+            if isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError as e:
+                    print(type(e))
+                    continue
             values[field] = round(value, 2)
         return values
     
-class WinsLosses(Base):
+
+class UserProfileMetrics(PerformanceMetrics, UserMetrics):
+    username: str
+    pass
+
+    
+class WinsLosses(CustomBase):
     """
     JSON Schema for the Frontend bar chart showcasing each weekday's gaisn
     """    
     wins: Optional[List[int]] = []
     losses: Optional[List[int]] = []
 
-class SpotOrderRead(Base):
+class SpotOrderRead(CustomBase):
     """Client facing schema for an order"""    
     ticker: str
     market_type: Optional[MarketType] = None
@@ -163,17 +186,17 @@ class TickerData(BaseModel):
     close: Optional[float] = None
     
 
-class GrowthModel(Base):
+class GrowthModel(CustomBase):
     time: Optional[int] = None
     value: Optional[float] = None
     
 
-class TickerDistribution(Base):
+class AssetAllocation(CustomBase):
     value: Optional[float] = None
     name: Optional[str] = None
 
 
-class LeaderboardItem(Base):
+class LeaderboardItem(CustomBase):
     rank: int = Field(gt=0)
     username: str
     earnings: float | str = Field(gt=0)    
@@ -183,7 +206,7 @@ class LeaderboardItem(Base):
         return f"${round(earnings, 2)}"
 
 
-class CopyTradeRequest(Base):
+class CopyTradeRequest(CustomBase):
     username: str
     spot: bool = False
     futures: bool = False
@@ -196,7 +219,7 @@ class CopyTradeRequest(Base):
         super().__init__(**kw)
     
     
-class ModifyAccountBody(Base):
+class ModifyAccountBody(CustomBase):
     username: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None

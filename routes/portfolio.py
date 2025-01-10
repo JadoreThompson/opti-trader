@@ -45,7 +45,7 @@ from models.models import (
     QuantitativeMetricsBody,
     QuantitativeMetrics,
     SpotOrderRead,
-    TickerDistribution,
+    AssetAllocation,
     Username,
     WinsLosses,
 )
@@ -239,6 +239,7 @@ async def orders(
 @portfolio.get("/performance", response_model=PerformanceMetrics)
 async def performance(
     market_type: MarketType,
+    interval: Optional[GrowthInterval] = GrowthInterval.MONTH,
     user_id: str = Depends(verify_jwt_token_http),
     username: Optional[str] = None,
 ) -> PerformanceMetrics:
@@ -246,6 +247,7 @@ async def performance(
     Returns performance metrics for the account
 
     Args:
+        market_type (MarketType)
         user_id (str): JWT Token in header
         username (Optional[str])
     Returns:
@@ -261,24 +263,38 @@ async def performance(
     if existing_data:
         existing_data = json.loads(existing_data)
         if 'performance' in existing_data:
-            return existing_data['performance']
+            return PerformanceMetrics(**existing_data['performance'])
     else:
         existing_data = {}
 
     existing_data['performance'] = {}
     task = asyncio.create_task(calculate_quant_metrics(user_id))
     
+    
+    query = \
+        select(DBOrder)\
+        .where(
+            (DBOrder.user_id == user_id)
+            & (DBOrder.order_status == OrderStatus.CLOSED)
+            & (DBOrder.market_type == market_type)
+        ) \
+        .limit(1000)
+    
+    today = datetime.now()
+    options = {
+        GrowthInterval.DAY: DBOrder.created_at >= today,
+        GrowthInterval.WEEK: DBOrder.created_at >= today - timedelta(days=today.weekday()),
+        GrowthInterval.MONTH: DBOrder.created_at >= today.replace(day=1),
+        GrowthInterval.YEAR: DBOrder.created_at >= datetime(year=today.year, month=1, day=1),
+    }
+    
+    clause = options.get(interval, None)
+    if clause:
+        query = query.where(clause)
+    
     try:
         async with get_db_session() as session:
-            r = await session.execute(
-                select(DBOrder)
-                .where(
-                    (DBOrder.user_id == user_id)
-                    & (DBOrder.order_status == OrderStatus.CLOSED)
-                    & (DBOrder.market_type == market_type)
-                )
-                .limit(1000)
-            )
+            r = await session.execute(query)
             
             all_orders = [vars(order) for order in r.scalars().all()]
             
@@ -306,6 +322,7 @@ async def performance(
         existing_data['performance'].update(task.result())
         REDIS_CLIENT.set(user_id, json.dumps(existing_data))
     except Exception as e:
+        print(f'{type(e)} - {str(e)}')
         logger.error(f'{type(e)} - {str(e)}')
     finally:
         return PerformanceMetrics(**existing_data['performance'])
@@ -453,12 +470,12 @@ async def growth(
         ]
     
 
-@portfolio.get("/allocation", response_model=List[Optional[TickerDistribution]])
+@portfolio.get("/allocation", response_model=List[Optional[AssetAllocation]])
 async def distribution(
     market_type: MarketType,
     user_id: str = Depends(verify_jwt_token_http),
     username: Optional[str] = None,
-) -> List[Optional[TickerDistribution]]:
+) -> List[Optional[AssetAllocation]]:
     """
 
     Args:
@@ -476,19 +493,21 @@ async def distribution(
         if not user_id:
             raise HTTPException(status_code=403)
     
-    key_ = 'distribution'
+    key_ = 'allocation'
     existing_data = REDIS_CLIENT.get(user_id)
     
     if existing_data:
         existing_data = json.loads(existing_data)
-        if key_ in existing_data:
+        if existing_data.get(key_, {}).get(market_type, None):
             return [
-                TickerDistribution(name=k, value=v) 
-                for k, v in existing_data[key_].items()
+                AssetAllocation(name=k, value=v) 
+                for k, v in existing_data[key_][market_type].items()
             ]
     else:
         existing_data = {}
-    existing_data[key_] = {}
+        
+    existing_data.setdefault(key_, {})
+    existing_data[key_][market_type] = {}
 
     try:
         async with get_db_session() as session:
@@ -525,15 +544,15 @@ async def distribution(
             for k, v in ticker_map.items()
         }
         
-        existing_data[key_]  = ticker_map
+        existing_data[key_][market_type]  = ticker_map
         REDIS_CLIENT.set(user_id, json.dumps(existing_data))    
         
     except Exception as e:
         logger.error('{} - {}'.format(type(e), str(e)))
     finally:
         return [
-            TickerDistribution(name=k, value=v) 
-            for k, v in existing_data[key_].items()
+            AssetAllocation(name=k, value=v) 
+            for k, v in existing_data[key_][market_type].items()
         ]
 
     
