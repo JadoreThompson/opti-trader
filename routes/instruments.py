@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 # Local
 from enums import IntervalTypes
 from db_models import MarketData
-from models.models import TickerData
+from models.models import OHLC
 from utils.auth import verify_jwt_token_http
 from utils.db import get_db_session
 
@@ -21,7 +21,7 @@ from utils.db import get_db_session
 instruments = APIRouter(prefix="/instruments", tags=["instrument"])
 
 
-@instruments.get("", response_model=List[TickerData])
+@instruments.get("", response_model=List[OHLC])
 async def get_data(
     ticker: str,
     interval: IntervalTypes,
@@ -43,7 +43,7 @@ async def get_data(
     if not all_data:
         m = (int(now.timestamp()) - target_time) // interval.value
         nt = (m * 60) + target_time
-        return [TickerData(time=nt)]
+        return [OHLC(time=nt)]
     
     ticker_data_list: list[dict] = []
     
@@ -86,7 +86,7 @@ async def get_data(
     
     ticker_data_list.sort(key=lambda item: item['time'])
     
-    return [TickerData(**item) for item in ticker_data_list]
+    return [OHLC(**item) for item in ticker_data_list]
 
 
 @instruments.get('/csv')
@@ -96,7 +96,7 @@ async def to_csv(
     user_id: str = Depends(verify_jwt_token_http),
 ):
     try:
-        data: list[TickerData] = await get_data(ticker=ticker, interval=interval, user_id=user_id)
+        data: list[OHLC] = await get_data(ticker=ticker, interval=interval, user_id=user_id)
         
         filename = f'csvs/{user_id}_{ticker}_{interval.value}_{datetime.now().timestamp()}.csv'
         

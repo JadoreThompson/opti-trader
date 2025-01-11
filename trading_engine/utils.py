@@ -58,9 +58,10 @@ async def publish_update_to_client(channel: str, message: str | dict) -> None:
         """        
         try:
             if isinstance(message, dict):
+                print(json.dumps(message, indent=4))
                 message = json.dumps(message)
             
-            if isinstance(message, str):
+            if isinstance(message, str):                
                 await REDIS.publish(channel=channel, message=message)
         except Exception as e:
             logger.error(str(e))

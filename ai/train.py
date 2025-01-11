@@ -1,14 +1,13 @@
 import os
 import matplotlib.pyplot as plt
 import pandas as pd
-
 import numpy as np
 import tensorflow as tf
+
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import LSTM
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
 
 # Local
 from .utils import CURRENT_FOLDER, LOOK_BACK, build_dataset
@@ -39,7 +38,11 @@ testX, testY = build_dataset(test, LOOK_BACK)
 with tf.device('/GPU:0'):
     # Initialisation
     model = Sequential()
-    model.add(LSTM(LOOK_BACK, input_shape=(LOOK_BACK, 1), return_sequences=True))
+    model.add(LSTM(
+        LOOK_BACK, 
+        input_shape=(LOOK_BACK, 1), 
+        return_sequences=True)
+    )
     model.add(LSTM(int(LOOK_BACK * 1.2)))
     model.add(Dense(1))
     

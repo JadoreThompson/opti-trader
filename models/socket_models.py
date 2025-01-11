@@ -4,7 +4,7 @@ from pydantic import (
     Field,
     field_validator
 )
-from typing import Optional
+from typing import Dict, Optional
 from uuid import UUID
 
 from enums import (
@@ -16,17 +16,17 @@ from enums import (
 )
 
 
-class Base(BaseModel):
+class CustomBase(BaseModel):
     """Base class for all models with enum value usage enabled."""
     class Config:
         use_enum_values = True
 
-class _OrderType(Base):
+class _OrderType(CustomBase):
     """Represents the order_type key: value in JSON"""
     type: OrderType
 
 
-class _MarketType(Base):
+class _MarketType(CustomBase):
     """Represents the market_type key: value in JSON"""
     market_type: MarketType
 
@@ -60,7 +60,7 @@ class FuturesContractWrite(TempBaseOrder):
     side: Side
     
 
-class BasePubSubMessage(Base):
+class BasePubSubMessage(CustomBase):
     category: PubSubCategory
     message: Optional[str] = None
     details: Optional[dict] = None
@@ -76,4 +76,9 @@ class BasePubSubMessage(Base):
 
 class OrderUpdatePubSubMessage(BasePubSubMessage):
     on: UpdateScope
+
+    
+class DOM(CustomBase):
+    asks: Dict[int, int]
+    bids: Dict[int, int]
     

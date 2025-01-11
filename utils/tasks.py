@@ -1,23 +1,14 @@
-import asyncio
 import logging
-import random
 import string
 import secrets
-import time
 
-from asgiref.sync import sync_to_async
 from celery import Celery
-from sqlalchemy import select
-from uuid import UUID
-
 from config import MAILER
-from db_models import Users, UserWatchlist
-from enums import OrderType
-from utils.db import get_db_session
 
 
 app = Celery(broker='redis://localhost:6379/0')
 app.conf.result_backend = None
+
 logger = logging.getLogger(__name__)
 TOKENS = {}
 

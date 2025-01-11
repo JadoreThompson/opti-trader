@@ -175,7 +175,7 @@ class FuturesContractRead(SpotOrderRead):
     side: Side | str
 
 
-class TickerData(BaseModel):
+class OHLC(BaseModel):
     """
     Ticker data object
     """

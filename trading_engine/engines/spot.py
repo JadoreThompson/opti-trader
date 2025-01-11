@@ -184,6 +184,7 @@ class SpotEngine:
                         'message': BasePubSubMessage(
                             category=PubSubCategory.SUCCESS,
                             message="Order successfully placed",
+                            on=UpdateScope.NEW,
                             details=SpotOrderRead(**data).model_dump()
                         ).model_dump()
                     }

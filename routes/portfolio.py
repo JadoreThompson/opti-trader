@@ -282,15 +282,16 @@ async def performance(
     
     today = datetime.now()
     options = {
-        GrowthInterval.DAY: DBOrder.created_at >= today,
-        GrowthInterval.WEEK: DBOrder.created_at >= today - timedelta(days=today.weekday()),
-        GrowthInterval.MONTH: DBOrder.created_at >= today.replace(day=1),
-        GrowthInterval.YEAR: DBOrder.created_at >= datetime(year=today.year, month=1, day=1),
+        GrowthInterval.DAY: (DBOrder.created_at >= today, ),
+        GrowthInterval.WEEK: (DBOrder.created_at >= today - timedelta(days=today.weekday()), ),
+        GrowthInterval.MONTH: (DBOrder.created_at >= today.replace(day=1), ),
+        GrowthInterval.YEAR: (DBOrder.created_at >= datetime(year=today.year, month=1, day=1), ),
     }
     
     clause = options.get(interval, None)
+    print(clause)
     if clause:
-        query = query.where(clause)
+        query = query.where(clause[0])
     
     try:
         async with get_db_session() as session:
@@ -559,6 +560,7 @@ async def distribution(
 @portfolio.get('/weekday-results')
 async def weekday_results(
     user_id: str = Depends(verify_jwt_token_http),
+    market_type: Optional[MarketType] = MarketType.SPOT,
     username: Optional[str] = None,
 ):
     """
@@ -584,11 +586,13 @@ async def weekday_results(
 
     if existing_data:
         existing_data = json.loads(existing_data)
-        if key_ in existing_data:
-            return WinsLosses(**existing_data[key_])
+        if existing_data.get(key_, {}).get(market_type, None):
+            return WinsLosses(**existing_data[key_][market_type])
     else:
         existing_data = {}
-    existing_data[key_] = {}
+        
+    existing_data.setdefault(key_, {})
+    existing_data[key_][market_type] = {}
     
     try:
         num_range = range(7)
@@ -601,6 +605,7 @@ async def weekday_results(
                 .where(
                     (DBOrder.user_id == user_id)
                     & (DBOrder.order_status == OrderStatus.CLOSED)
+                    & (DBOrder.market_type == market_type)
                 )
             )
             all_orders: List[DBOrder] = r.scalars().all()
@@ -611,13 +616,13 @@ async def weekday_results(
             elif order.realised_pnl > 0:
                 wins[order.created_at.weekday()] += 1
         
-        existing_data[key_] = {'wins': wins, 'losses': losses}        
+        existing_data[key_][market_type] = {'wins': wins, 'losses': losses}        
         REDIS_CLIENT.set(user_id, json.dumps(existing_data))
         
     except Exception as e:
         logger.error('{} - {}'.format(type(e), str(e)))
     finally:
-        return WinsLosses(**existing_data[key_])
+        return WinsLosses(**existing_data[key_][market_type])
 
 
 @portfolio.post("/copy")

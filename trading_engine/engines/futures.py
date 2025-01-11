@@ -103,14 +103,6 @@ class FuturesEngine:
 
     async def _handle_match(self, **kwargs) -> None:
         data = kwargs['data']
-        
-        return_value = {
-            'message': BasePubSubMessage(
-                category=PubSubCategory.SUCCESS,
-                message="Order successfully placed",
-                details=FuturesContractRead(**data).model_dump()
-            ).model_dump()
-        }
         orderbook: OrderBook = self._order_books[data['ticker']]
         position = FuturesPosition(
             data, 
@@ -126,29 +118,29 @@ class FuturesEngine:
 
         if data['limit_price']:
             self._handle_limit(position, orderbook)
-            return return_value
-        
-        result = self._match(
-            contract=position.contract,
-            orderbook=orderbook,
-        )
-        
-        try:
-            if result[0] == 2:
-                await orderbook.set_price(result[1])
-                position.contract.data['filled_price'] = result[1]
-                self._place_tp_sl(position.contract, position, orderbook)
-            else:
-                position.contract.append_to_orderbook(orderbook, )
+        else:    
+            result = self._match(
+                contract=position.contract,
+                orderbook=orderbook,
+            )
+            
+            print(result)
+            
+            try:
+                if result[0] == 2:
+                    print(position.contract.order_status)
+                    await orderbook.set_price(result[1])
+                    position.contract.data['filled_price'] = result[1]
+                    self._place_tp_sl(position.contract, position, orderbook)
+                else:
+                    position.contract.append_to_orderbook(orderbook, )
 
-        except Exception as e:
-            logger.error('Error during handling of match result {} {} - {}'.format(result[0], type(e), str(e)))    
+            except Exception as e:
+                logger.error('Error during handling of match result {} {} - {}'.format(result[0], type(e), str(e)))    
         
         await batch_update([position.contract.data])
-        
-        return_value = {2: return_value}
 
-        return_value.update({
+        return {
             0: {
                 'message': BasePubSubMessage(
                     category=PubSubCategory.ERROR,
@@ -161,11 +153,19 @@ class FuturesEngine:
                     category=PubSubCategory.ORDER_UPDATE,
                     message="Insufficient asks to fulfill bid order",
                     on=UpdateScope.NEW,
-                    details=FuturesContractRead(**data).model_dump()
+                    details=FuturesContractRead(**position.contract.data).model_dump()
                 ).model_dump()
             },
-        })
-        return return_value[result[0]]
+            
+            2: {
+                'message': OrderUpdatePubSubMessage(
+                    category=PubSubCategory.SUCCESS,
+                    message="Order successfully placed",
+                    on=UpdateScope.NEW,
+                    details=FuturesContractRead(**position.contract.data).model_dump()
+                ).model_dump()
+            },
+        }[result[0]]
         
     def _handle_limit(self, position: FuturesPosition, orderbook: OrderBook) -> None:
         position.contract.append_to_orderbook(orderbook,)
