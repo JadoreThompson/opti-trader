@@ -1,9 +1,11 @@
+import os
 import time
 import uvicorn
 import asyncio
 import logging
 from multiprocessing import Process, Queue
 
+from urllib.parse import quote
 from config import DB_URL
 from trading_engine.engines.futures import FuturesEngine
 from trading_engine.engines.spot import SpotEngine
@@ -14,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def db_listener():
-    asyncio.run(DBListener(DB_URL).start())    
+    asyncio.run(DBListener(DB_URL.format(quote(os.getenv('DB_PASSWORD')))).start())    
 
 
 def futures_engine(order_queue: Queue, price_queue):

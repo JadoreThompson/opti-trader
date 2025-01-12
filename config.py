@@ -3,6 +3,7 @@ import logging
 import uuid
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from urllib.parse import quote
 from argon2 import PasswordHasher
@@ -12,9 +13,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from mailers.gmailer import GMailer
 from utils.connection import AsyncRedisConnection, SyncRedisConnection
 
-
 load_dotenv(override=False)
-CACHE: dict[str, dict[str, any]] = {}
+ROOT = Path().absolute()
 
 # Security
 API_KEY_ALIAS = 'api-key'
@@ -34,10 +34,23 @@ ASYNC_REDIS_CONN_POOL = redis.asyncio.connection.ConnectionPool(
 
 # DB
 DB_URL = \
-    f"postgresql+asyncpg://{os.getenv("DB_USER")}:{quote(os.getenv('DB_PASSWORD'))}\
+    f"postgresql+asyncpg://{os.getenv("DB_USER")}:{{}}\
 @{os.getenv("DB_HOST")}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
-DB_ENGINE = create_async_engine(DB_URL, future=True, pool_size=10, max_overflow=10, echo_pool=True)
+DB_ENGINE = create_async_engine(
+    DB_URL.format(os.getenv('DB_PASSWORD')),
+    future=True, 
+    pool_size=10, 
+    max_overflow=10, 
+    echo_pool=True
+)
 TICKERS = ['BTC/USDT', 'SOL/USDT', 'ETH/USDT']
+
+from alembic.config import Config
+alconfig = Config(ROOT.joinpath('\\alembic.ini'))
+alconfig.set_main_option(
+    'sqlalchemy.url', 
+    DB_URL.format(os.getenv('DB_PASSWORD')).replace('+asyncpg', '')
+)
 
 # Logging
 LOG_FOLDER = os.getcwd() + '/log'

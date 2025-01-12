@@ -162,8 +162,10 @@ class ClientManager:
             #         category=PubSubCategory.DOM_UPDATE
             #     )
             #     await asyncio.sleep(1)
+            
             async with REDIS_CLIENT.pubsub() as ps:
                 await ps.subscribe('dom')
+                
                 while True:
                     try:
                         msg = await ps.get_message(ignore_subscribe_messages=True)
@@ -177,6 +179,8 @@ class ClientManager:
                             )
                     except Exception as e:
                         logger.error('Inner {} - {}'.format(type(e), str(e)))
+                    
+                    await asyncio.sleep(1)
         except Exception as e:
             logger.error('Outer {} - {}'.format(type(e), str(e)))
                 

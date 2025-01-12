@@ -53,7 +53,8 @@ class DBListener:
                 await asyncio.sleep(0.001)
 
     async def start(self):
-        db_url = self.dsn.replace('+asyncpg', '')
+        db_url = self._dsn.replace('+asyncpg', '')
+        print(db_url)
         
         try:
             self._conn = await asyncpg.connect(dsn=db_url)
