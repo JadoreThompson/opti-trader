@@ -42,15 +42,10 @@ class PubSubCategory(str, Enum):
     All types of consumer message topics sent by the matching
     engine.
     """
+    CONNECTION = 'connection'
+    
     # Order was successfully placed, either a Limit or Market order
     SUCCESS = 'success'
-    
-    # Used to update the user on the status of an order, 
-    # such as a partially filled order.
-    # To be used without passing of the order details
-    # if you want to pass the order object, you can use
-    # ORDER_UPDATE
-    UPDATE = 'update'
     
     # Used when a property of an order changes
     ORDER_UPDATE = 'order_update'
@@ -69,6 +64,11 @@ class PubSubCategory(str, Enum):
     # users of events like someone they are copy trading performing an order. 
     # Kept generic for potential future use cases.
     NOTIFICATION = 'notification'
+
+
+class WebSocketConnectionStatus(str, Enum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
 
 
 class UpdateScope(str, Enum):

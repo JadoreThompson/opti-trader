@@ -289,7 +289,7 @@ async def performance(
     }
     
     clause = options.get(interval, None)
-    print(clause)
+
     if clause:
         query = query.where(clause[0])
     
@@ -323,42 +323,10 @@ async def performance(
         existing_data['performance'].update(task.result())
         REDIS_CLIENT.set(user_id, json.dumps(existing_data))
     except Exception as e:
-        print(f'{type(e)} - {str(e)}')
+        
         logger.error(f'{type(e)} - {str(e)}')
     finally:
         return PerformanceMetrics(**existing_data['performance'])
-
-
-# @portfolio.get("/quantitative",)
-# async def quantitative_metrics(
-#     username: Optional[str] = None,
-#     user_id: str = Depends(verify_jwt_token_http),
-# ):
-#     """
-#     Args:
-#         user_id (str, optional): Depends(verify_jwt_token) Header JWT Verification.
-#         risk_free (Optional[float], optional): The risk free rate or benchmark rate to be comapred to.
-
-#     Returns:
-#         QuantitativeMetrics()
-#     """ 
-#     key_ = 'quantitative'
-    
-#     if username is not None:
-#         user_id = await check_visible_user(username)
-#         if not user_id:
-#             raise HTTPException(status_code=403)
-    
-#     existing_data = REDIS_CLIENT.get(user_id)
-    
-#     if existing_data:
-#         existing_data = json.loads(existing_data)
-#         if key_ in existing_data:
-#             return QuantitativeMetrics(**existing_data[key_])
-#     else:
-#         existing_data = {}
-    
-#     return QuantitativeMetrics(**await calculate_quant_metrics(user_id))
 
 
 @portfolio.get("/growth", response_model=List[GrowthModel])

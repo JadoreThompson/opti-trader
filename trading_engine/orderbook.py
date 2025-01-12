@@ -50,8 +50,6 @@ class OrderBook:
 
     async def set_price(self, price: float) -> None:
         async with self._lock:
-            # print(len(self._bids[price]), 'bids')
-            # print(len(self.asks[price]), 'asks')
             if price == self._price:
                 return
             
@@ -158,7 +156,7 @@ class OrderBook:
         )
         
         try:
-            prices = [i for i in self._bid_levels if i < price][-20:]
+            prices = [i for i in self._bid_levels if i < price][-1 * dom_size:]
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)))
             prices = []

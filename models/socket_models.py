@@ -12,7 +12,8 @@ from enums import (
     Side, 
     UpdateScope, 
     OrderType, 
-    PubSubCategory
+    PubSubCategory,
+    WebSocketConnectionStatus
 )
 
 
@@ -73,6 +74,11 @@ class BasePubSubMessage(CustomBase):
                 for k, v in details.items()
             }
         return details
+
+
+class PubSubStatusMessage(BasePubSubMessage):
+    status: WebSocketConnectionStatus
+
 
 class OrderUpdatePubSubMessage(BasePubSubMessage):
     on: UpdateScope

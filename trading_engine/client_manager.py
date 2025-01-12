@@ -39,12 +39,14 @@ from enums import (
     MarketType,
     PubSubCategory, 
     OrderType, 
-    OrderStatus
+    OrderStatus,
+    WebSocketConnectionStatus
 )
 from models.socket_models import (
     DOM,
     BasePubSubMessage,
     FuturesCloseOrder,
+    PubSubStatusMessage,
     SpotCloseOrder,
     FuturesContractWrite,
     ModifyOrder, 
@@ -135,7 +137,8 @@ class ClientManager:
                     pass
                 except Exception as e:
                     logger.error(f'Inner exc >> {type(e)} - {str(e)}')
-                await asyncio.sleep(1)        
+                
+                await asyncio.sleep(5)        
                     
         except Exception as e:
             logger.error(f'Outer exc >> {type(e)} - {str(e)}')
@@ -144,36 +147,36 @@ class ClientManager:
             
     async def _listen_to_dom(self) -> None:
         try:
-            # async with REDIS_CLIENT.pubsub() as ps:
-            #     await ps.subscribe('dom')
-            #     while True:
-            #         try:
-            #             msg = await ps.get_message(ignore_subscribe_messages=True)
-            #             if msg:
-            #                 msg = json.loads(msg['data'])
-            #                 asyncio.get_running_loop().create_task(
-            #                     self._send_update_all(
-            #                         msg['details'], 
-            #                         PubSubCategory.DOM_UPDATE
-            #                     )
-            #                 )
-            #         except Exception as e:
-            #             logger.error('Inner {} - {}'.format(type(e), str(e)))
-            while True:
-                await self._send_update_all(
-                    DOM(
-                        asks={
-                            random.randint(100, 500): random.randint(10, 50)
-                            for _ in range(5)
-                        },
-                        bids={
-                            random.randint(100, 500): random.randint(10, 50)
-                            for _ in range(5)
-                        }
-                    ).model_dump(),
-                    category=PubSubCategory.DOM_UPDATE
-                )
-                await asyncio.sleep(1)
+            # while True:
+            #     await self._send_update_all(
+            #         DOM(
+            #             asks={
+            #                 random.randint(100, 500): random.randint(10, 50)
+            #                 for _ in range(5)
+            #             },
+            #             bids={
+            #                 random.randint(100, 500): random.randint(10, 50)
+            #                 for _ in range(5)
+            #             }
+            #         ).model_dump(),
+            #         category=PubSubCategory.DOM_UPDATE
+            #     )
+            #     await asyncio.sleep(1)
+            async with REDIS_CLIENT.pubsub() as ps:
+                await ps.subscribe('dom')
+                while True:
+                    try:
+                        msg = await ps.get_message(ignore_subscribe_messages=True)
+                        if msg:
+                            msg = json.loads(msg['data'])
+                            asyncio.get_running_loop().create_task(
+                                self._send_update_all(
+                                    msg['details'], 
+                                    PubSubCategory.DOM_UPDATE
+                                )
+                            )
+                    except Exception as e:
+                        logger.error('Inner {} - {}'.format(type(e), str(e)))
         except Exception as e:
             logger.error('Outer {} - {}'.format(type(e), str(e)))
                 
@@ -336,8 +339,9 @@ class ClientManager:
             }
 
             await socket.send_text(json.dumps(
-                BasePubSubMessage(
-                    category=PubSubCategory.SUCCESS,
+                PubSubStatusMessage(
+                    category=PubSubCategory.CONNECTION,
+                    status=WebSocketConnectionStatus.SUCCESS,
                     message="Successfully connected"
                 ).model_dump()
             ))

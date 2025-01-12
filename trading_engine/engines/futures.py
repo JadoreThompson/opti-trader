@@ -124,11 +124,8 @@ class FuturesEngine:
                 orderbook=orderbook,
             )
             
-            print(result)
-            
             try:
                 if result[0] == 2:
-                    print(position.contract.order_status)
                     await orderbook.set_price(result[1])
                     position.contract.data['filled_price'] = result[1]
                     self._place_tp_sl(position.contract, position, orderbook)
