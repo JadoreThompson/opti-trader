@@ -1,7 +1,9 @@
+import asyncio
+import logging
+
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from uuid import UUID
-import asyncio
 
 # SA
 from sqlalchemy import select
@@ -12,9 +14,9 @@ from sqlalchemy.orm import sessionmaker
 from config import DB_ENGINE
 from enums import OrderStatus
 from exceptions import DoesNotExist, InvalidAction
-from db_models import Orders, Users
+from db_models import DBOrder, Users
 
-
+logger = logging.getLogger(__name__)
 
 async_session_maker = sessionmaker(
     DB_ENGINE,
@@ -38,13 +40,10 @@ async def get_db_session():
         try:
             yield session
         
-        except DoesNotExist:
-            raise
-        except Exception as e:
+        except Exception:
             await session.rollback()
-            raise e
-        finally:
             await session.close()
+            raise
             
 
 def constraints_to_tuple(constraints: dict) -> tuple:
@@ -64,7 +63,7 @@ def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwarg
     except KeyError:
         pass
     except Exception as e:
-        print('cache ', type(e), str(e))
+        logger.error(f'{type(e)} - {str(e)}')
     
     
 def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
@@ -102,11 +101,11 @@ async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
         if key in existing_data:
             return existing_data[key]
     
-    query = select(Orders).where(Orders.user_id == user_id)
+    query = select(DBOrder).where(DBOrder.user_id == user_id)
     constraints = kwargs
         
     if constraints.get('order_status', None) != None:
-        query = query.where(Orders.order_status == constraints['order_status'])
+        query = query.where(DBOrder.order_status == constraints['order_status'])
         
     async with get_db_session() as session:
         results = await session.execute(query.limit(1000))
@@ -129,9 +128,9 @@ async def get_active_orders(user_id: str) -> list[dict]:
     
     async with get_db_session() as session:
         results = await session.execute(
-            select(Orders).where(
-                (Orders.user_id == user_id)
-                & (Orders.order_status != OrderStatus.CLOSED)
+            select(DBOrder).where(
+                (DBOrder.user_id == user_id)
+                & (DBOrder.order_status != OrderStatus.CLOSED)
             )
         )
         
@@ -182,5 +181,8 @@ async def check_visible_user(username: str) -> str:
                 (Users.visible == True)
             )
         )
-        return res.first()[0]
+        try:
+            return str(res.first()[0])
+        except TypeError:
+            return ''
         

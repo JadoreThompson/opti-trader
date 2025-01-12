@@ -1,24 +1,43 @@
-from typing import Any, Optional
+from typing import List, Optional
 from datetime import datetime
 
 # Local
-from enums import GrowthInterval, OrderStatus, OrderType
+from enums import (
+    GrowthInterval, 
+    OrderStatus, 
+    OrderType,
+    MarketType,
+    Side,
+)
 
 # Pydantic
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel, 
+    Field, 
+    field_validator, 
+    model_validator
+)
 
 
-class Base(BaseModel):
+class CustomBase(BaseModel):
     class Config:
         use_enum_values = True
         
 
-class UserID(Base):
+class UserID(CustomBase):
     user_id: UUID
 
 
-class _User(Base):
+class Email(CustomBase):
+    email: str
+    
+
+class TokenBody(Email):
+    token: str
+
+
+class _User(CustomBase):
     """Represents a user with email and password attributes."""
     email: str
     password: str
@@ -32,7 +51,7 @@ class RegisterBody(_User):
     username: str
 
 
-class UserCount(Base):
+class UserCount(CustomBase):
     count: int
     entities: Optional[list[str]] = Field(
         None, 
@@ -40,12 +59,12 @@ class UserCount(Base):
     )
 
 
-class UserMetrics(Base):
+class UserMetrics(CustomBase):
     following: Optional[UserCount] = None
     followers: UserCount
 
 
-class Username(Base):
+class Username(CustomBase):
     username: Optional[str] = None
 
 
@@ -78,13 +97,12 @@ class QuantitativeMetrics(BaseModel):
     beta: Optional[float] = None
     sharpe: Optional[float] = None
     treynor: Optional[float] = None
-    ahpr: Optional[float] = None
-    ghpr: Optional[float] = None
     risk_of_ruin: Optional[float] = None
+    winrate: Optional[float | str] = None
     
     @field_validator(
         "std", "beta", "sharpe", "treynor",
-        "ahpr", "ghpr", "risk_of_ruin",
+        "risk_of_ruin", "winrate",
         mode="before"
     )
     def validator(cls, value):
@@ -93,58 +111,71 @@ class QuantitativeMetrics(BaseModel):
         return value
     
 
-class PerformanceMetrics(QuantitativeMetrics):
+class PerformanceMetrics(CustomBase):
     daily: Optional[float | str] = None
     balance: Optional[float | str] = None
     total_profit: Optional[float | str] = None
+    std: Optional[float] = None
+    beta: Optional[float] = None
+    sharpe: Optional[float] = None
+    treynor: Optional[float] = None
+    risk_of_ruin: Optional[float] = None
     winrate: Optional[float | str] = None
     
-    
-    @field_validator("daily", "balance", "total_profit", "winrate", mode="before")
-    def convert_to_float(cls, value, name):
-        field = name.field_name
-        
-        if field in ['daily', 'balance', 'total_profit']:
-            chunks = []
-            value_list = list(str(value).split('.')[0])
-            i = len(value_list)
+    @model_validator(mode='before')
+    def validate_fields(cls, values):
+        for field, value in values.items():
+            if not isinstance(value, (str, float, int)):
+                continue
             
-            while i >= 1:
-                splitter = i - 3
-                if splitter >= 0:
-                    chunks.append(value_list[splitter: i])
-                else:
-                    chunks.append(value_list[0: i])
-                i -= 3
-            
-            value = '$' + ",".join(["".join(chunk) for chunk in chunks[::-1]])
-            
-        elif field == 'winrate':
-            value = f"{value}%"
-        
-        return value
+            if isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError as e:
+                    print(type(e))
+                    continue
+            values[field] = round(value, 2)
+        return values
     
 
-class APIOrder(Base):
+class UserProfileMetrics(PerformanceMetrics, UserMetrics):
+    username: str
+    pass
+
+    
+class WinsLosses(CustomBase):
+    """
+    JSON Schema for the Frontend bar chart showcasing each weekday's gaisn
+    """    
+    wins: Optional[List[int]] = []
+    losses: Optional[List[int]] = []
+
+class SpotOrderRead(CustomBase):
     """Client facing schema for an order"""    
     ticker: str
+    market_type: Optional[MarketType] = None
     order_type: OrderType
     limit_price: Optional[float] = None
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
-    quantity: float
+    quantity: int
+    standing_quantity: int
     order_status: OrderStatus
     price: Optional[float] = None
     created_at: datetime
     filled_price: Optional[float] = None
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
-    realised_pnl: Optional[float] = None
-    unrealised_pnl: Optional[float] = None
+    realised_pnl: Optional[float] = 0
+    unrealised_pnl: Optional[float] = 0
     order_id: UUID
+    
+
+class FuturesContractRead(SpotOrderRead):
+    side: Side | str
 
 
-class TickerData(BaseModel):
+class OHLC(BaseModel):
     """
     Ticker data object
     """
@@ -155,17 +186,17 @@ class TickerData(BaseModel):
     close: Optional[float] = None
     
 
-class GrowthModel(Base):
-    time: int
-    value: float
+class GrowthModel(CustomBase):
+    time: Optional[int] = None
+    value: Optional[float] = None
     
 
-class TickerDistribution(Base):
+class AssetAllocation(CustomBase):
     value: Optional[float] = None
     name: Optional[str] = None
 
 
-class LeaderboardItem(Base):
+class LeaderboardItem(CustomBase):
     rank: int = Field(gt=0)
     username: str
     earnings: float | str = Field(gt=0)    
@@ -175,18 +206,20 @@ class LeaderboardItem(Base):
         return f"${round(earnings, 2)}"
 
 
-class CopyTradeRequest(Base):
+class CopyTradeRequest(CustomBase):
     username: str
-    limit_orders: bool = False
-    market_orders: bool = False
+    spot: bool = False
+    futures: bool = False
+    limit_order: bool = False
+    market_order: bool = False
     
     def __init__(self, **kw):
-        if not kw.get('limit_orders', None) and not kw.get('market_orders', None):
+        if not kw.get('limit_order', None) and not kw.get('market_order', None):
             raise ValueError("Must specifiy either limit_orders or market_orders")
         super().__init__(**kw)
     
     
-class ModifyAccountBody(Base):
+class ModifyAccountBody(CustomBase):
     username: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None

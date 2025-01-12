@@ -26,12 +26,15 @@ class OrderStatus(str, Enum):
     CLOSED = 'closed'
 
     # The order has some quantity remaining, but it is now inactive 
-    # and cannot be called within a CLOSE request again.
+    # The client cannot perform any action on it.
     PARTIALLY_CLOSED_INACTIVE = 'partially_closed_inactive'
 
     # The order has remaining quantity to be consumed but can still be 
     # called for a CLOSE request.
     PARTIALLY_CLOSED_ACTIVE = 'partially_closed_active'
+
+    # The contract has reached it's expiry date
+    EXPIRED = 'expired'
 
 
 class PubSubCategory(str, Enum):
@@ -39,15 +42,10 @@ class PubSubCategory(str, Enum):
     All types of consumer message topics sent by the matching
     engine.
     """
+    CONNECTION = 'connection'
+    
     # Order was successfully placed, either a Limit or Market order
     SUCCESS = 'success'
-    
-    # Used to update the user on the status of an order, 
-    # such as a partially filled order.
-    # To be used without passing of the order details
-    # if you want to pass the order object, you can use
-    # ORDER_UPDATE
-    UPDATE = 'update'
     
     # Used when a property of an order changes
     ORDER_UPDATE = 'order_update'
@@ -66,6 +64,11 @@ class PubSubCategory(str, Enum):
     # users of events like someone they are copy trading performing an order. 
     # Kept generic for potential future use cases.
     NOTIFICATION = 'notification'
+
+
+class WebSocketConnectionStatus(str, Enum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
 
 
 class UpdateScope(str, Enum):
@@ -97,3 +100,20 @@ class GrowthInterval(str, Enum):
     MONTH = '1m'
     YEAR = '1y'
     ALL = 'all'
+
+
+class Side(str, Enum):
+    LONG = 'long'
+    SHORT = 'short'
+    
+    def invert(self):
+        return Side.SHORT if self == Side.LONG else Side.LONG
+
+class MarketType(str, Enum):
+    """Different types of markets the user can enter positions in """
+    FUTURES = 'futures'
+    SPOT = 'spot'
+    
+class PnlCategory(str, Enum):
+    REALISED = 'realised'
+    UNREALISED = 'unrealised'

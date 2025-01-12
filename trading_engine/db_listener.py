@@ -40,20 +40,17 @@ class DBListener:
         while True:
             try:
                 user_id = self._queue.get_nowait()            
-                if user_id:
-                    data = self._redis.get(user_id)
-                    if data:
-                        data = {}
-                        self._redis.set(user_id, json.dumps(data))
-                    
-                    self._queue.task_done()
+                data = self._redis.get(user_id)
+                if data:
+                    self._redis.set(user_id, json.dumps({}))
+                self._queue.task_done()
             except asyncio.queues.QueueEmpty:
                 pass
             except Exception as e:
                 logger.error(f'{type(e)} - {str(e)}')
                 pass
             finally:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)
 
     async def start(self):
         db_url = self.dsn.replace('+asyncpg', '')

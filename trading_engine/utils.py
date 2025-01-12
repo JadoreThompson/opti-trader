@@ -1,16 +1,20 @@
 import asyncio
+import datetime
 import json
 import logging
 import redis
 from sqlalchemy import update
 
 from config import ASYNC_REDIS_CONN_POOL, REDIS_HOST
-from db_models import Orders
+from db_models import DBOrder
 from utils.auth import get_db_session
 
 
 logger = logging.getLogger(__name__)
-REDIS = redis.asyncio.client.Redis(connection_pool=ASYNC_REDIS_CONN_POOL, host=REDIS_HOST)
+REDIS = redis.asyncio.client.Redis(
+    connection_pool=ASYNC_REDIS_CONN_POOL, 
+    host=REDIS_HOST
+)
 
 async def batch_update(orders: list[dict]) -> None:
     """
@@ -24,13 +28,24 @@ async def batch_update(orders: list[dict]) -> None:
     async with get_db_session() as session:
         for order in orders:
             try:
-                order.pop('type', None)
-                await session.execute(update(Orders),[order])
+                if isinstance(order['created_at'], str):
+                    order['created_at'] = datetime.datetime.strptime(order['created_at'], "%Y-%m-%d %H:%M:%S.%f")
+                    
+                await session.execute(
+                    update(DBOrder),
+                    [
+                        {
+                            k: v 
+                            for k, v in order.items() 
+                            if k != 'type'
+                        }
+                    ]
+                )
                 await session.commit()
             except Exception as e:
                 await session.rollback()
-            finally:
-                await asyncio.sleep(0.1)
+
+            await asyncio.sleep(0.001)
                 
                 
 async def publish_update_to_client(channel: str, message: str | dict) -> None:
@@ -45,7 +60,7 @@ async def publish_update_to_client(channel: str, message: str | dict) -> None:
             if isinstance(message, dict):
                 message = json.dumps(message)
             
-            if isinstance(message, str):
+            if isinstance(message, str):                
                 await REDIS.publish(channel=channel, message=message)
         except Exception as e:
             logger.error(str(e))

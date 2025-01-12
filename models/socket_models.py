@@ -1,133 +1,67 @@
 from datetime import datetime
-from typing import Optional
-from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator
+)
+from typing import Dict, Optional
+from uuid import UUID
 
-from enums import UpdateScope, OrderType, PubSubCategory
+from enums import (
+    MarketType,
+    Side, 
+    UpdateScope, 
+    OrderType, 
+    PubSubCategory,
+    WebSocketConnectionStatus
+)
 
 
-class Base(BaseModel):
+class CustomBase(BaseModel):
     """Base class for all models with enum value usage enabled."""
-
     class Config:
         use_enum_values = True
 
+class _OrderType(CustomBase):
+    """Represents the order_type key: value in JSON"""
+    type: OrderType
 
-class TakeProfitOrder(Base):
-    price: float = Field(gt=0)
+
+class _MarketType(CustomBase):
+    """Represents the market_type key: value in JSON"""
+    market_type: MarketType
 
 
-class StopLossOrder(Base):
-    price: float = Field(gt=0)
-    
-
-class BaseOrder(Base):
-    """Represents a base order with ticker, take profit, and stop loss settings.
-
-    Attributes:
-        ticker (str): The symbol of the security.
-        take_profit (Optional[float]): The take-profit price, must be positive.
-        stop_loss (Optional[float]): The stop-loss price, must be positive.
-    """
+class TempBaseOrder(_OrderType, _MarketType):
     ticker: str
     quantity: int = Field(gt=0)
-    take_profit: Optional[TakeProfitOrder] = Field(None)
-    stop_loss: Optional[StopLossOrder] = Field(None)
+    take_profit: Optional[float] = Field(None)
+    stop_loss: Optional[float] = Field(None)
+    limit_price: Optional[float] = Field(None, gt=0)
 
 
-
-class MarketOrder(BaseOrder):
-    """Represents a market order, inheriting from BaseOrder."""
-    
-    @field_validator('take_profit', check_fields=False)
-    def take_profit_validator(cls, take_profit, values) -> float:
-        """
-        Args:
-            take_profit (float): The take-profit price.
-            values (dict): The field values of the model.
-        Raises:
-            ValueError: If stop_loss is greater than or equal to take_profit.
-        Returns:
-            float: The validated take-profit value.
-        """
-        stop_loss = values.data.get('stop_loss', None)
-        
-        try:    
-            if stop_loss and take_profit:
-                if take_profit.price <= stop_loss.price:
-                    raise ValueError('Take profit price must be greater than stop loss price')
-        except AttributeError:
-            pass
-        finally:
-            return take_profit
-
-
-class LimitOrder(BaseOrder):
-    """Represents a limit order with a specific limit price.
-
-    Attributes:
-        limit_price (float): The price at which the limit order is set, must be positive.
-    """
-
-    limit_price: float = Field(gt=0)
-    
-    @field_validator('limit_price', check_fields=False)
-    def limit_price_validator(cls, limit_price: float, values):
-        """
-        Args:
-            take_profit (float): The take-profit price.
-            values (dict): The field values of the model.
-        
-        Raises:
-            ValueError: If stop_loss is greater than or equal to take_profit.
-        
-        Returns:
-            float: The validated take-profit value.
-        """
-        stop_loss = values.data.get('stop_loss', None)
-        take_profit = values.data.get('take_profit', None)
-        
-        if stop_loss:
-            if stop_loss.price >= limit_price:
-                raise ValueError('Stop Loss must be greater than limit price')
-        if take_profit:
-            if take_profit.price <= limit_price:
-                raise ValueError('Take profit must be greater than limit price')
-        return limit_price
-
-
-class CloseOrder(Base):
+class SpotCloseOrder(_MarketType, _OrderType):
     ticker: str
     quantity: Optional[float] = Field(None, gt=0)
 
 
-class ModifyOrder(Base):
+class FuturesCloseOrder(_MarketType, _OrderType):
+    order_id: str
+    quantity: Optional[float] = Field(None, gt=0)
+
+
+class ModifyOrder(_MarketType, _OrderType):
     order_id: UUID
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
 
 
-class EntryPriceChange(Base):
-    price: float
-    order_id: UUID
+class FuturesContractWrite(TempBaseOrder):
+    """"Core schema for futures contract"""
+    side: Side
+    
 
-
-class Request(Base):
-    """Represents an order with type, market order, and limit order details.
-
-    Attributes:
-        type (OrderType): The type of the order (e.g., market or limit).
-        market_order (Optional[MarketOrder]): Details of the market order, if applicable.
-        limit_order (Optional[LimitOrder]): Details of the limit order, if applicable.
-    """
-    type: OrderType
-    market_order: Optional[MarketOrder] = None
-    limit_order: Optional[LimitOrder] = None
-    close_order: Optional[CloseOrder] = None
-    modify_order: Optional[ModifyOrder] = None
-
-
-class BasePubSubMessage(Base):
+class BasePubSubMessage(CustomBase):
     category: PubSubCategory
     message: Optional[str] = None
     details: Optional[dict] = None
@@ -141,6 +75,16 @@ class BasePubSubMessage(Base):
             }
         return details
 
+
+class PubSubStatusMessage(BasePubSubMessage):
+    status: WebSocketConnectionStatus
+
+
 class OrderUpdatePubSubMessage(BasePubSubMessage):
     on: UpdateScope
+
+    
+class DOM(CustomBase):
+    asks: Dict[int, int]
+    bids: Dict[int, int]
     

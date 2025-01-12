@@ -12,3 +12,10 @@ class OrderType(int, Enum):
     TAKE_PROFIT_ORDER = 3
     """An unplanned close request"""
     CLOSE_ORDER = 4
+
+
+class Tag(str, Enum):
+    TAKE_PROFIT = 'take_profit'
+    STOP_LOSS = 'stop_loss'
+    ENTRY = 'entry'
+    ORPHAN = 'orphan'
