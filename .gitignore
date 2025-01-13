@@ -11,6 +11,7 @@ rec.py
 client_secret.json
 tokens
 log
+TokenContract.sol
 
 alembic.ini
 docker-compose.yaml

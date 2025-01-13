@@ -40,7 +40,7 @@ async def get_db_session():
         try:
             yield session
         
-        except Exception:
+        except Exception as e:
             await session.rollback()
             await session.close()
             raise
@@ -146,15 +146,19 @@ async def get_active_orders(user_id: str) -> list[dict]:
         return existing_data
 
 
-async def check_user_exists(user_id: str):
+async def check_user_exists(user_id: str=None, email: str=None):
     try:
+        query = select(Users)
+        
+        if user_id:
+            query = query.where(Users.user_id == user_id)
+        else:
+            query = query.where(Users.email == email)
+            
         async with get_db_session() as session:
-            result = await session.execute(
-                select(Users)
-                .where(Users.user_id == user_id)
-            )
+            result = await session.execute(query)
             user = result.scalar()
-                
+
             if not user:
                 return InvalidAction("Invalid user")
             return user            

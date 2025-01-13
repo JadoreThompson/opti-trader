@@ -82,7 +82,11 @@ async def check_user_exists(user: _User) -> Users:
     """
     try:
         async with get_db_session() as session:
-            result = await session.execute(select(Users).where(Users.email == user.email))
+            result = await session.execute(
+                select(Users)
+                .where(Users.email == user.email)
+            )
+
             existing_user: Users = result.scalars().first()
 
             if not existing_user:
