@@ -181,7 +181,7 @@ class SpotEngine:
                     
                     2: {
                         "channel": channel,
-                        'message': BasePubSubMessage(
+                        'message': OrderUpdatePubSubMessage(
                             category=PubSubCategory.SUCCESS,
                             message="Order successfully placed",
                             on=UpdateScope.NEW,

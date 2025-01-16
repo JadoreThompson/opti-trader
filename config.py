@@ -14,7 +14,7 @@ from mailers.gmailer import GMailer
 from utils.connection import AsyncRedisConnection, SyncRedisConnection
 
 load_dotenv(override=False)
-ROOT = Path().absolute()
+ROOT = os.getcwd()
 
 # Security
 API_KEY_ALIAS = 'api-key'
@@ -46,12 +46,13 @@ DB_ENGINE = create_async_engine(
 TICKERS = ['BTC/USDT', 'SOL/USDT', 'ETH/USDT']
 
 from alembic.config import Config
-alconfig = Config(ROOT.joinpath('\\alembic.ini'))
+alconfig = Config(os.path.join(ROOT, 'alembic.ini'))
+sqlalc_uri = list(DB_URL.format(quote(os.getenv('DB_PASSWORD'))).replace('+asyncpg', ''))
+sqlalc_uri.insert(sqlalc_uri.index('%') + 1, '%')
 alconfig.set_main_option(
-    'sqlalchemy.url', 
-    DB_URL.format(os.getenv('DB_PASSWORD')).replace('+asyncpg', '')
+    "sqlalchemy.url", 
+    ''.join(sqlalc_uri),
 )
-
 # Logging
 LOG_FOLDER = os.getcwd() + '/log'
 if not os.path.exists(LOG_FOLDER):

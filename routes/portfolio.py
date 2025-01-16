@@ -225,7 +225,12 @@ async def orders(
         
         async with get_db_session() as s:
             r = await s.execute(query)
-            all_orders = [vars(order) for order in r.scalars().all()]
+            all_orders = [
+                {k: v}
+                for order in r.scalars().all()
+                for k, v in vars(order) 
+                if k != '_sa_instance_state'
+            ]
         
         existing_data[prim_cache_key][sec_cache_key] = all_orders
         REDIS_CLIENT.set(user_id, json.dumps(existing_data))

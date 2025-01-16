@@ -40,7 +40,7 @@ async def generate_order_requests(quantity: int = 10) -> list:
             'market_type': MarketType.FUTURES,
             'type': OrderType.MARKET,
             'ticker': 'APPL',
-            'quantity': random.randint(10, 15),
+            'quantity': 20,
             'take_profit': None,
             'stop_loss': None,
             'limit_price': None,
@@ -191,7 +191,7 @@ async def main():
             name=fkr.first_name(), 
             divider=randint(2, 5), 
             num_orders=randint(10_000, 30_000), 
-            close_quantity=randint(8, 10)
+            close_quantity=randint(15, 20)
         ) for _ in range(TEST_SIZE)
     ])
 

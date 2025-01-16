@@ -107,24 +107,9 @@ class ClientManager:
         try:
             while True:
                 try:
-                    ticker = 'APPL'
-                    price = random.randint(100, 1000)
-                    await self._send_update_all(
-                                {
-                                    'ticker': ticker,
-                                    'price': price,
-                                    'time': int(datetime.now().timestamp())
-                                },
-                                PubSubCategory.PRICE_UPDATE,
-                            )
-                    # item = self.price_queue.get_nowait()
-                    # if isinstance(item, tuple):
-                    #     ticker, price = item
-                    #     if price == self._ticker_quotes[ticker]:
-                    #         continue
-                        
-                    #     self._ticker_quotes[ticker] = price
-                    #     asyncio.get_running_loop().create_task(self._send_update_all(
+                    # ticker = 'APPL'
+                    # price = random.randint(100, 1000)
+                    # await self._send_update_all(
                     #             {
                     #                 'ticker': ticker,
                     #                 'price': price,
@@ -132,7 +117,23 @@ class ClientManager:
                     #             },
                     #             PubSubCategory.PRICE_UPDATE,
                     #         )
-                    #     )
+                    
+                    item = self.price_queue.get_nowait()
+                    if isinstance(item, tuple):
+                        ticker, price = item
+                        if price == self._ticker_quotes[ticker]:
+                            continue
+                        
+                        self._ticker_quotes[ticker] = price
+                        asyncio.get_running_loop().create_task(self._send_update_all(
+                                {
+                                    'ticker': ticker,
+                                    'price': price,
+                                    'time': int(datetime.now().timestamp())
+                                },
+                                PubSubCategory.PRICE_UPDATE,
+                            )
+                        )
                 except (asyncio.queues.QueueEmpty, queue.Empty) as e:
                     pass
                 except Exception as e:

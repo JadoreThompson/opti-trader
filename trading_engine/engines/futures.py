@@ -7,6 +7,7 @@ import logging
 import queue
 
 from typing import (
+    Dict,
     Optional, 
     Tuple, 
     List, 
@@ -69,7 +70,7 @@ class FuturesEngine:
         """
         for t in tickers:
             self._order_books[t] = OrderBook(t, price_queue)
-            self._config_bid_ask(
+            await self._config_bid_ask(
                 self._order_books[t], 
                 quantity=quantity, 
                 divider=divider
@@ -94,6 +95,10 @@ class FuturesEngine:
         
     async def _route(self, data: dict) -> None: 
         try:
+            if 'filled_price' not in data:
+                print(json.dumps({k: str(v) for k, v in data.items()}, indent=4))
+                print('*' * 20)
+                
             pub_params = {'channel': f"trades_{data['user_id']}"}
             pub_params.update(await self._handlers[data['type']](data=data, ))
             
@@ -101,7 +106,18 @@ class FuturesEngine:
         except Exception as e:
             logger.error('{} - {}'.format(type(e), str(e)), exc_info=True)  
 
-    async def _handle_match(self, **kwargs) -> None:
+    async def _handle_match(self, **kwargs) -> Dict[str, dict]:
+        """
+        Handles matching of order against opposing orders
+        and all necessary actions
+
+        Args:
+            - kwargs:
+                data (dict): Dictionary representing the order
+        Returns:
+            - dict: Dictionary containing the mesage content
+                to be published to the client
+        """        
         data = kwargs['data']
         orderbook: OrderBook = self._order_books[data['ticker']]
         position = FuturesPosition(
@@ -114,10 +130,10 @@ class FuturesEngine:
             )
         )
         position.contract.position = position
-        orderbook.track(position=position, channel='position')
+        orderbook.track(position=position,)
 
         if data['limit_price']:
-            self._handle_limit(position, orderbook)
+            result = self._handle_limit(position, orderbook)
         else:    
             result = self._match(
                 contract=position.contract,
@@ -164,16 +180,17 @@ class FuturesEngine:
             },
         }[result[0]]
         
-    def _handle_limit(self, position: FuturesPosition, orderbook: OrderBook) -> None:
+    def _handle_limit(self, position: FuturesPosition, orderbook: OrderBook) -> Tuple[int]:
         position.contract.append_to_orderbook(orderbook,)
         self._place_tp_sl(position.contract, position, orderbook)
+        return (2,)
 
-    async def _close(self, **kwargs) -> None:
+    async def _close(self, **kwargs) -> Dict[str, dict]:
         data = kwargs['data']
         orderbook = self._order_books[data['ticker']]
         
         try:
-            position: FuturesPosition = orderbook.fetch(data['order_id'], 'position')
+            position: FuturesPosition = orderbook.fetch(data['order_id'])
             position.orphan_contract = _FuturesContract(
                 position.contract.data, 
                 data['price'], 
@@ -236,10 +253,10 @@ class FuturesEngine:
                 ).model_dump()
             }
 
-    async def _modify_position(self, **kwargs) -> None:
+    async def _modify_position(self, **kwargs) -> Dict[str, dict]:
         try:
             data = kwargs['data']
-            position: FuturesPosition = self._order_books[data['ticker']].fetch(data['order_id'], 'position')
+            position: FuturesPosition = self._order_books[data['ticker']].fetch(data['order_id'],)
             position.alter_position(
                 self._order_books[data['ticker']], 
                 data['take_profit'], 
@@ -375,7 +392,7 @@ class FuturesEngine:
             position.sl_contract.append_to_orderbook(orderbook)
             position.sl_contract.position = position
     
-    def _config_bid_ask(self, orderbook: OrderBook, quantity: int=10_000, divider: int=5) -> None:
+    async def _config_bid_ask(self, orderbook: OrderBook, quantity: int=10_000, divider: int=5) -> None:
         import random 
         from uuid import uuid4
         
@@ -388,6 +405,7 @@ class FuturesEngine:
         
         for i in range(quantity):
             data = {
+                'fake': True,
                 'user_id': uuid4(),
                 'order_id': uuid4(),
                 'market_type': MarketType.FUTURES,
@@ -409,26 +427,4 @@ class FuturesEngine:
                 data['limit_price'] = random.choice(op_range)
                 data['type'] = OrderType.LIMIT
             
-            position = FuturesPosition(
-                data, 
-                _FuturesContract(
-                    data, 
-                    data['price'] or data['limit_price'], 
-                    Tag.ENTRY, 
-                    data['side']
-                )
-            )
-            
-            position.contract.position = position
-            orderbook.track(position=position, channel='position')
-            
-            if data['limit_price']:
-                self._handle_limit(position, orderbook)
-                continue
-            
-            if i % divider == 0:
-                position.contract.remove_from_orderbook(orderbook)
-                position.contract.order_status = OrderStatus.FILLED
-                self._place_tp_sl(position.contract, position, orderbook)
-
 ### End of Class ###

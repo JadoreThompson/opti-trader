@@ -22,7 +22,7 @@ def db_listener():
 def futures_engine(order_queue: Queue, price_queue):
     asyncio.run(
         FuturesEngine(order_queue)\
-            .start(['APPL'], price_queue, quantity=1000, divider=3)
+            .start(['APPL'], price_queue, quantity=1000, divider=2)
     )
 
 

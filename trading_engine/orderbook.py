@@ -102,46 +102,63 @@ class OrderBook:
         """Update unrealisd pnl for all orders and publish to the clients"""
         from .order.base_spot import BaseSpotOrder
         from .order.contract import _FuturesContract
+        from .order.position import FuturesPosition
         
-        complete = False
         for _, v in self._tracker.copy().items():
             await asyncio.sleep(0.01)
-            
-            if not complete:
-                continue
-            try:
-                if 'entry' not in v:
-                    continue
-                
+
+            if isinstance(v['entry'], BaseSpotOrder):
                 order = v['entry']
+            elif isinstance(v['entry'], FuturesPosition):
+                order = v['entry'].contract
+            
+            if order.order_status in [OrderStatus.NOT_FILLED, OrderStatus.CLOSED]:
+                continue
+            
+            if 'filled_price' not in order.data:
+                print(json.dumps({k: str(v) for k, v in order.data.items()}, indent=4))
+            
+            pct_change = price / order.data['filled_price']
+            init_margin = order.standing_quantity * order.data['filled_price']
+            upl = init_margin * pct_change
+            
+            if upl != init_margin:
+                print('[UPL]: Initial margin: ', init_margin, 'Entry Price: ', order.data['filled_price'], 'New Price: ', price, 'Side: ', order.data['side'], 'UPL: ', upl)
+            
+
+            # try:
+            #     if 'entry' not in v:
+            #         continue
                 
-                if isinstance(order, BaseSpotOrder):        
-                    if order.order_status in [OrderStatus.NOT_FILLED, OrderStatus.CLOSED]:
-                        continue
+            #     order = v['entry']
                 
-                # Only here for testing
-                if 'unrealised_pnl' not in order.data:
-                    continue
+            #     if isinstance(order, BaseSpotOrder):        
+            #         if order.order_status in [OrderStatus.NOT_FILLED, OrderStatus.CLOSED]:
+            #             continue
                 
-                starting_upl = order.data['unrealised_pnl']
+            #     # Only here for testing
+            #     if 'unrealised_pnl' not in order.data:
+            #         continue
                 
-                pos_size = order.standing_quantity * order.data['filled_price']
-                upl = (price / order.data['filled_price']) * (pos_size)
-                order.data['unrealised_pnl'] += -1 * (pos_size - round(upl, 2))
+            #     starting_upl = order.data['unrealised_pnl']
+                
+            #     pos_size = order.standing_quantity * order.data['filled_price']
+            #     upl = (price / order.data['filled_price']) * (pos_size)
+            #     order.data['unrealised_pnl'] += -1 * (pos_size - round(upl, 2))
                 
                 
-                if not (order.data['unrealised_pnl'] == starting_upl):
-                    await publish_update_to_client(**{
-                        'channel': f'trades_{order.data['user_id']}',
-                        'message': OrderUpdatePubSubMessage(
-                            category=PubSubCategory.ORDER_UPDATE,
-                            on=UpdateScope.EXISTING,
-                            details=SpotOrderRead(**order.data).model_dump()
-                        ).model_dump()
-                    })
+            #     if not (order.data['unrealised_pnl'] == starting_upl):
+            #         await publish_update_to_client(**{
+            #             'channel': f'trades_{order.data['user_id']}',
+            #             'message': OrderUpdatePubSubMessage(
+            #                 category=PubSubCategory.ORDER_UPDATE,
+            #                 on=UpdateScope.EXISTING,
+            #                 details=SpotOrderRead(**order.data).model_dump()
+            #             ).model_dump()
+            #         })
                 
-            except Exception as e:
-                logger.error('{} - {}'.format(type(e), str(e)))
+            # except Exception as e:
+            #     logger.error('{} - {}'.format(type(e), str(e)))
     
     async def _update_dom(self, price: float) -> None:
         dom_size = 5
