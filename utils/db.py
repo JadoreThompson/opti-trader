@@ -49,3 +49,4 @@ def alembic_upgrade_head() -> None:
 async def get_db_session() -> AsyncGenerator[None, AsyncSession]:
     async with smaker() as session:
         yield session
+
