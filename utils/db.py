@@ -1,192 +1,51 @@
-import asyncio
-import logging
+import configparser
+import os
+import subprocess
 
 from contextlib import asynccontextmanager
-from collections import defaultdict
-from uuid import UUID
-
-# SA
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
+from typing import AsyncGenerator, Any
+from urllib.parse import quote
 
-# Local
-from config import DB_ENGINE
-from enums import OrderStatus
-from exceptions import DoesNotExist, InvalidAction
-from db_models import DBOrder, Users
+from config import DB_ENGINE, DB_URL
 
-logger = logging.getLogger(__name__)
-
-async_session_maker = sessionmaker(
-    DB_ENGINE,
-    class_=AsyncSession,
+smaker = sessionmaker(
+    bind=DB_ENGINE, 
+    class_=AsyncSession, 
     expire_on_commit=False
 )
 
+def write_sqlalchemy_url(db_url: str) -> None:
+    sqlalc_uri = \
+        db_url.format(quote(os.getenv('DB_PASSWORD')))\
+            .replace('+asyncpg', '')
+    
+    sqlalc_uri = sqlalc_uri.replace('%', '%%')
+    config = configparser.ConfigParser(interpolation=None)
+    config.read('alembic.ini')
+
+    config['alembic'].update({'sqlalchemy.url': sqlalc_uri})
+    
+    with open('alembic.ini', 'w') as f:
+        config.write(f)    
+
+
+def alembic_upgrade_head() -> None:
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    with open('alembic.ini', 'r') as f:
+        alembic_ini = f.read()
+        
+    write_sqlalchemy_url(DB_URL)
+    subprocess.run(['alembic', 'upgrade', 'head'])
+    
+    with open('alembic.ini', 'w') as f:
+        f.write(alembic_ini)
+
 
 @asynccontextmanager
-async def get_db_session():
-    """
-    Provides an asynchronous database session.
-
-    Yields:
-        AsyncSession: The database session for executing queries.
-    Raises:
-        Exception: If an error occurs during the session.
-    """
-    
-    async with async_session_maker() as session:
-        try:
-            yield session
-        
-        except Exception as e:
-            await session.rollback()
-            await session.close()
-            raise
-            
-
-def constraints_to_tuple(constraints: dict) -> tuple:
-    return tuple(sorted(constraints.items()))
-
-
-_CACHE = {}
-
-def delete_from_internal_cache(user_id: str | UUID, channel: str | list, **kwargs) -> None:
-    global _CACHE
-    try:    
-        if isinstance(channel, list):
-            for item in channel:
-                _CACHE[user_id].pop(item, None)
-        else:
-            _CACHE[user_id].pop(channel, None)
-    except KeyError:
-        pass
-    except Exception as e:
-        logger.error(f'{type(e)} - {str(e)}')
-    
-    
-def add_to_internal_cache(user_id: str | UUID, channel: str, value: any) -> None:
-    global _CACHE
-    _CACHE.setdefault(user_id, {})  
-    
-    if channel not in _CACHE[user_id]:
-       _CACHE[user_id][channel] = {}
-    
-    if isinstance(value, dict):
-        _CACHE[user_id][channel].update(value)
-    else:
-        _CACHE[user_id][channel] = value
-    
-    
-
-def retrieve_from_internal_cache(user_id: str | UUID, channel: str) -> any:
-    global _CACHE
-    try:
-        return _CACHE[user_id][channel]
-    except KeyError:
-        return None
-
-
-async def get_orders(user_id: str | UUID, **kwargs) -> list[dict]:
-    """
-    Returns all orders withhin a DB that follow the constraints
-
-    Args:
-        constraints (dict)
-    """ 
-    key = kwargs.get('order_status', None) or 'all'
-    existing_data = retrieve_from_internal_cache(user_id, 'orders')
-    if existing_data:
-        if key in existing_data:
-            return existing_data[key]
-    
-    query = select(DBOrder).where(DBOrder.user_id == user_id)
-    constraints = kwargs
-        
-    if constraints.get('order_status', None) != None:
-        query = query.where(DBOrder.order_status == constraints['order_status'])
-        
-    async with get_db_session() as session:
-        results = await session.execute(query.limit(1000))
-    
-    order_list = [vars(order) for order in results.scalars().all()]
-    add_to_internal_cache(user_id, 'orders', {key: order_list})
-    return order_list
-
-
-async def get_active_orders(user_id: str) -> list[dict]:
-    """
-    Returns all orders withhin a DB that follow the constraints
-
-    Args:
-        constraints (dict)
-    """
-    existing_data = retrieve_from_internal_cache(user_id, 'active_orders')
-    if existing_data:
-        return existing_data
-    
-    async with get_db_session() as session:
-        results = await session.execute(
-            select(DBOrder).where(
-                (DBOrder.user_id == user_id)
-                & (DBOrder.order_status != OrderStatus.CLOSED)
-            )
-        )
-        
-        existing_data = [
-            {
-                k: v 
-                for k, v in vars(order).items() if k != '_sa_instance_state'    
-            } 
-            for order in results.scalars().all()
-        ]
-        
-        add_to_internal_cache(user_id, 'active_orders', existing_data)
-        return existing_data
-
-
-async def check_user_exists(user_id: str=None, email: str=None):
-    try:
-        query = select(Users)
-        
-        if user_id:
-            query = query.where(Users.user_id == user_id)
-        else:
-            query = query.where(Users.email == email)
-            
-        async with get_db_session() as session:
-            result = await session.execute(query)
-            user = result.scalar()
-
-            if not user:
-                return InvalidAction("Invalid user")
-            return user            
-    except Exception:
-        raise
-
-
-async def check_visible_user(username: str) -> str:
-    """
-    Returns the user_id for the username passsed in param
-    if the user exists and has visible set to True.
-    
-    Args:
-        username (str):
-
-    Returns:
-        str: UserId
-    """    
-    async with get_db_session() as session:
-        res = await session.execute(
-            select(Users.user_id)
-            .where(
-                (Users.username == username) &
-                (Users.visible == True)
-            )
-        )
-        try:
-            return str(res.first()[0])
-        except TypeError:
-            return ''
-        
+async def get_db_session() -> AsyncGenerator[None, AsyncSession]:
+    async with smaker() as session:
+        yield session
