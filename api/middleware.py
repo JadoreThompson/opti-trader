@@ -1,20 +1,44 @@
+import jwt
 import uuid
+
+from datetime import datetime
 from fastapi import HTTPException, Request
-from config import COOKIE_KEY
+from typing import TypedDict
+from .config import (
+    COOKIE_ALGO, 
+    COOKIE_EXP, 
+    COOKIE_KEY, 
+    COOKIE_SECRET_KEY
+)
 
 TOKENS: dict[uuid.UUID, dict]= {}
 
-def generate_token(payload: dict) -> uuid.UUID:
-    global TOKENS
-    
-    key = uuid.uuid4()
-    TOKENS[key] = payload
-    return key
+class JWT(TypedDict):
+    sub: str # username
+    em: str # email
+    exp: datetime
 
-def verify_token(req: Request) -> dict:
-    global TOKENS
+
+# def generate_token(payload: JWT) -> uuid.UUID:
+    # global TOKENS
+    
+    # key = uuid.uuid4()
+    # TOKENS[key] = payload
+    # return key
+def generate_token(payload: JWT) -> str:
+    payload['exp'] = datetime.now() + COOKIE_EXP
+    return jwt.encode(payload, COOKIE_SECRET_KEY, algorithm=COOKIE_ALGO)
+
+
+def verify_cookie(req: Request) -> JWT:
+    token: str | None = req.cookies.get(COOKIE_KEY, None)
+    
+    if token is None:
+        raise HTTPException(status_code=401, detail="Unauthorised")
     
     try:
-        return TOKENS[req.cookies[COOKIE_KEY]]
-    except KeyError:
-        raise HTTPException(status_code=401, detail='Unauthorized')
+        return jwt.decode(token, COOKIE_SECRET_KEY, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")

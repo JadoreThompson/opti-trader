@@ -5,7 +5,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
-from typing import AsyncGenerator, Any
+from typing import AsyncGenerator
 from urllib.parse import quote
 
 from config import DB_ENGINE, DB_URL
@@ -49,4 +49,3 @@ def alembic_upgrade_head() -> None:
 async def get_db_session() -> AsyncGenerator[None, AsyncSession]:
     async with smaker() as session:
         yield session
-

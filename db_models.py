@@ -1,6 +1,21 @@
+from uuid import uuid4
 import sqlalchemy
-from sqlalchemy import Float, ForeignKey, UUID, Integer, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import (
+    Float, 
+    ForeignKey, 
+    UUID, 
+    Integer, 
+    String
+)
+from sqlalchemy.orm import (
+    DeclarativeBase, 
+    Mapped, 
+    mapped_column, 
+    relationship, 
+    validates
+)
+
+from config import PH
 
 
 class Base(DeclarativeBase):
@@ -10,9 +25,11 @@ class Base(DeclarativeBase):
 class Users(Base):
     __tablename__ = 'users'
     
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    avatar: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    password: Mapped[str] = mapped_column(String, nullable=False)
+    avatar: Mapped[str] = mapped_column(String, nullable=False)
     balance: Mapped[float] = mapped_column(
         Float, 
         nullable=False, 
@@ -20,8 +37,12 @@ class Users(Base):
         server_default=sqlalchemy.sql.text('10000')
     )
     
+    @validates('password')
+    def password_validator(self, _, value):
+        return PH.hash(value)
+    
     # Relationships
-    orders = relationship('Orders', back_populates='users')
+    orders = relationship('Orders', back_populates='users', cascade='all, delete-orphan')
 
 
 class Orders(Base):
@@ -43,4 +64,4 @@ class Orders(Base):
     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
     
     # Relationships
-    users = relationship('Users', back_populates='orders', cascade='all, delete-orphan')
+    users = relationship('Users', back_populates='orders')

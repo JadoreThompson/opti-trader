@@ -1,5 +1,5 @@
 from pydantic import BaseModel
 
-class Base(BaseModel):
+class CustomBase(BaseModel):
     class Config:
         as_enum = True

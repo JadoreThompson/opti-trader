@@ -13,7 +13,7 @@ def run_server(queue: multiprocessing.Queue) -> None:
         "api.app:app", 
         host="0.0.0.0", 
         port=8000, 
-        # reload=True
+        reload=True
     )
 
 

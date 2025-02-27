@@ -1,3 +1,4 @@
+import argon2
 import os
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -18,4 +19,8 @@ DB_ENGINE = create_async_engine(
 )
 
 # Misc
-COOKIE_KEY = 'my-cookie-key'
+PH = argon2.PasswordHasher(
+    time_cost=2,
+    memory_cost=1_024_000,
+    parallelism=8,
+)
