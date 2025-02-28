@@ -7,7 +7,13 @@ from alembic import context
 
 from config import DB_URL
 from utils.db import write_sqlalchemy_url
-write_sqlalchemy_url(DB_URL)
+
+# if DEV:
+#     url = DB_URL.replace('+aiosqlite', '')
+# else:
+url= DB_URL.replace('+asyncpg', '')
+
+write_sqlalchemy_url(url)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,10 +26,9 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-import db_models
-# target_metadata = mymodel.Base.metadata
-target_metadata = db_models.Base.metadata
+from db_models import Base
+target_metadata = Base.metadata
+# target_metadata = None
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

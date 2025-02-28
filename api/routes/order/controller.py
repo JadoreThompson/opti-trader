@@ -15,12 +15,12 @@ async def enter_order(details: dict, user_id: str):
             .values(details)
             .returning(Orders)
         )
-        res = res.scalar().first()
+        order = res.scalar()
         await sess.commit()
     
     FUTURES_QUEUE.put_nowait({
         k: v 
-        for k, v in vars(res).items() 
+        for k, v in vars(order).items() 
         if k != '_sa_instance_state'
     })
     

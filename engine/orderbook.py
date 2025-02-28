@@ -1,15 +1,15 @@
-from typing import Literal
+from typing import Literal, Optional
 from engine.position import Position
 
 
 class Orderbook:
-    def __init__(self, instrument: str, price: float = None) -> None:
+    def __init__(self, instrument: str, price: float = 150) -> None:
         self.instrument = instrument
         self.bids: dict[float, list[Position]] = {}
         self.asks: dict[float, list[Position]] = {}
         self.bid_levels = self.bids.keys()
         self.ask_levels = self.asks.keys()
-        self.price = price
+        self._price = price
         
     def append(self, order: dict):
         if order['side'] == 'buy':
@@ -39,26 +39,41 @@ class Orderbook:
             if not self.asks[position.order['price']]:
                 self.asks.pop(position.order['price'])
                 
-    def best_price(self, side: Literal['buy', 'sell'], price: float) -> float:
+    def best_price(self, side: Literal['buy', 'sell'], price: float) -> Optional[float]:
         price_levels = self.bid_levels if side == 'sell' else self.ask_levels
+        price_levels = list(price_levels)
+        print("[orderbook] Price Levels - ", price_levels, "Side - ", side)
+        if not price_levels:
+            return
+
+        if price_levels[0] == None:
+            return
         
         if side == 'sell':    
             cleaned_prices = {
                 key: abs(price - key)
-                for key in list(price_levels)
+                for key in price_levels
                 if key >= price
-                # and len(self.asks[key]) > 0
+                and len(self.asks[key]) > 0
             }
             
         elif side == 'buy':
             cleaned_prices = {
                 key: abs(price - key)
-                for key in list(price_levels)
+                for key in price_levels
                 if key <= price
-                # and len(self.bids[key]) > 0
+                and len(self.bids[key]) > 0
             }
             
-        return sorted(cleaned_prices.items(), key=lambda item: item[1])[0][0]
+        if cleaned_prices:
+            return sorted(cleaned_prices.items(), key=lambda item: item[1])[0][0]
+        
+    def set_price(self, price: float) -> None:
+        ...
+        
+    @property
+    def price(self) -> float:
+        return self._price
         
     def __getitem__(self, book: Literal['bids', 'asks']) -> dict:
         return self.bids if book == 'bids' else self.asks

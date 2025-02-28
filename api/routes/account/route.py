@@ -14,7 +14,7 @@ async def get_account(jwt: JWT = Depends(verify_cookie)) -> Profile:
     async with get_db_session() as sess:
         res = await sess.execute(
             select(Users)
-            .where(Users.username == jwt['sub'])
+            .where(Users.user_id == jwt['sub'])
         )
         user = res.scalar()
     

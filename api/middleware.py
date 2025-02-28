@@ -14,17 +14,11 @@ from .config import (
 TOKENS: dict[uuid.UUID, dict]= {}
 
 class JWT(TypedDict):
-    sub: str # username
+    sub: str # user_id
     em: str # email
     exp: datetime
 
 
-# def generate_token(payload: JWT) -> uuid.UUID:
-    # global TOKENS
-    
-    # key = uuid.uuid4()
-    # TOKENS[key] = payload
-    # return key
 def generate_token(payload: JWT) -> str:
     payload['exp'] = datetime.now() + COOKIE_EXP
     return jwt.encode(payload, COOKIE_SECRET_KEY, algorithm=COOKIE_ALGO)

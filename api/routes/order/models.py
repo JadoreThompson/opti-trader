@@ -11,14 +11,14 @@ class OrderWrite(CustomBase):
     market_type: MarketType
     order_type: OrderType
     side: Side
-    price: Optional[float]
-    limit_price: Optional[float]
-    stop_loss: Optional[float]
-    take_profit: Optional[float]
+    limit_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
     
-    @field_validator('price')
-    def validate_price(cls, value):
-        return round(value, 2)
+    # @field_validator('price')
+    # def validate_price(cls, value):
+    #     if value:
+    #         return round(value, 2)
     
     @field_validator('limit_price')
     def validate_limit_price(cls, value):

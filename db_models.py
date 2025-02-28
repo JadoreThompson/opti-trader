@@ -48,7 +48,7 @@ class Users(Base):
 class Orders(Base):
     __tablename__ = 'orders'
     
-    order_id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    order_id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey('users.user_id'))
     instrument: Mapped[str] = mapped_column(String, nullable=False)
     side: Mapped[str] = mapped_column(String, nullable=False)
