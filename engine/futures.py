@@ -66,7 +66,8 @@ class FuturesEngine:
             order['status'] = OrderStatus.FILLED
             order['standing_quantity'] = order['quantity']
         elif result.outcome == 1:
-            order['status'] = OrderStatus.PARTIALLY_FILLED
+            if order['standing_quantity'] != order['quantity']:
+                order['status'] = OrderStatus.PARTIALLY_FILLED
             ob.append(order, order['price'])
         
         self.collection.append(order)
@@ -114,7 +115,10 @@ class FuturesEngine:
     async def _handle_filled_orders(self, pos: list[Position], ob: Orderbook) -> None:
         for p in pos:
             ob.remove(p)
-            p.order['status'] = OrderStatus.FILLED
+            if p.order['status'] == OrderStatus.FILLED:
+                p.order['status'] = OrderStatus.CLOSED
+            else:
+                p.order['status'] = OrderStatus.FILLED
             
         self.collection.extend([p.order for p in pos])
 
