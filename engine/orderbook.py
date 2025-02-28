@@ -11,50 +11,52 @@ class Orderbook:
         self.ask_levels = self.asks.keys()
         self._price = price
         
-    def append(self, order: dict):
+    def append(self, order: dict, price: float) -> None:
         if order['side'] == 'buy':
-            self.bids.setdefault(order['price'], [])
-            self.bids[order['price']].append(Position(order))
+            self.bids.setdefault(price, [])
+            self.bids[price].append(Position(order))
             
         elif order['side'] == 'sell':
-            self.asks.setdefault(order['price'], [])
-            self.asks[order['price']].append(Position(order))
+            self.asks.setdefault(price, [])
+            self.asks[price].append(Position(order))
             
     def remove(self, position: Position):
+        price = position.order['price'] or position.order['limit_price']
+        
         if position.order['side'] == 'buy':
             try:
-                self.bids[position.order['price']].remove(position)
-            except ValueError:
+                self.bids[price].remove(position)
+                if not self.bids[price]:
+                    self.bids.pop(price)
+                    
+            except (ValueError, KeyError):
                 pass
             
-            if not self.bids[position.order['price']]:
-                self.bids.pop(position.order['price'])
-                
         elif position.order['side'] == 'sell':
             try:
-                self.asks[position.order['price']].remove(position)
-            except ValueError:
+                self.asks[price].remove(position)
+                if not self.asks[price]:
+                    self.asks.pop(price)
+            except (ValueError, KeyError):
                 pass
             
-            if not self.asks[position.order['price']]:
-                self.asks.pop(position.order['price'])
                 
     def best_price(self, side: Literal['buy', 'sell'], price: float) -> Optional[float]:
         price_levels = self.bid_levels if side == 'sell' else self.ask_levels
         price_levels = list(price_levels)
-        print("[orderbook] Price Levels - ", price_levels, "Side - ", side)
         if not price_levels:
             return
 
         if price_levels[0] == None:
             return
         
+        # print("[orderbook] Price Levels - ", price_levels, "Side - ", side)
         if side == 'sell':    
             cleaned_prices = {
                 key: abs(price - key)
                 for key in price_levels
                 if key >= price
-                and len(self.asks[key]) > 0
+                and len(self.bids[key]) > 0
             }
             
         elif side == 'buy':
@@ -62,7 +64,7 @@ class Orderbook:
                 key: abs(price - key)
                 for key in price_levels
                 if key <= price
-                and len(self.bids[key]) > 0
+                and len(self.asks[key]) > 0
             }
             
         if cleaned_prices:

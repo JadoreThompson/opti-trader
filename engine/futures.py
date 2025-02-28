@@ -67,6 +67,7 @@ class FuturesEngine:
             order['standing_quantity'] = order['quantity']
         elif result.outcome == 1:
             order['status'] = OrderStatus.PARTIALLY_FILLED
+            ob.append(order, order['price'])
         
         self.collection.append(order)
     
@@ -75,10 +76,10 @@ class FuturesEngine:
         return self._match(order, ob, order['price'])
     
     def _handle_limit(self, order: dict, ob: Orderbook) -> None:
-        ob.append(order)
+        ob.append(order, order['limit_price'])
 
     def _match(self, order: dict, ob: Orderbook, price: float) -> MatchResult:
-        touched = []
+        touched: list[Position] = []
         filled: list[Position] = []
         book = 'bids' if order['side'] == 'sell' else 'asks'
         price: float | None = ob.best_price(order['side'], price)
@@ -91,7 +92,6 @@ class FuturesEngine:
             leftover_quant = existing_pos.order['standing_quantity'] - order['standing_quantity']
             
             if leftover_quant >= 0:
-                filled.append(order)
                 existing_pos.order['standing_quantity'] -= order['standing_quantity']
                 order['standing_quantity'] = 0
             else:
@@ -102,27 +102,21 @@ class FuturesEngine:
             if order['standing_quantity'] == 0:
                 break
         
-        self.loop.run_until_complete(self._handle_filled_orders(filled, ob))
+        self.loop.create_task(self._handle_filled_orders(filled, ob))
+        self.collection.extend([p.order for p in touched])
         
         if order['standing_quantity'] == 0:
             return MatchResult(2, price)
         
         if order['standing_quantity'] > 0:
-            ob.append(order)
             return MatchResult(1, None)
     
-    async def _handle_filled_orders(self, pos: list[Position], ob: Orderbook):
+    async def _handle_filled_orders(self, pos: list[Position], ob: Orderbook) -> None:
         for p in pos:
             ob.remove(p)
-            p.order['status'] = 'filled'
+            p.order['status'] = OrderStatus.FILLED
             
-        async with get_db_session() as sess:
-            await sess.execute(
-                update(Orders),
-                [p.order for p in pos]
-            )
-            
-            await sess.commit()
+        self.collection.extend([p.order for p in pos])
 
     async def _publish_changes(self) -> None:
         while True:
@@ -133,7 +127,6 @@ class FuturesEngine:
                             update(Orders),
                             self.collection
                         )
-                        print("Persisting")
                         await sess.commit()
                     self.collection.clear()
                 except Exception as e:
