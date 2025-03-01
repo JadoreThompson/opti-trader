@@ -1,4 +1,5 @@
 import argon2
+import redis
 import os
 
 from dotenv import load_dotenv
@@ -19,6 +20,13 @@ DB_ENGINE = create_async_engine(
     # pool_size=10, 
     # max_overflow=10, 
     echo_pool=True
+)
+
+REDIS_CLIENT = redis.asyncio.Redis(
+    connection_pool=redis.asyncio.connection.ConnectionPool(
+        connection_class=redis.asyncio.connection.Connection,
+        max_connections=100,
+    )
 )
 
 # Misc
