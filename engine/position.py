@@ -21,5 +21,4 @@ class Position:
         return self.__repr__()
 
     def __repr__(self) -> str:
-        # return f"Position(instrument={self.instrument}, side={self._order.side}, order=({self._order}), sl=({self.stop_loss}), tp=({self.take_profit}))"
-        return "[position] + " + self.order.__repr__()
+        return f"Position(order=({self.order}), sl=({self.stop_loss}), tp=({self.take_profit}))"

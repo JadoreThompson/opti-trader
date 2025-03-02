@@ -121,7 +121,7 @@ async def main(gen_fake: bool=False, num_users: int=1, num_orders: int=1) -> Non
                 if not p.is_alive():
                     raise Exception(f"{p.name} has died")
             await asyncio.sleep(2)
-    except (Exception, KeyboardInterrupt) as e:
+    except Exception as e:
         print("[pm][Error] => ", str(e))
         print("Terminating processes")
         
@@ -129,7 +129,7 @@ async def main(gen_fake: bool=False, num_users: int=1, num_orders: int=1) -> Non
             p.terminate()
             p.join()
             print(f"Terminated {p.name}")
-                
+        raise e
 
 if __name__ == "__main__":
     asyncio.run(main(True, 1000, 1000))

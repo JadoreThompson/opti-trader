@@ -25,19 +25,15 @@ MatchResult = namedtuple(
     ),
 )
 
-
 class FuturesEngine:
     def __init__(self, queue: multiprocessing.Queue = None) -> None:
         self.last_price = None
         self.thread: threading.Thread = None
         self.loop: asyncio.AbstractEventLoop = None
-
+        
         self._init_loop()
-
-        if not self.loop.is_running():
-            raise RuntimeError("Loop not configured")
         self.loop.create_task(self._publish_changes())
-
+        
         self.queue = queue or multiprocessing.Queue()
         self._order_books: dict[str, Orderbook] = {
             "BTCUSD": Orderbook(self.loop, "BTCUSD", 37),
@@ -48,6 +44,9 @@ class FuturesEngine:
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._set_loop, daemon=True)
         self.thread.start()
+        
+        if not self.loop.is_running():
+            raise RuntimeError("Loop is dead")
 
     def _set_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
@@ -64,7 +63,7 @@ class FuturesEngine:
     def _handle(self, order_data: dict):
         ob = self._order_books[order_data["instrument"]]
         order = Order(order_data, Tag.ENTRY, order_data["side"])
-        ogsq = order_data["standing_quantity"]
+        
         func: dict[OrderType, callable] = {
             OrderType.MARKET: self._handle_market,
             OrderType.LIMIT: self._handle_limit,
@@ -201,13 +200,13 @@ class FuturesEngine:
             if order.tag == Tag.ENTRY:
                 if order.order["status"] == OrderStatus.PARTIALLY_FILLED:
                     order.order["status"] = OrderStatus.FILLED
+                    self._place_tp_sl(order, ob)
             else:
-                print(f"Tag: {order.tag}")
+                print(f"[futures][_handle_filled_orders] - {str(order.order['order_id']):*^20} is a {order.tag} order")
                 ob.remove(order, 'all')
-                print(f"{str(order.order['order_id']):*^20}")
                 order.order["status"] = OrderStatus.CLOSED
+            self._collection.append(order.order)
         # print(f"[futures][handle_filled_orders] Appended: {orders}")
-        self._collection.extend([order.order for order in orders])
 
     async def _publish_changes(self) -> None:
         while True:

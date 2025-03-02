@@ -36,16 +36,28 @@ class Orderbook:
         """
         Appends order to tracking and to the book
         """
-        create_position = True
+        create_position = False
 
-        if order.order["order_id"] in self._tracker:
-            create_position = False
-            pos: Position = self._tracker[order.order["order_id"]]
+        # if order.order["order_id"] in self._tracker:
+        #     create_position = False
+        #     pos: Position = self._tracker[order.order["order_id"]]
 
+        #     if order.tag == Tag.TAKE_PROFIT:
+        #         pos.take_profit = order
+        #     else:
+        #         pos.stop_loss = order
+        try:
+            pos: Position = self.get(order.order['order_id'])
+            
             if order.tag == Tag.TAKE_PROFIT:
                 pos.take_profit = order
+                # print(f"[orderbook][append] Take Profit Order appended to {order.order['order_id']}")
             else:
                 pos.stop_loss = order
+                # print(f"[orderbook][append] Stop Loss Order appended to {order.order['order_id']}")
+            # print("[orderbook][append] - Updated position - ", pos)
+        except ValueError:
+            create_position = True
 
         if create_position:
             self._tracker.setdefault(order.order['order_id'], Position(order))
@@ -69,18 +81,23 @@ class Orderbook:
         return pos
 
     def remove(self, order: Order, mode: Literal["single", "all"] = "single") -> None:
-        remove_func = {
+        func = {
             "single": self.remove_single,
             "all": self.remove_all
         }.get(mode)
 
-        if remove_func:
-            remove_func(order)
+        if func:
+            func(order)
         else:
-            raise ValueError(f"Mode must be of all, single")
+            raise ValueError("Mode must be of all, single")
 
     def remove_single(self, order: Order) -> None:
-        price = order.order["price"] or order.order["limit_price"]
+        if order.tag == Tag.ENTRY:
+            price = order.order["price"] or order.order["limit_price"]
+        elif order.tag == Tag.TAKE_PROFIT:
+            price = order.order['take_profit']
+        elif order.tag == Tag.STOP_LOSS:
+            price = order.order['stop_loss']
 
         if order.side == Side.BUY:
             try:
@@ -99,20 +116,22 @@ class Orderbook:
                 pass
             
     def remove_all(self, order: Order) -> None:
-        pos: Position = self.get(order.order['order_id'])
-        self.remove_single(pos.order)
+        pos: Position = self._tracker.pop(order.order['order_id'])
+        self.remove_single(order)
         
         if pos.take_profit is not None:
             self.remove_single(pos.take_profit)
         if pos.stop_loss is not None:
             self.remove_single(pos.stop_loss)
-        
-        del self._tracker[order.order['order_id']]
 
-    def get(self, order_id: str) -> Optional[Position]:
-        if order_id not in self._tracker:
+    def get(self, order_id: str | UUID, **kwargs) -> Optional[Position]:
+        pos = self._tracker.get(order_id)
+        if pos is None:
+            # if 'tag'in kwargs:
+            #     print(kwargs.get('tag'), pos)
             raise ValueError("Position related to order doesn't exist")
-        return self._tracker[order_id]
+        # if order_id not in self._tracker:
+        return pos
 
     def best_price(self, side: Side, price: float) -> Optional[float]:
         price_levels = self.bid_levels if side == Side.BUY else self.ask_levels
@@ -163,7 +182,7 @@ class Orderbook:
                 )
             except Exception as e:
                 if not isinstance(e, IndexError):
-                    print(f"Redis error: {e}")
+                    print('[orderbook][_publis_price] - ', type(e), str(e))
 
             await asyncio.sleep(1)
 
