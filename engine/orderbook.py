@@ -48,8 +48,7 @@ class Orderbook:
                 pos.stop_loss = order
 
         if create_position:
-            pos = Position(order)
-            self._tracker[order.order["order_id"]] = pos
+            self._tracker.setdefault(order.order['order_id'], Position(order))
 
         if order.side == Side.BUY:
             self.bids.setdefault(price, [])
@@ -103,9 +102,9 @@ class Orderbook:
         pos: Position = self.get(order.order['order_id'])
         self.remove_single(pos.order)
         
-        if pos.take_profit:
+        if pos.take_profit is not None:
             self.remove_single(pos.take_profit)
-        if pos.stop_loss:
+        if pos.stop_loss is not None:
             self.remove_single(pos.stop_loss)
         
         del self._tracker[order.order['order_id']]

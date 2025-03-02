@@ -5,16 +5,6 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from config import DB_URL
-from utils.db import write_sqlalchemy_url
-
-# if DEV:
-#     url = DB_URL.replace('+aiosqlite', '')
-# else:
-url= DB_URL.replace('+asyncpg', '')
-
-write_sqlalchemy_url(url)
-
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

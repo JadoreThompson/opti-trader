@@ -6,7 +6,7 @@ import uvicorn
 
 from sqlalchemy import text
 from enums import OrderType, Side
-from utils.db import get_db_session
+from utils.db import get_db_session, write_sqlalchemy_url
 
 BASE_URL = "http://192.168.1.145:8000/api"
 
@@ -87,8 +87,9 @@ async def load_db(num_users: int, num_orders: int) -> None:
 
 async def migrate():
     import subprocess
-    from config import DEV_MODE
-    
+    from config import DEV_MODE,DB_URL
+
+    write_sqlalchemy_url(DB_URL.replace('+asyncpg', ''))
     subprocess.run(['alembic', 'upgrade', 'head'], check=True)
     
     async with get_db_session() as sess:

@@ -1,3 +1,4 @@
+from functools import cached_property
 from enums import Side
 from .enums import Tag
 
@@ -7,11 +8,11 @@ class Order:
         self._tag = tag
         self._side = side
     
-    @property
+    @cached_property
     def tag(self) -> Tag:
         return self._tag
     
-    @property
+    @cached_property
     def side(self) -> Side:
         return self._side
     

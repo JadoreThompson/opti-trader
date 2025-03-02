@@ -132,9 +132,9 @@ class FuturesEngine:
         if target_price not in ob[book]:
             return MatchResult(0, None)
 
-        if self.last_price != target_price:
-            self.last_price = target_price
-            print("Target Price: ", self.last_price)
+        # if self.last_price != target_price:
+        #     self.last_price = target_price
+        #     print("Target Price: ", self.last_price)
 
         for existing_order in ob[book][target_price]:
             leftover_quant = (
@@ -202,6 +202,7 @@ class FuturesEngine:
                 if order.order["status"] == OrderStatus.PARTIALLY_FILLED:
                     order.order["status"] = OrderStatus.FILLED
             else:
+                print(f"Tag: {order.tag}")
                 ob.remove(order, 'all')
                 print(f"{str(order.order['order_id']):*^20}")
                 order.order["status"] = OrderStatus.CLOSED
