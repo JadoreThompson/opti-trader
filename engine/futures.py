@@ -197,12 +197,12 @@ class FuturesEngine:
         for order in orders:
             ob.remove(order)
             # print(f"[futures][_handle_filled_orders] Tag: ", order.tag)
-            if order.tag == Tag.ENTRY:
-                if order.order["status"] == OrderStatus.PARTIALLY_FILLED:
-                    order.order["status"] = OrderStatus.FILLED
-                    self._place_tp_sl(order, ob)
+            if order.tag == Tag.ENTRY:    
+                # print(order.order['order_id'], order.order['status'])
+                order.order["status"] = OrderStatus.FILLED
+                self._place_tp_sl(order, ob)
             else:
-                print(f"[futures][_handle_filled_orders] - {str(order.order['order_id']):*^20} is a {order.tag} order")
+                # print(f"[futures][_handle_filled_orders] - {str(order.order['order_id']):*^20} is a {order.tag} order")
                 ob.remove(order, 'all')
                 order.order["status"] = OrderStatus.CLOSED
             self._collection.append(order.order)
