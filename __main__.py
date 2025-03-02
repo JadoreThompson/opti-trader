@@ -1,4 +1,5 @@
 import asyncio
+import random
 import httpx
 import multiprocessing
 import uvicorn
@@ -18,6 +19,7 @@ def run_server(queue: multiprocessing.Queue) -> None:
         host="0.0.0.0", 
         port=8000, 
         # reload=True
+        log_config=None,
     )
 
 
@@ -44,27 +46,30 @@ async def gen_fake_user(session) -> None:
 async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
     import random
     
+    randnum = lambda: round(random.random() * 100, 2)
     for _ in range(num_orders):
+        # await asyncio.sleep(random.randint(1, 2))
         order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
         payload = {
-            'amount': random.randint(1, 15),
+            'amount': random.randint(1, 5),
             'instrument': 'BTCUSD',
             'quantity': random.randint(1, 50),
             'market_type': 'futures',
             'order_type': order_type,
             'side': random.choice([Side.BUY, Side.SELL]),
+            'take_profit': random.choice([randnum(), None]),
+            'stop_loss': random.choice([randnum(), None]),
         }
         
         if order_type == OrderType.LIMIT:
-            payload['limit_price'] = round(random.random() * 100, 2)
+            payload['limit_price'] = randnum()
         
         await session.post(
             BASE_URL + '/order/', 
             json=payload,
             cookies=cookie,
         )
-        
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.1)
 
 
 async def load_db(num_users: int, num_orders: int) -> None:
@@ -72,12 +77,11 @@ async def load_db(num_users: int, num_orders: int) -> None:
         async with httpx.AsyncClient() as sess:
             try:
                 cookie = await gen_fake_user(sess)
-                await asyncio.sleep(1)
                 await gen_fake_orders(sess, num_orders, cookie)
             except Exception as e:
                 print(f"[{load_db.__name__}]", type(e), str(e))
     
-    for batch in range(0, num_users, 3):
+    for _ in range(0, num_users, 3):
         await asyncio.gather(*[generate() for _ in range(3)])
 
 
@@ -127,4 +131,4 @@ async def main(gen_fake: bool=False, num_users: int=1, num_orders: int=1) -> Non
                 
 
 if __name__ == "__main__":
-    asyncio.run(main(True, 20, 20))
+    asyncio.run(main(True, 1000, 1000))

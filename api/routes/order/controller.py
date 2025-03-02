@@ -1,7 +1,7 @@
 from sqlalchemy import insert
 
 from db_models import Orders
-from enums import Side
+from enums import MarketType, Side
 from utils.db import get_db_session
 from .models import OrderWrite
 from ...config import FUTURES_QUEUE
@@ -46,9 +46,10 @@ async def enter_order(details: dict, user_id: str):
         order = res.scalar()
         await sess.commit()
     
-    FUTURES_QUEUE.put_nowait({
-        k: v 
-        for k, v in vars(order).items() 
-        if k != '_sa_instance_state'
-    })
+    if details['market_type'] == MarketType.FUTURES:
+        FUTURES_QUEUE.put_nowait({
+            k: v 
+            for k, v in vars(order).items() 
+            if k != '_sa_instance_state'
+        })
     
