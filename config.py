@@ -17,9 +17,11 @@ DB_URL = \
 DB_ENGINE = create_async_engine(
     DB_URL.format(quote(os.getenv('DB_PASSWORD'))),
     future=True, 
-    # pool_size=10, 
-    # max_overflow=10, 
-    echo_pool=True
+    echo_pool=True,
+    pool_size=50,
+    max_overflow=100,
+    pool_timeout=30,
+    pool_recycle=600,
 )
 
 REDIS_CLIENT = redis.asyncio.Redis(

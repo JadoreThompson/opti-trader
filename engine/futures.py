@@ -43,8 +43,8 @@ class FuturesEngine:
             time.sleep(i)
             if self.pusher.is_running:
                 break
-            warnings.warn(f"Pusher not running - sleeping {i} seconds")
             i += 1
+            warnings.warn("Pusher not running - sleeping {} seconds".format(i))
 
         self.queue = queue or multiprocessing.Queue()
         self._order_books: dict[str, OrderBook] = {

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from email.policy import HTTP
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 
@@ -17,5 +18,8 @@ async def get_account(jwt: JWT = Depends(verify_cookie)) -> Profile:
             .where(Users.user_id == jwt['sub'])
         )
         user = res.scalar()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User doesn't exist")
     
     return Profile(**vars(user))
