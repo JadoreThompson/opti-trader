@@ -1,17 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
-
+from httpx import request
+from pydantic import ValidationError
 
 from config import REDIS_CLIENT
 from .controller import enter_order, validate_order_details
-from .models import OrderWrite
-from ...middleware import verify_cookie
+from .manager import ClientManager
+from .models import OrderWrite, SocketPayload
+from ...middleware import JWT, verify_cookie, verify_cookie_http
 
 order = APIRouter(prefix="/order", tags=["order"])
+manager = ClientManager()
 
+
+@order.websocket("/ws")
+async def order_stream(ws: WebSocket):
+    try:
+        jwt = verify_cookie(ws.cookies)
+        await manager.connect(ws)
+        m = await ws.receive_text()
+
+        payload = SocketPayload(**json.loads(m))
+        await manager.append(ws, jwt["sub"], payload.content)
+
+        while True:
+            await ws.receive()
+    except RuntimeError:
+        await manager.disconnect(jwt["sub"])
 
 @order.post("/")
-async def create_order(body: OrderWrite, token: dict = Depends(verify_cookie)):
+async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http)):
     p = await REDIS_CLIENT.get(f"{body.instrument}.price")
 
     if not p:
@@ -19,8 +38,7 @@ async def create_order(body: OrderWrite, token: dict = Depends(verify_cookie)):
 
     try:
         validate_order_details(float(p), body)
-        await enter_order(body.model_dump(), token["sub"])
+        await enter_order(body.model_dump(), jwt["sub"])
         return JSONResponse(status_code=201, content={"message": "Order placed"})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-

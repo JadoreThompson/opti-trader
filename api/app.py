@@ -9,7 +9,11 @@ app = FastAPI(root_path="/api")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        # "*", 
+        "http://192.168.1.145",
+        "http://192.168.1.145:5173",
+    ],
     allow_headers=["*"],
     allow_methods=["*"],
     allow_credentials=True,
@@ -18,17 +22,3 @@ app.add_middleware(
 app.include_router(auth)
 app.include_router(account)
 app.include_router(order)
-
-from sqlalchemy import insert
-from db_models import Orders
-from utils.db import get_db_session
-
-
-async def enter_order(details: dict):
-    async with get_db_session() as sess:
-        await sess.execute(
-            insert(Orders)
-            .values(details)
-        )
-        await sess.commit()
-    

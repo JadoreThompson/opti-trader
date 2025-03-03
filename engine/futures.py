@@ -33,45 +33,39 @@ class FuturesEngine:
         self.pusher = pusher or Pusher()
         self.last_price = None
         self.thread: threading.Thread = None
-        self.loop: asyncio.AbstractEventLoop = None
-
-        self._init_loop()
-        self.loop.create_task(self.pusher.run())
+        self.queue = queue or multiprocessing.Queue()
+        self._collection: list[dict] = []
         
-        i = 1
-        while i < 5:
-            time.sleep(i)
+    async def run(self):
+        asyncio.create_task(self.pusher.run())
+        
+        i = 0
+        while i < 20:
             if self.pusher.is_running:
                 break
             i += 1
-            warnings.warn("Pusher not running - sleeping {} seconds".format(i))
-
-        self.queue = queue or multiprocessing.Queue()
+            m = f"Waiting for pusher - Sleeping for {i} seconds"
+            warnings.warn(m)
+            await asyncio.sleep(i) 
+        
+        if i == 20:
+            raise RuntimeError("Failed to connect to pusher")
+        
         self._order_books: dict[str, OrderBook] = {
-            "BTCUSD": OrderBook(self.loop, "BTCUSD", 37, self.pusher),
+            "BTCUSD": OrderBook("BTCUSD", 37, self.pusher),
         }
-        self._collection: list[dict] = []
 
-    def _init_loop(self) -> None:
-        self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self._set_loop, daemon=True)
-        self.thread.start()
-
-        if not self.loop.is_running():
-            raise RuntimeError("Loop is dead")
-
-    def _set_loop(self) -> None:
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-
-    def run(self) -> None:
+        await self._listen()
+    
+    async def _listen(self) -> None:
         while True:
             try:
                 message = self.queue.get()
                 self._handle(message)
+                await asyncio.sleep(0.01)
             except queue.Empty:
                 continue
-
+        
     def _handle(self, order_data: dict):
         ob = self._order_books[order_data["instrument"]]
         order = Order(order_data, Tag.ENTRY, order_data["side"])
@@ -263,5 +257,5 @@ class FuturesEngine:
 
                 order.payload["realised_pnl"] = upl
                 return
-        
+
         order.payload["unrealised_pnl"] = upl

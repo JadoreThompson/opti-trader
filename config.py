@@ -24,12 +24,14 @@ DB_ENGINE = create_async_engine(
     pool_recycle=600,
 )
 
+# Redis
 REDIS_CLIENT = redis.asyncio.Redis(
     connection_pool=redis.asyncio.connection.ConnectionPool(
         connection_class=redis.asyncio.connection.Connection,
         max_connections=100,
     )
 )
+ORDER_UPDATE_CHANNEL = "order.updates"
 
 # Misc
 PH = argon2.PasswordHasher(

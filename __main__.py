@@ -7,7 +7,7 @@ import uvicorn
 
 from faker import Faker
 from sqlalchemy import text
-from enums import OrderType, Side
+from enums import MarketType, OrderType, Side
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 fkr = Faker()
@@ -33,7 +33,8 @@ def run_engine(queue: multiprocessing.Queue) -> None:
     from engine.pusher import Pusher
 
     engine = FuturesEngine(queue, Pusher())
-    engine.run()
+    # engine.run()
+    asyncio.run(engine.run())
 
 
 async def gen_fake_user(session) -> None:
@@ -58,9 +59,9 @@ async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
         order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
         payload = {
             "amount": random.randint(1, 5),
-            "instrument": "BTCUSD",
             "quantity": random.randint(1, 50),
-            "market_type": "futures",
+            "instrument": "BTCUSD",
+            "market_type": MarketType.FUTURES,
             "order_type": order_type,
             "side": random.choice([Side.BUY, Side.SELL]),
             "take_profit": random.choice([randnum(), None]),
@@ -75,6 +76,7 @@ async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
             json=payload,
             cookies=cookie,
         )
+        
         await asyncio.sleep(0.1)
 
 
@@ -139,4 +141,4 @@ async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) 
 
 
 if __name__ == "__main__":
-    asyncio.run(main(True, 1000, 1000))
+    asyncio.run(main(True, 10, 1_000_000))

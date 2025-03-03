@@ -51,6 +51,10 @@ async def enter_order(details: dict, user_id: str) -> None:
         await sess.commit()
 
     if details["market_type"] == MarketType.FUTURES:
-        FUTURES_QUEUE.put_nowait(
-            {k: v for k, v in vars(order).items() if k != "_sa_instance_state"}
-        )
+        payload = vars(order)
+        del payload['_sa_instance_state']
+        # payload['created_at'] = str(payload['created_at'])
+        FUTURES_QUEUE.put_nowait(payload)
+        # FUTURES_QUEUE.put_nowait(
+        #     {k: v for k, v in vars(order).items() if k != "_sa_instance_state"}
+        # )

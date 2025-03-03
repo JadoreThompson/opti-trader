@@ -22,24 +22,19 @@ from .utils import calc_sell_pl, calc_buy_pl, calculate_upl
 class OrderBook:
     def __init__(
         self,
-        loop: asyncio.AbstractEventLoop,
         instrument: str,
         price: float = 150,
         pusher: Pusher = None,
     ) -> None:
         self._price = price
         self._price_queue = deque()
-        self._loop = loop
 
         if pusher is None:
             warnings.warn("Pusher not provided, configuring pusher")
             pusher = Pusher()
-            self._loop.create_task(pusher.run())
+            asyncio.create_task(pusher.run())
 
-        if not pusher.is_running:
-            raise RuntimeError("Pusher failed to run")
-
-        self._loop.create_task(self._publish_price())
+        asyncio.create_task(self._publish_price())
 
         self.pusher = pusher
         self.instrument = instrument
@@ -162,8 +157,8 @@ class OrderBook:
     def set_price(self, price: float) -> None:
         self._price = price
         self._price_queue.append(price)
-        self._loop.create_task(self._update_upl(price))
-        
+        asyncio.create_task(self._update_upl(price))
+
     async def _publish_price(
         self,
     ) -> None:
@@ -175,9 +170,9 @@ class OrderBook:
             self._price_queue.append(self._price)
 
             try:
-                await REDIS_CLIENT.set(
-                    f"{self.instrument}.price", str(self._price_queue.popleft())
-                )
+                price = self._price_queue.popleft()
+                await REDIS_CLIENT.set(f"{self.instrument}.price", str(price))
+                await REDIS_CLIENT.publish(f"{self.instrument}.live", price)
             except Exception as e:
                 if not isinstance(e, IndexError):
                     print("[orderbook][_publish_price] - ", type(e), str(e))

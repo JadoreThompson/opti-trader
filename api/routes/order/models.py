@@ -1,8 +1,10 @@
-from typing import Optional
+from typing import Any, Optional
 from pydantic import Field, ValidationInfo, field_validator
 
+from api.routes.order.enums import SocketPayloadCategory
 from enums import MarketType, OrderType, Side
 from ...base import CustomBase
+
 
 class OrderWrite(CustomBase):
     amount: float
@@ -22,8 +24,8 @@ class OrderWrite(CustomBase):
     
     @field_validator('side')
     def tp_sl_validator(cls, value: Side, values: ValidationInfo):
-        tp = values.data.get('take_profit', None)
-        sl = values.data.get('stop_loss', None)
+        tp = values.data.get('take_profit')
+        sl = values.data.get('stop_loss')
         
         if tp is None and sl is None:
             return value
@@ -40,4 +42,31 @@ class OrderWrite(CustomBase):
                     raise ValueError("TP must be greater than SL")
                 
         return value
+
+
+class OrderRead(CustomBase):
+    order_id: str
+    amount: float
+    quantity: int
+    instrument: str
+    market_type: MarketType
+    order_type: OrderType
+    side: Side
+    limit_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
     
+
+class PricePayload(CustomBase):
+    price: float
+    time: int
+
+
+class ConnectPayload(CustomBase):
+    instrument: str
+
+
+class SocketPayload(CustomBase):
+    """Used for both posting and receiving messages"""
+    category: SocketPayloadCategory
+    content: dict
