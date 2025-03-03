@@ -1,30 +1,47 @@
 import asyncio
 import json
 import random
+import warnings
 
 from collections import deque
 from typing import Literal, Optional
 from uuid import UUID
+from sqlalchemy import update
 
 from config import REDIS_CLIENT
-from enums import Side
+from db_models import Users
+from enums import OrderStatus, Side
+from utils.db import get_db_session
 from .enums import Tag
 from .order import Order
 from .position import Position
+from .pusher import Pusher
+from .utils import calc_sell_pl, calc_buy_pl, calculate_upl
 
 
-class Orderbook:
+class OrderBook:
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop,
         instrument: str,
         price: float = 150,
+        pusher: Pusher = None,
     ) -> None:
         self._price = price
         self._price_queue = deque()
         self._loop = loop
+
+        if pusher is None:
+            warnings.warn("Pusher not provided, configuring pusher")
+            pusher = Pusher()
+            self._loop.create_task(pusher.run())
+
+        if not pusher.is_running:
+            raise RuntimeError("Pusher failed to run")
+
         self._loop.create_task(self._publish_price())
 
+        self.pusher = pusher
         self.instrument = instrument
         self.bids: dict[float, list[Order]] = {}
         self.asks: dict[float, list[Order]] = {}
@@ -38,29 +55,18 @@ class Orderbook:
         """
         create_position = False
 
-        # if order.order["order_id"] in self._tracker:
-        #     create_position = False
-        #     pos: Position = self._tracker[order.order["order_id"]]
-
-        #     if order.tag == Tag.TAKE_PROFIT:
-        #         pos.take_profit = order
-        #     else:
-        #         pos.stop_loss = order
         try:
-            pos: Position = self.get(order.order['order_id'])
-            
+            pos: Position = self.get(order.payload["order_id"])
+
             if order.tag == Tag.TAKE_PROFIT:
                 pos.take_profit = order
-                # print(f"[orderbook][append] Take Profit Order appended to {order.order['order_id']}")
             else:
                 pos.stop_loss = order
-                # print(f"[orderbook][append] Stop Loss Order appended to {order.order['order_id']}")
-            # print("[orderbook][append] - Updated position - ", pos)
         except ValueError:
             create_position = True
 
         if create_position:
-            self._tracker.setdefault(order.order['order_id'], Position(order))
+            self._tracker.setdefault(order.payload["order_id"], Position(order))
 
         if order.side == Side.BUY:
             self.bids.setdefault(price, [])
@@ -71,7 +77,7 @@ class Orderbook:
             self.asks[price].append(order)
 
     def track(self, order: Order) -> Position:
-        pos = self._tracker.setdefault(order.order["order_id"], Position(order))
+        pos = self._tracker.setdefault(order.payload["order_id"], Position(order))
 
         if order.tag == Tag.STOP_LOSS:
             pos.stop_loss = order
@@ -81,10 +87,7 @@ class Orderbook:
         return pos
 
     def remove(self, order: Order, mode: Literal["single", "all"] = "single") -> None:
-        func = {
-            "single": self.remove_single,
-            "all": self.remove_all
-        }.get(mode)
+        func = {"single": self.remove_single, "all": self.remove_all}.get(mode)
 
         if func:
             func(order)
@@ -93,11 +96,11 @@ class Orderbook:
 
     def remove_single(self, order: Order) -> None:
         if order.tag == Tag.ENTRY:
-            price = order.order["price"] or order.order["limit_price"]
+            price = order.payload["price"] or order.payload["limit_price"]
         elif order.tag == Tag.TAKE_PROFIT:
-            price = order.order['take_profit']
+            price = order.payload["take_profit"]
         elif order.tag == Tag.STOP_LOSS:
-            price = order.order['stop_loss']
+            price = order.payload["stop_loss"]
 
         if order.side == Side.BUY:
             try:
@@ -114,11 +117,11 @@ class Orderbook:
                     self.asks.pop(price, None)
             except (ValueError, KeyError):
                 pass
-            
+
     def remove_all(self, order: Order) -> None:
-        pos: Position = self._tracker.pop(order.order['order_id'])
+        pos: Position = self._tracker.pop(order.payload["order_id"])
         self.remove_single(order)
-        
+
         if pos.take_profit is not None:
             self.remove_single(pos.take_profit)
         if pos.stop_loss is not None:
@@ -127,10 +130,7 @@ class Orderbook:
     def get(self, order_id: str | UUID, **kwargs) -> Optional[Position]:
         pos = self._tracker.get(order_id)
         if pos is None:
-            # if 'tag'in kwargs:
-            #     print(kwargs.get('tag'), pos)
             raise ValueError("Position related to order doesn't exist")
-        # if order_id not in self._tracker:
         return pos
 
     def best_price(self, side: Side, price: float) -> Optional[float]:
@@ -162,7 +162,8 @@ class Orderbook:
     def set_price(self, price: float) -> None:
         self._price = price
         self._price_queue.append(price)
-
+        self._loop.create_task(self._update_upl(price))
+        
     async def _publish_price(
         self,
     ) -> None:
@@ -170,21 +171,37 @@ class Orderbook:
         randnum = lambda: round(random.random() * 100, 2)
 
         while True:
-            # self._price = randnum()
-            # self._price_queue.append(self._price)
-            # print(self._price_queue)
-
             self._price = randnum()
             self._price_queue.append(self._price)
+
             try:
                 await REDIS_CLIENT.set(
                     f"{self.instrument}.price", str(self._price_queue.popleft())
                 )
             except Exception as e:
                 if not isinstance(e, IndexError):
-                    print('[orderbook][_publis_price] - ', type(e), str(e))
+                    print("[orderbook][_publish_price] - ", type(e), str(e))
 
             await asyncio.sleep(1)
+
+    async def _update_upl(self, price: float) -> None:
+        while True:
+            if self._tracker:
+                tracker_copy = self._tracker.copy()
+                for _, pos in tracker_copy.items():
+                    if pos.order.payload["status"] in (
+                        OrderStatus.FILLED,
+                        OrderStatus.PARTIALLY_CLOSED,
+                    ):
+                        calculate_upl(pos.order, price, self)
+                        if pos.order.payload["status"] == OrderStatus.CLOSED:
+                            self.pusher.append(pos.order.payload, "fast")
+                async with get_db_session() as sess:
+                    await sess.execute(
+                        update(Users),
+                        [pos.order.payload for _, pos in tracker_copy.items()],
+                    )
+                    await sess.commit()
 
     @property
     def price(self) -> float:

@@ -1,6 +1,9 @@
-from uuid import uuid4
 import sqlalchemy
+
+from datetime import datetime
+from uuid import uuid4
 from sqlalchemy import (
+    DateTime,
     Float, 
     ForeignKey, 
     UUID, 
@@ -50,16 +53,21 @@ class Orders(Base):
     
     order_id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey('users.user_id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
     instrument: Mapped[str] = mapped_column(String, nullable=False)
     side: Mapped[str] = mapped_column(String, nullable=False)
     market_type: Mapped[str] = mapped_column(String, nullable=False)
     order_type: Mapped[str] = mapped_column(String, nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=True)
+    limit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    filled_price: Mapped[float] = mapped_column(Float, nullable=True)
+    closed_price: Mapped[float] = mapped_column(Float, nullable=True)
+    realised_pnl: Mapped[float] = mapped_column(Float, nullable=True)
+    unrealised_pnl: Mapped[float] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default='pending')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    limit_price: Mapped[float] = mapped_column(Float, nullable=True)
     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
     

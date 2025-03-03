@@ -31,6 +31,14 @@ def write_sqlalchemy_url(db_url: str) -> None:
         config.write(f)    
 
 
+def remove_sqlalchemy_url():
+    config = configparser.ConfigParser(interpolation=None)
+    config.read('alembic.ini')
+    config['alembic'].update({'sqlalchemy.url': ''})
+    
+    with open('alembic.ini', 'w') as f:
+        config.write(f)    
+
 def alembic_upgrade_head() -> None:
     from dotenv import load_dotenv
     load_dotenv()

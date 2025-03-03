@@ -4,7 +4,7 @@ from .order import Order
 
 class Position:
     def __init__(self, order: Order) -> None:
-        self._instrument = order.order["instrument"]
+        self._instrument = order.payload["instrument"]
         self._order = order
         self.stop_loss: Optional[Order] = None
         self.take_profit: Optional[Order] = None

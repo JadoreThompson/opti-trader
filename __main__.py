@@ -6,7 +6,7 @@ import uvicorn
 
 from sqlalchemy import text
 from enums import OrderType, Side
-from utils.db import get_db_session, write_sqlalchemy_url
+from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 BASE_URL = "http://192.168.1.145:8000/api"
 
@@ -25,7 +25,9 @@ def run_server(queue: multiprocessing.Queue) -> None:
 
 def run_engine(queue: multiprocessing.Queue) -> None:
     from engine.futures import FuturesEngine
-    engine = FuturesEngine(queue)
+    from engine.pusher import Pusher
+    
+    engine = FuturesEngine(queue, Pusher())
     engine.run()
 
 
@@ -122,9 +124,9 @@ async def main(gen_fake: bool=False, num_users: int=1, num_orders: int=1) -> Non
                     raise Exception(f"{p.name} has died")
             await asyncio.sleep(2)
     except Exception as e:
+        remove_sqlalchemy_url()
         print("[pm][Error] => ", str(e))
         print("Terminating processes")
-        
         for p in ps:
             p.terminate()
             p.join()
