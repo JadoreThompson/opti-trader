@@ -61,6 +61,7 @@ class FuturesEngine:
         while True:
             try:
                 message = self.queue.get()
+                print(message)
                 self._handle(message)
                 await asyncio.sleep(0.01)
             except queue.Empty:
@@ -79,7 +80,7 @@ class FuturesEngine:
 
         if order_data["order_type"] == OrderType.LIMIT:
             return
-
+        print(result)
         if result.outcome == 2:
             ob.set_price(result.price)
             order_data["status"] = OrderStatus.FILLED

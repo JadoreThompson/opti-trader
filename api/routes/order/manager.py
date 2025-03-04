@@ -32,7 +32,10 @@ class ClientManager:
         self._connections.pop(user_id, None)
 
     async def append(self, ws: WebSocket, user_id: str, payload: ConnectPayload):
-        self._connections[user_id] = {"instrument": payload['instrument'], "websocket": ws}
+        self._connections[user_id] = {
+            "instrument": payload["instrument"],
+            "websocket": ws,
+        }
 
     async def listen_to_price(self) -> None:
         instrument = "BTCUSD"

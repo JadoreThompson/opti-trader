@@ -2,8 +2,11 @@ from email.policy import HTTP
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
+from enums import OrderStatus
 
-from db_models import Users
+
+from ..order.models import OrderRead
+from db_models import Orders, Users
 from utils.db import get_db_session
 from .model import Profile
 from ...middleware import JWT, verify_cookie_http
@@ -21,3 +24,10 @@ async def get_account(jwt: JWT = Depends(verify_cookie_http)) -> Profile:
         raise HTTPException(status_code=404, detail="User doesn't exist")
 
     return Profile(**vars(user))
+
+
+@account.get("/orders")
+async def get_orders(jwt: JWT = Depends(verify_cookie_http)) -> list[OrderRead]:
+    async with get_db_session() as sess:
+        res = await sess.execute(select(Orders).where(Orders.user_id == jwt["sub"]))
+    return [OrderRead(**vars(order)) for order in res.scalars().all()]

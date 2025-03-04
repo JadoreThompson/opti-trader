@@ -1,8 +1,6 @@
 import json
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from fastapi.responses import JSONResponse
-from httpx import request
-from pydantic import ValidationError
 
 from config import REDIS_CLIENT
 from .controller import enter_order, validate_order_details
@@ -29,6 +27,7 @@ async def order_stream(ws: WebSocket):
     except RuntimeError:
         await manager.disconnect(jwt["sub"])
 
+
 @order.post("/")
 async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http)):
     p = await REDIS_CLIENT.get(f"{body.instrument}.price")
@@ -37,7 +36,7 @@ async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http))
         raise HTTPException(status_code=400, detail="Invalid instrument")
 
     try:
-        validate_order_details(float(p), body)
+        validate_order_details(float(p.decode()), body)
         await enter_order(body.model_dump(), jwt["sub"])
         return JSONResponse(status_code=201, content={"message": "Order placed"})
     except ValueError as e:

@@ -24,7 +24,7 @@ def run_server(queue: multiprocessing.Queue) -> None:
         host="0.0.0.0",
         port=8000,
         # reload=True
-        log_config=None,
+        # log_config=None,
     )
 
 
@@ -77,7 +77,7 @@ async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
             cookies=cookie,
         )
         
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
 
 
 async def load_db(num_users: int, num_orders: int) -> None:
