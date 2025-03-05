@@ -9,11 +9,9 @@ import redis.asyncio.client
 import uvicorn
 
 from faker import Faker
-from redis.lock import Lock
 from sqlalchemy import text
 from config import REDIS_CLIENT
 from enums import MarketType, OrderType, Side
-from imp import lock_held
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 fkr = Faker()
@@ -41,7 +39,7 @@ def run_engine(queue: multiprocessing.Queue, ) -> None:
     from engine.pusher import Pusher
 
     lock = REDIS_CLIENT.lock("zenz")
-    engine = FuturesEngine(lock, queue,)
+    engine = FuturesEngine(Pusher(lock), queue,)
     # engine.run()
     asyncio.run(engine.run())
 
@@ -52,12 +50,13 @@ async def gen_fake_user(session) -> None:
         "email": fkr.email(),
         "password": fkr.word(),
     }
-    print(f"{"*" * 20}\n{json.dumps(payload, indent=4)}\n{"*" * 20}")
-    await session.post(
+    # print(f"{"*" * 20}\n{json.dumps(payload, indent=4)}\n{"*" * 20}")
+    rsp = await session.post(
         BASE_URL + "/auth/register",
         json=payload,
     )
-    print(session)
+    print("[gen_fake_user] - ", rsp)
+    # print(session)
 
 
 async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
@@ -65,8 +64,8 @@ async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
     randnum = lambda: round(random.random() * 100, 2)
     
     for _ in range(num_orders):
-        # await asyncio.sleep(random.random() * 10)
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(random.random() * 10)
+        # await asyncio.sleep(0.05)
         order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
         payload = {
             "amount": random.randint(1, 5),
@@ -94,6 +93,7 @@ async def load_db(num_users: int, num_orders: int) -> None:
         async with httpx.AsyncClient() as sess:
             try:
                 cookie = await gen_fake_user(sess)
+                print(cookie)
                 await gen_fake_orders(sess, num_orders, cookie)
             except Exception as e:
                 print(f"[{load_db.__name__}]", type(e), str(e))
@@ -123,7 +123,7 @@ async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) 
     # lock = Lock(REDIS_CLIENT, "Myredislock")
     ps = [
         multiprocessing.Process(target=run_server, args=(queue,), name="server"),
-        # multiprocessing.Process(target=run_engine, args=(queue,), name="engine"),
+        multiprocessing.Process(target=run_engine, args=(queue,), name="engine"),
     ]
 
     for p in ps:

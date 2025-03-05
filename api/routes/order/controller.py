@@ -38,8 +38,8 @@ async def enter_order(details: dict, user_id: str) -> None:
     details["standing_quantity"] = details["quantity"]
     details["user_id"] = user_id
 
-    async with DB_LOCK:
-        print("[enter_order] I've got the lock now")
+    async with DB_LOCK:        
+        # print("[enter_order] I've got the lock now")
         async with get_db_session() as sess:
             res = await sess.execute(select(Users.balance).where(Users.user_id == user_id))
             
@@ -55,8 +55,5 @@ async def enter_order(details: dict, user_id: str) -> None:
     if details["market_type"] == MarketType.FUTURES:
         payload = vars(order)
         del payload['_sa_instance_state']
-        # payload['created_at'] = str(payload['created_at'])
+        print('put payload:', payload)
         FUTURES_QUEUE.put_nowait(payload)
-        # FUTURES_QUEUE.put_nowait(
-        #     {k: v for k, v in vars(order).items() if k != "_sa_instance_state"}
-        # )

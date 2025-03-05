@@ -27,10 +27,10 @@ MatchResult = namedtuple(
 
 class FuturesEngine:
     def __init__(
-        self, lock, queue: multiprocessing.Queue = None, pusher: Pusher = None
+        self, pusher: Pusher, queue: multiprocessing.Queue = None,
     ) -> None:
-        self.lock = lock
-        self.pusher = pusher or Pusher(self.lock)
+        self.pusher = pusher
+        self.lock = self.pusher.lock
         self.queue = queue or multiprocessing.Queue()
 
     async def run(self):
@@ -47,21 +47,31 @@ class FuturesEngine:
 
         if i == 20:
             raise RuntimeError("Failed to connect to pusher")
-
+        print(1)
         self._order_books: dict[str, OrderBook] = {
             "BTCUSD": OrderBook(self.lock, "BTCUSD", 37, self.pusher),
         }
+        print(2)
 
         await self._listen()
 
     async def _listen(self) -> None:
+        print(3)
+        await asyncio.sleep(0)
         while True:
+            # print('[futures][listen] top')
             try:
-                message = self.queue.get()
+                # print('scooby')
+                message = self.queue.get_nowait()
+                # print('gotem')
+                print(message)
                 self._handle(message)
-                await asyncio.sleep(0.01)
-            except queue.Empty:
-                continue
+                # print('finished handling')
+            except Exception:
+                # print(type(e), str(e))
+                pass
+            await asyncio.sleep(1)
+            # print('[futures][listen] bottom')
 
     def _handle(self, order_data: dict):
         ob = self._order_books[order_data["instrument"]]
@@ -76,7 +86,7 @@ class FuturesEngine:
 
         if order_data["order_type"] == OrderType.LIMIT:
             return
-        # print(result)
+        print(result)
         if result.outcome == 2:
             ob.set_price(result.price)
             order_data["status"] = OrderStatus.FILLED
@@ -156,6 +166,7 @@ class FuturesEngine:
         if touched or filled:
             ob.set_price(price)
 
+        print('1111')
         for t_order in touched:
             if t_order.tag == Tag.ENTRY:
                 if t_order.payload["standing_quantity"] > 0:
@@ -168,6 +179,7 @@ class FuturesEngine:
             calculate_upl(t_order, target_price, ob)
             if t_order.payload["status"] == OrderStatus.FILLED:
                 filled.append(t_order.payload)
+            print(t_order.payload['status'] == OrderStatus.CLOSED)
                 # self.pusher.append(t_order.payload, 'balance')
             self.pusher.append(t_order.payload)
 

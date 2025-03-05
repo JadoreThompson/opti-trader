@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
-from config import DB_LOCK, PH, REDIS_LOCK_MANAGER
+from config import DB_LOCK, PH
 from db_models import Users
 from utils.db import get_db_session
 from .models import LoginCredentials, RegisterCredentials
@@ -19,8 +19,11 @@ async def register(body: RegisterCredentials) -> None:
 
     try:
         # lock = await DB_LOCK.acquire()
-        async with await REDIS_LOCK_MANAGER.lock("db-session"):
-            print(body.password)
+        # async with await REDIS_LOCK_MANAGER.lock("db-session"):
+        print("aaaa - ") 
+        print(await DB_LOCK.acquire())
+        async with DB_LOCK:
+            # print(body.password)
             print("[register] I've got the lock")
             async with get_db_session() as sess:
                 res = await sess.execute(
@@ -30,6 +33,7 @@ async def register(body: RegisterCredentials) -> None:
                 )
                 user: Users = res.scalar()
                 await sess.commit()
+        print("Exited context")
         resp = Response()
         resp.set_cookie(
             COOKIE_KEY,
@@ -46,7 +50,7 @@ async def register(body: RegisterCredentials) -> None:
     except IntegrityError:
         raise HTTPException(status_code=401, detail="Credentials already exist")
     except Exception as e:
-        print(type(e), str(e))
+        print("[/auth/register]", type(e), str(e))
 
 
 @auth.post("/login")

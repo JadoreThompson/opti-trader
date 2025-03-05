@@ -48,6 +48,7 @@ class Pusher:
         gate: Literal["balance", "order"] = "order",
         mode: Literal["lazy", "fast"] = "lazy",
     ) -> None:
+        print('append called')
         if gate == "order":
             if mode == "lazy":
                 if isinstance(obj, list):
@@ -69,6 +70,7 @@ class Pusher:
     async def _push_slow(self) -> None:
         self._slow_running = True
         while True:
+            # print('slow running')
             if self._slow_queue:
                 try:
                     async with self.lock:
@@ -89,7 +91,6 @@ class Pusher:
                     self._slow_queue.clear()
                 except Exception:
                     import traceback
-
                     traceback.print_exc()
 
             await asyncio.sleep(self._slow_delay)
@@ -97,6 +98,7 @@ class Pusher:
     async def _push_fast(self) -> None:
         self._fast_running = True
         while True:
+            # print('fast running')
             if self._fast_queue:
                 try:
                     async with self.lock:
@@ -115,7 +117,6 @@ class Pusher:
                     self._fast_queue.clear()
                 except Exception:
                     import traceback
-
                     traceback.print_exc()
 
             await asyncio.sleep(self._fast_delay)
@@ -124,8 +125,10 @@ class Pusher:
         self._balance_running = True
 
         while True:
+            # print('balance running')
             if self._balance_queue:
                 collection = [*self._balance_queue]
+                print(collection)
                 try:
                     print("-" * 10)
 
@@ -158,7 +161,7 @@ class Pusher:
                     #         )
 
                     #         await sess.commit()
-                    
+
                     async with REDIS_CLIENT.pipeline() as pipe:
                         for item in collection:
                             await pipe.publish(BALANCE_UPDATE_CHANNEL, dump_obj(item))
@@ -168,7 +171,6 @@ class Pusher:
                 except Exception as e:
                     print(e)
                     import traceback
-
                     traceback.print_exc()
 
             await asyncio.sleep(self._balance_delay)
