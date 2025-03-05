@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
-from config import PH
+from config import DB_LOCK, PH, REDIS_LOCK_MANAGER
 from db_models import Users
 from utils.db import get_db_session
 from .models import LoginCredentials, RegisterCredentials
@@ -16,33 +16,43 @@ auth = APIRouter(prefix="/auth", tags=["auth"])
 @auth.post("/register")
 async def register(body: RegisterCredentials) -> None:
     body.password = PH.hash(body.password)
+
     try:
-        async with get_db_session() as sess:
-            res = await sess.execute(
-                insert(Users).values(**body.model_dump(), balance=10_000_000).returning(Users)
-            )
-            user: Users = res.scalar()
-            await sess.commit()
+        # lock = await DB_LOCK.acquire()
+        async with await REDIS_LOCK_MANAGER.lock("db-session"):
+            print(body.password)
+            print("[register] I've got the lock")
+            async with get_db_session() as sess:
+                res = await sess.execute(
+                    insert(Users)
+                    .values(**body.model_dump(), balance=10_000_000)
+                    .returning(Users)
+                )
+                user: Users = res.scalar()
+                await sess.commit()
+        resp = Response()
+        resp.set_cookie(
+            COOKIE_KEY,
+            generate_token(
+                {
+                    "sub": str(user.user_id),
+                    "em": user.email,
+                }
+            ),
+            httponly=True,
+            # secure=True
+        )
+        return resp
     except IntegrityError:
         raise HTTPException(status_code=401, detail="Credentials already exist")
-
-    resp = Response()
-    resp.set_cookie(
-        COOKIE_KEY,
-        generate_token(
-            {
-                "sub": str(user.user_id),
-                "em": user.email,
-            }
-        ),
-        httponly=True,
-        # secure=True
-    )
-    return resp
+    except Exception as e:
+        print(type(e), str(e))
 
 
 @auth.post("/login")
 async def login(body: LoginCredentials) -> None:
+    # async with DB_LOCK:
+    print("[login] I've got the lock")
     async with get_db_session() as sess:
         res = await sess.execute(select(Users).where(Users.email == body.email))
         user: Users = res.scalar()

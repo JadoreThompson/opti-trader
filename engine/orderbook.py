@@ -21,10 +21,15 @@ from .utils import calculate_upl
 class OrderBook:
     def __init__(
         self,
+        lock,
         instrument: str,
         price: float = 150,
         pusher: Pusher = None,
+        delay: float = 1,
     ) -> None:
+        """Delay in seconds"""
+        self.lock = lock
+        self._price_delay = delay
         self._price = price
         self._price_queue = deque()
 
@@ -156,7 +161,6 @@ class OrderBook:
     def set_price(self, price: float) -> None:
         self._price = price
         self._price_queue.append(price)
-        # asyncio.create_task(self._update_upl(price))
 
     async def _publish_price(
         self,
@@ -165,15 +169,17 @@ class OrderBook:
         await REDIS_CLIENT.publish(f"{self.instrument}.live", self._price)
 
         randnum = lambda: round(random.random() * 100, 2)
-        
+
         while True:
+            # self._price_queue.extend([randnum() for _ in range(5)])
             self._price = randnum()
             self._price_queue.append(self._price)
             
             try:
                 price = self._price_queue.popleft()
-            except IndexError:
-                price = self._price
+            except IndexError as e:
+                price = self._price = randnum()
+                
 
             try:
                 await self._update_upl(price)
@@ -182,11 +188,10 @@ class OrderBook:
             except Exception as e:
                 if not isinstance(e, IndexError):
                     print("[orderbook][_publish_price] - ", type(e), str(e))
-                    
-            await asyncio.sleep(2)
+
+            await asyncio.sleep(self._price_delay)
 
     async def _update_upl(self, price: float) -> None:
-        # while True:
         if self._tracker:
             tracker_copy = self._tracker.copy()
             for _, pos in tracker_copy.items():
@@ -195,15 +200,24 @@ class OrderBook:
                     OrderStatus.PARTIALLY_CLOSED,
                 ):
                     calculate_upl(pos.order, price, self)
-                    # if pos.order.payload["status"] == OrderStatus.CLOSED:
-                    self.pusher.append(pos.order.payload, "fast")
-            
-            async with get_db_session() as sess:
-                await sess.execute(
-                    update(Users),
-                    [pos.order.payload for _, pos in tracker_copy.items()],
-                )
-                await sess.commit()
+                    self.pusher.append(pos.order.payload, mode="fast")
+
+                    if pos.order.payload["status"] == OrderStatus.CLOSED:
+                        # print('Appending to the price queue')
+                        self.pusher.append(
+                            {
+                                "user_id": pos.order.payload["user_id"],
+                                "amount": pos.order.payload["realised_pnl"],
+                            },
+                            "balance",
+                        )
+
+            # async with get_db_session() as sess:
+            #     await sess.execute(
+            #         update(Users),
+            #         [pos.order.payload for _, pos in tracker_copy.items()],
+            #     )
+            #     await sess.commit()
 
     @property
     def price(self) -> float:

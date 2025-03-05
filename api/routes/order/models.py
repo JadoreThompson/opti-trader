@@ -83,17 +83,29 @@ class OrderRead(CustomBase):
         ...
 
 
-class PricePayload(CustomBase):
-    price: float
-    time: int
-
-
 class ConnectPayload(CustomBase):
     instrument: str
 
 
+class PricePayload(CustomBase):
+    price: float
+    time: int
+    
+    @field_serializer('price')
+    def price_serialiser(self, value):
+        return f"{value:.2f}"
+
+
+class BalancePayload(CustomBase):
+    user_id: str
+    balance: float
+    
+    @field_serializer('balance')
+    def balance_serialiser(self, value):
+        return f"{value:.2f}"
+
+
 class SocketPayload(CustomBase):
     """Used for both posting and receiving messages"""
-
     category: SocketPayloadCategory
     content: dict

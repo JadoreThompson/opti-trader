@@ -3,21 +3,29 @@ import json
 import random
 import httpx
 import multiprocessing
+import redis
+import redis.asyncio
+import redis.asyncio.client
 import uvicorn
 
 from faker import Faker
+from redis.lock import Lock
 from sqlalchemy import text
+from config import REDIS_CLIENT
 from enums import MarketType, OrderType, Side
+from imp import lock_held
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 fkr = Faker()
 BASE_URL = "http://192.168.1.145:8000/api"
 
 
-def run_server(queue: multiprocessing.Queue) -> None:
-    from api import config
+def run_server(queue: multiprocessing.Queue,) -> None:
+    import config as mainconfig
+    from api import config as apiconfig
 
-    config.FUTURES_QUEUE = queue
+    apiconfig.FUTURES_QUEUE = queue
+    mainconfig.DB_LOCK = REDIS_CLIENT.lock("zenz")
 
     uvicorn.run(
         "api.app:app",
@@ -28,11 +36,12 @@ def run_server(queue: multiprocessing.Queue) -> None:
     )
 
 
-def run_engine(queue: multiprocessing.Queue) -> None:
+def run_engine(queue: multiprocessing.Queue, ) -> None:
     from engine.futures import FuturesEngine
     from engine.pusher import Pusher
 
-    engine = FuturesEngine(queue, Pusher())
+    lock = REDIS_CLIENT.lock("zenz")
+    engine = FuturesEngine(lock, queue,)
     # engine.run()
     asyncio.run(engine.run())
 
@@ -48,14 +57,16 @@ async def gen_fake_user(session) -> None:
         BASE_URL + "/auth/register",
         json=payload,
     )
+    print(session)
 
 
 async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
     import random
-
     randnum = lambda: round(random.random() * 100, 2)
+    
     for _ in range(num_orders):
-        # await asyncio.sleep(random.randint(1, 2))
+        # await asyncio.sleep(random.random() * 10)
+        await asyncio.sleep(0.05)
         order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
         payload = {
             "amount": random.randint(1, 5),
@@ -76,8 +87,6 @@ async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
             json=payload,
             cookies=cookie,
         )
-        
-        await asyncio.sleep(0.2)
 
 
 async def load_db(num_users: int, num_orders: int) -> None:
@@ -111,9 +120,10 @@ async def migrate():
 
 async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) -> None:
     queue = multiprocessing.Queue()
+    # lock = Lock(REDIS_CLIENT, "Myredislock")
     ps = [
         multiprocessing.Process(target=run_server, args=(queue,), name="server"),
-        multiprocessing.Process(target=run_engine, args=(queue,), name="engine"),
+        # multiprocessing.Process(target=run_engine, args=(queue,), name="engine"),
     ]
 
     for p in ps:
@@ -141,4 +151,4 @@ async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) 
 
 
 if __name__ == "__main__":
-    asyncio.run(main(True, 10, 1_000_000))
+    asyncio.run(main(True, 1000, 1_000_000))

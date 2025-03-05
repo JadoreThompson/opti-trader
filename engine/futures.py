@@ -2,7 +2,6 @@ import asyncio
 import multiprocessing
 import queue
 import threading
-import time
 import warnings
 
 from collections import namedtuple
@@ -28,17 +27,15 @@ MatchResult = namedtuple(
 
 class FuturesEngine:
     def __init__(
-        self, queue: multiprocessing.Queue = None, pusher: Pusher = None
+        self, lock, queue: multiprocessing.Queue = None, pusher: Pusher = None
     ) -> None:
-        self.pusher = pusher or Pusher()
-        self.last_price = None
-        self.thread: threading.Thread = None
+        self.lock = lock
+        self.pusher = pusher or Pusher(self.lock)
         self.queue = queue or multiprocessing.Queue()
-        self._collection: list[dict] = []
-        
+
     async def run(self):
         asyncio.create_task(self.pusher.run())
-        
+
         i = 0
         while i < 20:
             if self.pusher.is_running:
@@ -46,27 +43,26 @@ class FuturesEngine:
             i += 1
             m = f"Waiting for pusher - Sleeping for {i} seconds"
             warnings.warn(m)
-            await asyncio.sleep(i) 
-        
+            await asyncio.sleep(i)
+
         if i == 20:
             raise RuntimeError("Failed to connect to pusher")
-        
+
         self._order_books: dict[str, OrderBook] = {
-            "BTCUSD": OrderBook("BTCUSD", 37, self.pusher),
+            "BTCUSD": OrderBook(self.lock, "BTCUSD", 37, self.pusher),
         }
 
         await self._listen()
-    
+
     async def _listen(self) -> None:
         while True:
             try:
                 message = self.queue.get()
-                print(message)
                 self._handle(message)
                 await asyncio.sleep(0.01)
             except queue.Empty:
                 continue
-        
+
     def _handle(self, order_data: dict):
         ob = self._order_books[order_data["instrument"]]
         order = Order(order_data, Tag.ENTRY, order_data["side"])
@@ -80,7 +76,7 @@ class FuturesEngine:
 
         if order_data["order_type"] == OrderType.LIMIT:
             return
-        print(result)
+        # print(result)
         if result.outcome == 2:
             ob.set_price(result.price)
             order_data["status"] = OrderStatus.FILLED
@@ -170,6 +166,9 @@ class FuturesEngine:
                 t_order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
             calculate_upl(t_order, target_price, ob)
+            if t_order.payload["status"] == OrderStatus.FILLED:
+                filled.append(t_order.payload)
+                # self.pusher.append(t_order.payload, 'balance')
             self.pusher.append(t_order.payload)
 
         self._handle_filled_orders(filled, ob, target_price, tag=uuid4())
@@ -216,6 +215,7 @@ class FuturesEngine:
             else:
                 ob.remove(order, "all")
                 order.payload["status"] = OrderStatus.CLOSED
+                # print('order now closed')
                 order.payload["closed_price"] = price
                 order.payload["unrealised_pnl"] = 0
 
@@ -230,33 +230,42 @@ class FuturesEngine:
 
             if order.payload["status"] == OrderStatus.FILLED:
                 calculate_upl(order, price, ob)
+            else:
+                # print('Appending to the price queue')
+                self.pusher.append(
+                    {
+                        "user_id": order.payload["user_id"],
+                        "amount": order.payload["realised_pnl"],
+                    },
+                    "balance",
+                )
 
             self.pusher.append(order.payload)
 
-    def _calculate_upl(self, order: Order, price: float, ob: OrderBook) -> None:
-        upl: float = None
+    # def _calculate_upl(self, order: Order, price: float, ob: OrderBook) -> None:
+    #     upl: float = None
 
-        if order.payload["filled_price"] is None:
-            return
+    #     if order.payload["filled_price"] is None:
+    #         return
 
-        if order.payload["side"] == Side.SELL:  # Must be a buy
-            upl = calc_buy_pl(
-                order.payload["amount"], order.payload["filled_price"], price
-            )
-        else:
-            upl = calc_sell_pl(
-                order.payload["amount"],
-                order.payload["filled_price"],
-                price,
-            )
-        if order.payload["unrealised_pnl"] is not None:
-            if upl <= order.payload["amount"] * -1:
-                ob.remove(order, "all")
-                order.payload["status"] = OrderStatus.CLOSED
-                order.payload["closed_price"] = price
-                order.payload["unrealised_pnl"] = 0
+    #     if order.payload["side"] == Side.SELL:  # Must be a buy
+    #         upl = calc_buy_pl(
+    #             order.payload["amount"], order.payload["filled_price"], price
+    #         )
+    #     else:
+    #         upl = calc_sell_pl(
+    #             order.payload["amount"],
+    #             order.payload["filled_price"],
+    #             price,
+    #         )
+    #     if order.payload["unrealised_pnl"] is not None:
+    #         if upl <= order.payload["amount"] * -1:
+    #             ob.remove(order, "all")
+    #             order.payload["status"] = OrderStatus.CLOSED
+    #             order.payload["closed_price"] = price
+    #             order.payload["unrealised_pnl"] = 0
+    #             order.payload["realised_pnl"] = upl
+    #             self.pusher.append(order.payload, 'balance')
+    #             return
 
-                order.payload["realised_pnl"] = upl
-                return
-
-        order.payload["unrealised_pnl"] = upl
+    #     order.payload["unrealised_pnl"] = upl

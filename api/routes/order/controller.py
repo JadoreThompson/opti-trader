@@ -1,6 +1,6 @@
-from multiprocessing import Value
 from sqlalchemy import insert, select, update
 
+from config import DB_LOCK
 from db_models import Orders, Users
 from enums import MarketType, Side
 from utils.db import get_db_session
@@ -38,17 +38,19 @@ async def enter_order(details: dict, user_id: str) -> None:
     details["standing_quantity"] = details["quantity"]
     details["user_id"] = user_id
 
-    async with get_db_session() as sess:
-        res = await sess.execute(select(Users.balance).where(Users.user_id == user_id))
-        
-        balance = res.first()[0] - (details["amount"] * details["quantity"])
-        if balance < 0:
-            raise ValueError("Insufficient balance")
+    async with DB_LOCK:
+        print("[enter_order] I've got the lock now")
+        async with get_db_session() as sess:
+            res = await sess.execute(select(Users.balance).where(Users.user_id == user_id))
+            
+            balance = res.first()[0] - (details["amount"] * details["quantity"])
+            if balance < 0:
+                raise ValueError("Insufficient balance")
 
-        await sess.execute(update(Users).values(balance=balance))
-        res = await sess.execute(insert(Orders).values(details).returning(Orders))
-        order = res.scalar()
-        await sess.commit()
+            await sess.execute(update(Users).values(balance=balance))
+            res = await sess.execute(insert(Orders).values(details).returning(Orders))
+            order = res.scalar()
+            await sess.commit()
 
     if details["market_type"] == MarketType.FUTURES:
         payload = vars(order)

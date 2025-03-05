@@ -10,10 +10,9 @@ calc_sell_pl = lambda amount, open_price, close_price: round(
 calc_buy_pl = lambda amount, open_price, close_price: round(
     (close_price / open_price) * amount, 2
 )
-dump_order = lambda obj: json.dumps({
-    k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in obj.items()
-})
-
+dump_obj = lambda obj: json.dumps(
+    {k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in obj.items()}
+)
 
 
 def calculate_upl(order: Order, price: float, ob) -> None:
@@ -40,6 +39,7 @@ def calculate_upl(order: Order, price: float, ob) -> None:
         if upl <= order.payload["amount"] * -1:
             ob.remove(order, "all")
             order.payload["status"] = OrderStatus.CLOSED
+            # print('order now closed')
             order.payload["closed_price"] = price
             order.payload["unrealised_pnl"] = 0
             order.payload["realised_pnl"] = upl

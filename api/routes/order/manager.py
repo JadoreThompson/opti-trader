@@ -1,11 +1,11 @@
 import asyncio
 import json
-from typing import TypedDict
 
+from datetime import datetime
+from typing import TypedDict
 from fastapi import WebSocket
 
-from config import ORDER_UPDATE_CHANNEL, REDIS_CLIENT
-from datetime import datetime
+from config import BALANCE_UPDATE_CHANNEL, ORDER_UPDATE_CHANNEL, REDIS_CLIENT
 from .enums import SocketPayloadCategory
 from .models import ConnectPayload, OrderRead, PricePayload, SocketPayload
 
@@ -26,6 +26,7 @@ class ClientManager:
         if not self._is_running:
             asyncio.create_task(self.listen_to_price())
             asyncio.create_task(self.listen_to_order_updates())
+            asyncio.create_task(self.listen_to_balance_updates())
             self._is_running = True
 
     async def disconnect(self, user_id: str) -> None:
@@ -80,6 +81,30 @@ class ClientManager:
                     SocketPayload(
                         category=SocketPayloadCategory.ORDER,
                         content=OrderRead(**payload).model_dump(),
+                    ).model_dump()
+                )
+            )
+
+    async def listen_to_balance_updates(self) -> None:
+        async with REDIS_CLIENT.pubsub() as ps:
+            await ps.subscribe(BALANCE_UPDATE_CHANNEL)
+            async for message in ps.listen():
+                if message["type"] == "subscribe":
+                    continue
+                
+                asyncio.create_task(
+                    self._handle_balance_updates(json.loads(message["data"]))
+                )
+
+    async def _handle_balance_updates(self, payload: dict) -> None:
+        ws = self._connections.get(payload["user_id"], {}).get("websocket")
+        if ws is not None:
+            del payload['user_id']
+            await ws.send_text(
+                json.dumps(
+                    SocketPayload(
+                        category=SocketPayloadCategory.BALANCE,
+                        content=payload,
                     ).model_dump()
                 )
             )

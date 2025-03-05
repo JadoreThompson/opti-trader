@@ -2,6 +2,7 @@ from email.policy import HTTP
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
+from config import DB_LOCK
 from enums import OrderStatus
 
 
@@ -16,9 +17,11 @@ account = APIRouter(prefix="/account", tags=["account"])
 
 @account.get("/")
 async def get_account(jwt: JWT = Depends(verify_cookie_http)) -> Profile:
-    async with get_db_session() as sess:
-        res = await sess.execute(select(Users).where(Users.user_id == jwt["sub"]))
-        user = res.scalar()
+    async with DB_LOCK:
+        print("[/account/] I've got the lock")
+        async with get_db_session() as sess:
+            res = await sess.execute(select(Users).where(Users.user_id == jwt["sub"]))
+            user = res.scalar()
 
     if not user:
         raise HTTPException(status_code=404, detail="User doesn't exist")
@@ -28,6 +31,8 @@ async def get_account(jwt: JWT = Depends(verify_cookie_http)) -> Profile:
 
 @account.get("/orders")
 async def get_orders(jwt: JWT = Depends(verify_cookie_http)) -> list[OrderRead]:
-    async with get_db_session() as sess:
-        res = await sess.execute(select(Orders).where(Orders.user_id == jwt["sub"]))
+    async with DB_LOCK:
+        print("[/orders] I've got the lock")
+        async with get_db_session() as sess:
+            res = await sess.execute(select(Orders).where(Orders.user_id == jwt["sub"]))
     return [OrderRead(**vars(order)) for order in res.scalars().all()]
