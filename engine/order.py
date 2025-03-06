@@ -9,11 +9,11 @@ class Order:
         self._tag = tag
         self._side = side
 
-    @cached_property
+    @property
     def tag(self) -> Tag:
         return self._tag
 
-    @cached_property
+    @property
     def side(self) -> Side:
         return self._side
 

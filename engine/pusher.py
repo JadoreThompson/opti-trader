@@ -48,7 +48,7 @@ class Pusher:
         gate: Literal["balance", "order"] = "order",
         mode: Literal["lazy", "fast"] = "lazy",
     ) -> None:
-        print('append called')
+        print('append called -', mode, gate)
         if gate == "order":
             if mode == "lazy":
                 if isinstance(obj, list):
@@ -56,6 +56,7 @@ class Pusher:
                 else:
                     self._slow_queue.append(obj)
             else:
+                # print("Append called with mode fast")
                 if isinstance(obj, list):
                     self._fast_queue.extend(obj)
                 else:
@@ -76,10 +77,12 @@ class Pusher:
                     async with self.lock:
                         print("[pusher][slow] I've got the lock")
                         collection = [*self._slow_queue]
+                        # print(collection)
                         async with get_db_session() as sess:
                             # await sess.execute(update(Orders), [*self._slow_queue])
                             await sess.execute(update(Orders), collection)
                             await sess.commit()
+                    print('[pusher][slow] im finished using lock')
                     # print("[pusher][slow] - Done updating in DB")
                     async with REDIS_CLIENT.pipeline() as pipe:
                         # for item in self._slow_queue:
@@ -98,8 +101,11 @@ class Pusher:
     async def _push_fast(self) -> None:
         self._fast_running = True
         while True:
-            # print('fast running')
+            # print("")
+            # print('fast running 1')
+            # print(self._fast_queue)
             if self._fast_queue:
+                # print('fast running 2')
                 try:
                     async with self.lock:
                         print("[pusher][fast] I've got the lock")
@@ -168,8 +174,7 @@ class Pusher:
                         await pipe.execute()
 
                     self._balance_queue.clear()
-                except Exception as e:
-                    print(e)
+                except Exception:
                     import traceback
                     traceback.print_exc()
 

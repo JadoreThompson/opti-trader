@@ -55,5 +55,5 @@ def alembic_upgrade_head() -> None:
 
 @asynccontextmanager
 async def get_db_session() -> AsyncGenerator[None, AsyncSession]:
-    async with smaker() as session:
+    async with smaker.begin() as session:
         yield session

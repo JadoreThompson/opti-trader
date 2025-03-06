@@ -20,8 +20,7 @@ async def register(body: RegisterCredentials) -> None:
     try:
         # lock = await DB_LOCK.acquire()
         # async with await REDIS_LOCK_MANAGER.lock("db-session"):
-        print("aaaa - ") 
-        print(await DB_LOCK.acquire())
+        # print("aaaa - ") 
         async with DB_LOCK:
             # print(body.password)
             print("[register] I've got the lock")
@@ -33,7 +32,6 @@ async def register(body: RegisterCredentials) -> None:
                 )
                 user: Users = res.scalar()
                 await sess.commit()
-        print("Exited context")
         resp = Response()
         resp.set_cookie(
             COOKIE_KEY,
@@ -55,19 +53,19 @@ async def register(body: RegisterCredentials) -> None:
 
 @auth.post("/login")
 async def login(body: LoginCredentials) -> None:
-    # async with DB_LOCK:
-    print("[login] I've got the lock")
-    async with get_db_session() as sess:
-        res = await sess.execute(select(Users).where(Users.email == body.email))
-        user: Users = res.scalar()
+    async with DB_LOCK:
+        print("[login] I've got the lock")
+        async with get_db_session() as sess:
+            res = await sess.execute(select(Users).where(Users.email == body.email))
+            user: Users = res.scalar()
 
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    try:
-        PH.verify(user.password, body.password)
-    except argon2.exceptions.VerifyMismatchError:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        try:
+            PH.verify(user.password, body.password)
+        except argon2.exceptions.VerifyMismatchError:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
     resp = Response()
     resp.set_cookie(

@@ -36,7 +36,7 @@ async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http))
         raise HTTPException(status_code=400, detail="Invalid instrument")
 
     try:
-        print(body)
+        # print(body)
         validate_order_details(float(p.decode()), body)
         await enter_order(body.model_dump(), jwt["sub"])
         return JSONResponse(status_code=201, content={"message": "Order placed"})
