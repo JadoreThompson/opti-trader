@@ -77,7 +77,8 @@ async def login(body: LoginCredentials) -> None:
 
 
 @auth.get("/verify-token")
-async def verify_token(jwt: JWT = Depends(verify_cookie_http)): ...
+async def verify_token(jwt: JWT = Depends(verify_cookie_http)):
+    pass
 
 
 @auth.get("/remove-token")

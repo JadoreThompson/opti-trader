@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes.auth.route import auth
-from api.routes.account.route import account
-from api.routes.order.route import order
+from .routes.auth.route import auth
+from .routes.account.route import account
+from .routes.order.route import order
+from .routes.instrument.route import instrument
 
 app = FastAPI(root_path="/api")
 
@@ -22,3 +23,4 @@ app.add_middleware(
 app.include_router(auth)
 app.include_router(account)
 app.include_router(order)
+app.include_router(instrument)

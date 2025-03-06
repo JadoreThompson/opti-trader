@@ -4,7 +4,8 @@ from uuid import UUID
 
 from enums import MarketType, OrderStatus, OrderType, Side
 from ...base import CustomBase
-from ..order.enums import SocketPayloadCategory
+# from ..order.enums import SocketPayloadCategory
+from ...utils import SocketPayloadCategory
 
 
 class OrderWrite(CustomBase):
@@ -78,22 +79,22 @@ class OrderRead(CustomBase):
     )
     def formatter_serialiser(self, value):
         if value is not None:
-            return f"{value:.2f}"
+            return f"{round(value, 2):.2f}"
         return value
         ...
 
 
-class ConnectPayload(CustomBase):
-    instrument: str
+# class ConnectPayload(CustomBase):
+#     instrument: str
 
 
-class PricePayload(CustomBase):
-    price: float
-    time: int
+# class PricePayload(CustomBase):
+#     price: float
+#     time: int
     
-    @field_serializer('price')
-    def price_serialiser(self, value):
-        return f"{value:.2f}"
+#     @field_serializer('price')
+#     def price_serialiser(self, value):
+#         return f"{value:.2f}"
 
 
 class BalancePayload(CustomBase):
@@ -103,9 +104,3 @@ class BalancePayload(CustomBase):
     @field_serializer('balance')
     def balance_serialiser(self, value):
         return f"{value:.2f}"
-
-
-class SocketPayload(CustomBase):
-    """Used for both posting and receiving messages"""
-    category: SocketPayloadCategory
-    content: dict

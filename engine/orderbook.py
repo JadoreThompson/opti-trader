@@ -3,12 +3,14 @@ import random
 import warnings
 
 from collections import deque
+from datetime import datetime
+from r_mutex import Lock
+from sqlalchemy import insert
 from typing import Literal, Optional
 from uuid import UUID
-from sqlalchemy import update
 
 from config import REDIS_CLIENT
-from db_models import Users
+from db_models import MarketData
 from enums import OrderStatus, Side
 from utils.db import get_db_session
 from .enums import Tag
@@ -21,14 +23,16 @@ from .utils import calculate_upl
 class OrderBook:
     def __init__(
         self,
-        lock,
         instrument: str,
+        instrument_lock: Lock,
+        order_lock: Lock,
         price: float = 150,
         pusher: Pusher = None,
         delay: float = 1,
     ) -> None:
         """Delay in seconds"""
-        self.lock = lock
+        self.order_lock = order_lock
+        self.instrument_lock = instrument_lock
         self._price_delay = delay
         self._price = price
         self._price_queue = deque()
@@ -126,7 +130,7 @@ class OrderBook:
         if pos.stop_loss is not None:
             self.remove_single(pos.stop_loss)
 
-    def get(self, order_id: str | UUID, **kwargs) -> Optional[Position]:
+    def get(self, order_id: str | UUID) -> Optional[Position]:
         pos = self._tracker.get(order_id)
         if pos is None:
             raise ValueError("Position related to order doesn't exist")
@@ -173,17 +177,26 @@ class OrderBook:
         while True:
             self._price = randnum()
             self._price_queue.append(self._price)
-            
+
             try:
                 price = self._price_queue.popleft()
             except IndexError as e:
                 price = self._price = randnum()
-                
 
             try:
                 await self._update_upl(price)
                 await REDIS_CLIENT.set(f"{self.instrument}.price", price)
                 await REDIS_CLIENT.publish(f"{self.instrument}.live", price)
+                
+                async with get_db_session() as sess:
+                    await sess.execute(
+                        insert(MarketData).values(
+                            instrument=self.instrument,
+                            time=datetime.now().timestamp(),
+                            price=price,
+                        )
+                    )
+                    await sess.commit()
             except Exception as e:
                 if not isinstance(e, IndexError):
                     print("[orderbook][_publish_price] - ", type(e), str(e))

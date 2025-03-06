@@ -4,6 +4,7 @@ import warnings
 
 from collections import namedtuple
 from collections.abc import Iterable
+from r_mutex import Lock
 from uuid import uuid4
 
 from enums import OrderStatus, OrderType, Side
@@ -26,11 +27,14 @@ MatchResult = namedtuple(
 class FuturesEngine:
     def __init__(
         self,
+        order_lock: Lock,
+        instrument_lock: Lock,
         pusher: Pusher,
         queue: multiprocessing.Queue,
     ) -> None:
         self.pusher = pusher
-        self.lock = self.pusher.lock
+        self.order_lock = order_lock
+        self.instrument_lock = instrument_lock
         self.queue = queue
 
     async def run(self):
@@ -49,7 +53,9 @@ class FuturesEngine:
             raise RuntimeError("Failed to connect to pusher")
 
         self._order_books: dict[str, OrderBook] = {
-            "BTCUSD": OrderBook(self.lock, "BTCUSD", 37, self.pusher),
+            "BTCUSD": OrderBook(
+                "BTCUSD", self.instrument_lock, self.order_lock, 37, self.pusher
+            ),
         }
 
         await self._listen()
@@ -166,7 +172,7 @@ class FuturesEngine:
                 t_order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
             calculate_upl(t_order, target_price, ob)
-            
+
             if t_order.payload["status"] == OrderStatus.FILLED:
                 filled.append(t_order.payload)
             if t_order.payload["status"] == OrderStatus.CLOSED:

@@ -7,6 +7,7 @@ from sqlalchemy import case, update
 from typing import Literal
 from r_mutex import Lock
 
+from api.routes.order.models import BalancePayload
 from config import BALANCE_UPDATE_CHANNEL, ORDER_UPDATE_CHANNEL, REDIS_CLIENT
 from db_models import Orders, Users
 from utils.db import get_db_session
@@ -162,7 +163,9 @@ class Pusher:
                             await pipe.publish(
                                 BALANCE_UPDATE_CHANNEL,
                                 json.dumps(
-                                    {"user_id": str(item[0]), "balance": item[1]}
+                                    BalancePayload(
+                                        user_id=str(item[0]), balance=item[1]
+                                    ).model_dump()
                                 ),
                             )
                         await pipe.execute()

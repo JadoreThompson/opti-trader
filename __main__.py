@@ -13,46 +13,58 @@ from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 fkr = Faker()
 BASE_URL = "http://192.168.1.145:8000/api"
 
-async def handle_run(queue: multiprocessing.Queue) -> None:
+async def handle_run_server(queue: multiprocessing.Queue) -> None:
     from config import DB_LOCK
     from api import config as apiconfig
 
     apiconfig.FUTURES_QUEUE = queue
     fa_config = uvicorn.Config(
         "api.app:app",
+        workers=2,
         host="0.0.0.0",
         port=8000,
-        log_config=None,
+        # log_config=None,
     )
     fa_server = uvicorn.Server(fa_config)
     
     asyncio.create_task(DB_LOCK.run())
     await fa_server.serve()
 
+
 def run_server(queue: multiprocessing.Queue) -> None:
-    asyncio.run(handle_run(queue))
+    asyncio.run(handle_run_server(queue))
 
 
 async def handle_engine(queue):
     from engine.futures import FuturesEngine
     from engine.pusher import Pusher
     
-    lock = Lock(REDIS_CLIENT, 'test', is_manager=False)
-    pusher = Pusher(lock)
-    engine = FuturesEngine(pusher, queue)
-    asyncio.create_task(lock.run())
+    order_lock = Lock(REDIS_CLIENT, 'orderlock', is_manager=False)
+    instrument_lock = Lock(REDIS_CLIENT, 'instrumentlock')
+    
+    pusher = Pusher(order_lock)
+    engine = FuturesEngine(order_lock, instrument_lock, pusher, queue)
+    
+    asyncio.create_task(order_lock.run())
+    asyncio.create_task(instrument_lock.run())
+    
     await engine.run()
+
 
 def run_engine(queue: multiprocessing.Queue, ) -> None:
     asyncio.run(handle_engine(queue))
 
 
 async def gen_fake_user(session) -> None:
+    import json
+    
     payload = {
         "username": fkr.first_name(),
         "email": fkr.email(),
         "password": fkr.word(),
     }
+    
+    print(json.dumps(payload, indent=4))
     
     await session.post(
         BASE_URL + "/auth/register",
@@ -123,7 +135,6 @@ async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) 
         multiprocessing.Process(target=run_server, args=(queue,), name="server"),
         multiprocessing.Process(target=run_engine, args=(queue,), name="engine"),
     ]
-    
 
     for p in ps:
         p.start()

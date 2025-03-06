@@ -1,16 +1,12 @@
-from email.policy import HTTP
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from config import DB_LOCK
-from enums import OrderStatus
-
-
-from ..order.models import OrderRead
 from db_models import Orders, Users
 from utils.db import get_db_session
 from .model import Profile
 from ...middleware import JWT, verify_cookie_http
+from ..order.models import OrderRead
 
 account = APIRouter(prefix="/account", tags=["account"])
 
