@@ -171,7 +171,6 @@ class OrderBook:
         randnum = lambda: round(random.random() * 100, 2)
 
         while True:
-            # self._price_queue.extend([randnum() for _ in range(5)])
             self._price = randnum()
             self._price_queue.append(self._price)
             
@@ -203,7 +202,6 @@ class OrderBook:
                     self.pusher.append(pos.order.payload, mode="fast")
 
                     if pos.order.payload["status"] == OrderStatus.CLOSED:
-                        # print('Appending to the price queue')
                         self.pusher.append(
                             {
                                 "user_id": pos.order.payload["user_id"],
@@ -211,13 +209,6 @@ class OrderBook:
                             },
                             "balance",
                         )
-
-            # async with get_db_session() as sess:
-            #     await sess.execute(
-            #         update(Users),
-            #         [pos.order.payload for _, pos in tracker_copy.items()],
-            #     )
-            #     await sess.commit()
 
     @property
     def price(self) -> float:

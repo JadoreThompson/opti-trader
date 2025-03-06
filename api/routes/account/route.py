@@ -18,7 +18,6 @@ account = APIRouter(prefix="/account", tags=["account"])
 @account.get("/")
 async def get_account(jwt: JWT = Depends(verify_cookie_http)) -> Profile:
     async with DB_LOCK:
-        print("[/account/] I've got the lock")
         async with get_db_session() as sess:
             res = await sess.execute(select(Users).where(Users.user_id == jwt["sub"]))
             user = res.scalar()
@@ -32,7 +31,6 @@ async def get_account(jwt: JWT = Depends(verify_cookie_http)) -> Profile:
 @account.get("/orders")
 async def get_orders(jwt: JWT = Depends(verify_cookie_http)) -> list[OrderRead]:
     async with DB_LOCK:
-        # print("[/orders] I've got the lock")
         async with get_db_session() as sess:
             res = await sess.execute(select(Orders).where(Orders.user_id == jwt["sub"]))
     return [OrderRead(**vars(order)) for order in res.scalars().all()]

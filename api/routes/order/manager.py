@@ -91,7 +91,7 @@ class ClientManager:
             async for message in ps.listen():
                 if message["type"] == "subscribe":
                     continue
-                
+
                 asyncio.create_task(
                     self._handle_balance_updates(json.loads(message["data"]))
                 )
@@ -99,7 +99,7 @@ class ClientManager:
     async def _handle_balance_updates(self, payload: dict) -> None:
         ws = self._connections.get(payload["user_id"], {}).get("websocket")
         if ws is not None:
-            del payload['user_id']
+            del payload["user_id"]
             await ws.send_text(
                 json.dumps(
                     SocketPayload(

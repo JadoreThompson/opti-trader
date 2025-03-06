@@ -18,12 +18,7 @@ async def register(body: RegisterCredentials) -> None:
     body.password = PH.hash(body.password)
 
     try:
-        # lock = await DB_LOCK.acquire()
-        # async with await REDIS_LOCK_MANAGER.lock("db-session"):
-        # print("aaaa - ") 
         async with DB_LOCK:
-            # print(body.password)
-            print("[register] I've got the lock")
             async with get_db_session() as sess:
                 res = await sess.execute(
                     insert(Users)
@@ -32,19 +27,19 @@ async def register(body: RegisterCredentials) -> None:
                 )
                 user: Users = res.scalar()
                 await sess.commit()
-        resp = Response()
-        resp.set_cookie(
-            COOKIE_KEY,
-            generate_token(
-                {
-                    "sub": str(user.user_id),
-                    "em": user.email,
-                }
-            ),
-            httponly=True,
-            # secure=True
-        )
-        return resp
+            resp = Response()
+            resp.set_cookie(
+                COOKIE_KEY,
+                generate_token(
+                    {
+                        "sub": str(user.user_id),
+                        "em": user.email,
+                    }
+                ),
+                httponly=True,
+                # secure=True
+            )
+            return resp
     except IntegrityError:
         raise HTTPException(status_code=401, detail="Credentials already exist")
     except Exception as e:
@@ -54,18 +49,17 @@ async def register(body: RegisterCredentials) -> None:
 @auth.post("/login")
 async def login(body: LoginCredentials) -> None:
     async with DB_LOCK:
-        print("[login] I've got the lock")
         async with get_db_session() as sess:
             res = await sess.execute(select(Users).where(Users.email == body.email))
             user: Users = res.scalar()
 
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        try:
-            PH.verify(user.password, body.password)
-        except argon2.exceptions.VerifyMismatchError:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        PH.verify(user.password, body.password)
+    except argon2.exceptions.VerifyMismatchError:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     resp = Response()
     resp.set_cookie(

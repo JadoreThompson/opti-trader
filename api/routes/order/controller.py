@@ -1,5 +1,4 @@
 from sqlalchemy import insert, select, update
-
 from config import DB_LOCK
 from db_models import Orders, Users
 from enums import MarketType, Side
@@ -39,7 +38,6 @@ async def enter_order(details: dict, user_id: str) -> None:
     details["user_id"] = user_id
 
     async with DB_LOCK:        
-    # print("[enter_order] I've got the lock now")
         async with get_db_session() as sess:
             res = await sess.execute(select(Users.balance).where(Users.user_id == user_id))
             
@@ -54,6 +52,5 @@ async def enter_order(details: dict, user_id: str) -> None:
 
     if details["market_type"] == MarketType.FUTURES:
         payload = vars(order)
-        del payload['_sa_instance_state']
-        # print('put payload:', payload)
+        del payload['_sa_instance_state']        
         FUTURES_QUEUE.put_nowait(payload)

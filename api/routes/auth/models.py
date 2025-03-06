@@ -1,7 +1,5 @@
 from typing import Optional
-from pydantic import Field, field_validator
-
-from enums import MarketType, Side
+from pydantic import Field
 from ...base import CustomBase
 
 

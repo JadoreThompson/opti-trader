@@ -39,7 +39,6 @@ def calculate_upl(order: Order, price: float, ob) -> None:
         if upl <= order.payload["amount"] * -1:
             ob.remove(order, "all")
             order.payload["status"] = OrderStatus.CLOSED
-            # print('order now closed')
             order.payload["closed_price"] = price
             order.payload["unrealised_pnl"] = 0
             order.payload["realised_pnl"] = upl

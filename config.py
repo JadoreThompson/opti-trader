@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import redis.asyncio
 import redis.asyncio.connection
@@ -8,10 +7,9 @@ import redis
 import sys
 
 from dotenv import load_dotenv
+from r_mutex import Lock
 from sqlalchemy.ext.asyncio import create_async_engine
 from urllib.parse import quote
-
-from engine.lock.lock import Lock
 
 load_dotenv()
 
@@ -53,7 +51,6 @@ DB_ENGINE = create_async_engine(
     pool_timeout=30,
     pool_recycle=600,
 )
-print("Calling db lock")
 DB_LOCK = Lock(REDIS_CLIENT, 'test')
 
 
