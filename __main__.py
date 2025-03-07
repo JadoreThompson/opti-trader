@@ -10,8 +10,10 @@ from r_mutex import Lock
 from enums import MarketType, OrderType, Side
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
+
 fkr = Faker()
 BASE_URL = "http://192.168.1.145:8000/api"
+
 
 async def handle_run_server(queue: multiprocessing.Queue) -> None:
     from config import DB_LOCK
@@ -20,10 +22,10 @@ async def handle_run_server(queue: multiprocessing.Queue) -> None:
     apiconfig.FUTURES_QUEUE = queue
     fa_config = uvicorn.Config(
         "api.app:app",
-        workers=2,
+        workers=3,
         host="0.0.0.0",
         port=8000,
-        # log_config=None,
+        log_config=None,
     )
     fa_server = uvicorn.Server(fa_config)
     

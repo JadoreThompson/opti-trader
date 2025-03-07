@@ -37,20 +37,24 @@ async def enter_order(details: dict, user_id: str) -> None:
     details["standing_quantity"] = details["quantity"]
     details["user_id"] = user_id
 
-    async with DB_LOCK:        
+    async with DB_LOCK:
         async with get_db_session() as sess:
-            res = await sess.execute(select(Users.balance).where(Users.user_id == user_id))
-            
+            res = await sess.execute(
+                select(Users.balance).where(Users.user_id == user_id)
+            )
+
             balance = res.first()[0] - (details["amount"] * details["quantity"])
             if balance < 0:
                 raise ValueError("Insufficient balance")
 
-            await sess.execute(update(Users).values(balance=balance))
+            await sess.execute(
+                update(Users).values(balance=balance).where(Users.user_id == user_id)
+            )
             res = await sess.execute(insert(Orders).values(details).returning(Orders))
             order = res.scalar()
             await sess.commit()
 
     if details["market_type"] == MarketType.FUTURES:
         payload = vars(order)
-        del payload['_sa_instance_state']        
+        del payload["_sa_instance_state"]
         FUTURES_QUEUE.put_nowait(payload)

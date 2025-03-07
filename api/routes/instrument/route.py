@@ -15,12 +15,15 @@ manager = ClientManager()
 
 @instrument.websocket("/ws/")
 async def instrument_ws(ws: WebSocket, instrument: str) -> None:
-    await manager.connect(ws, instrument)
-
     try:
+        await manager.connect(ws, instrument)
+        
         while True:
             await ws.receive()
-    except RuntimeError as e:
+    except Exception as e:
+        if not isinstance(e, RuntimeError):
+            print(type(e), str(e))
+    finally:
         manager.disconnect(ws, instrument)
 
 

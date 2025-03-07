@@ -24,15 +24,13 @@ class OrderBook:
     def __init__(
         self,
         instrument: str,
-        instrument_lock: Lock,
-        order_lock: Lock,
+        lock: Lock,        
         price: float = 150,
         pusher: Pusher = None,
         delay: float = 1,
     ) -> None:
         """Delay in seconds"""
-        self.order_lock = order_lock
-        self.instrument_lock = instrument_lock
+        self.lock = lock
         self._price_delay = delay
         self._price = price
         self._price_queue = deque()
@@ -184,19 +182,21 @@ class OrderBook:
                 price = self._price = randnum()
 
             try:
-                await self._update_upl(price)
                 await REDIS_CLIENT.set(f"{self.instrument}.price", price)
                 await REDIS_CLIENT.publish(f"{self.instrument}.live", price)
                 
-                async with get_db_session() as sess:
-                    await sess.execute(
-                        insert(MarketData).values(
-                            instrument=self.instrument,
-                            time=datetime.now().timestamp(),
-                            price=price,
+                async with self.lock:
+                    async with get_db_session() as sess:
+                        await sess.execute(
+                            insert(MarketData).values(
+                                instrument=self.instrument,
+                                time=datetime.now().timestamp(),
+                                price=price,
+                            )
                         )
-                    )
-                    await sess.commit()
+                        await sess.commit()
+                asyncio.create_task(self._update_upl(price))
+                # await self._update_upl(price)
             except Exception as e:
                 if not isinstance(e, IndexError):
                     print("[orderbook][_publish_price] - ", type(e), str(e))

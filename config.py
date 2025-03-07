@@ -51,7 +51,7 @@ DB_ENGINE = create_async_engine(
     pool_timeout=30,
     pool_recycle=600,
 )
-DB_LOCK = Lock(REDIS_CLIENT, 'test')
+DB_LOCK = Lock(REDIS_CLIENT, 'orderlock')
 
 
 # Misc

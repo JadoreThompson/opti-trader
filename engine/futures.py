@@ -54,7 +54,7 @@ class FuturesEngine:
 
         self._order_books: dict[str, OrderBook] = {
             "BTCUSD": OrderBook(
-                "BTCUSD", self.instrument_lock, self.order_lock, 37, self.pusher
+                "BTCUSD", self.instrument_lock, 37, self.pusher
             ),
         }
 

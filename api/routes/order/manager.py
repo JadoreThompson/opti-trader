@@ -5,7 +5,7 @@ from fastapi import WebSocket
 from config import BALANCE_UPDATE_CHANNEL, ORDER_UPDATE_CHANNEL, REDIS_CLIENT
 from .enums import SocketPayloadCategory
 from .models import OrderRead
-from ...utils import ConnectPayload, SocketPayload
+from ...utils import SocketPayload
 
 
 class ClientManager:
