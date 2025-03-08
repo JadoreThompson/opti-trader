@@ -1,8 +1,13 @@
 import json
+
 from datetime import datetime
+from enum import Enum
+from typing import TypedDict
 from uuid import UUID
+
 from enums import Side, OrderStatus
 from .order import Order
+
 
 calc_sell_pl = lambda amount, open_price, close_price: round(
     amount * (1 + (open_price - close_price) / open_price), 2
@@ -13,6 +18,16 @@ calc_buy_pl = lambda amount, open_price, close_price: round(
 dump_obj = lambda obj: json.dumps(
     {k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in obj.items()}
 )
+
+
+class EnginePayloadCategory(int, Enum):
+    NEW = 0
+    MODIFY = 1
+
+
+class EnginePayload(TypedDict):
+    category: EnginePayloadCategory
+    content: dict
 
 
 def calculate_upl(order: Order, price: float, ob) -> None:

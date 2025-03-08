@@ -17,7 +17,7 @@ manager = ClientManager()
 async def instrument_ws(ws: WebSocket, instrument: str) -> None:
     try:
         await manager.connect(ws, instrument)
-        
+
         while True:
             await ws.receive()
     except Exception as e:
@@ -29,7 +29,7 @@ async def instrument_ws(ws: WebSocket, instrument: str) -> None:
 
 @instrument.get("/")
 async def get_instrument(
-    instrument: str, timeframe: Timeframe, ago: int = 3600
+    instrument: str, timeframe: Timeframe, ago: int = 432000
 ) -> list[Optional[OHLC]]:
     """ago in seconds"""
     async with get_db_session() as sess:

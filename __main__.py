@@ -2,6 +2,8 @@ import asyncio
 import httpx
 import multiprocessing
 import uvicorn
+import random
+import json
 
 from faker import Faker
 from sqlalchemy import text
@@ -58,8 +60,6 @@ def run_engine(queue: multiprocessing.Queue, ) -> None:
 
 
 async def gen_fake_user(session) -> None:
-    import json
-    
     payload = {
         "username": fkr.first_name(),
         "email": fkr.email(),
@@ -75,10 +75,10 @@ async def gen_fake_user(session) -> None:
 
 
 async def gen_fake_orders(session, num_orders: int, cookie: str) -> None:
-    import random
     randnum = lambda: round(random.random() * 100, 2)
     
     for _ in range(num_orders):
+        # await asyncio.sleep(randnum())
         await asyncio.sleep(0.1)
         order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
         payload = {
@@ -165,4 +165,4 @@ async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) 
 
 
 if __name__ == "__main__":
-    asyncio.run(main(True, 1000, 1_000_000))
+    asyncio.run(main(True, 1, 1))

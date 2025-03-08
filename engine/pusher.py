@@ -139,15 +139,6 @@ class Pusher:
                         async with get_db_session() as sess:
                             res = await sess.execute(
                                 update(Users)
-                                # .values(
-                                #     [
-                                #         {
-                                #             "user_id": item["user_id"],
-                                #             "balance": Users.balance + item["amount"],
-                                #         }
-                                #         for item in collection
-                                #     ]
-                                # )
                                 .where(
                                     Users.user_id.in_(
                                         [u["user_id"] for u in collection]

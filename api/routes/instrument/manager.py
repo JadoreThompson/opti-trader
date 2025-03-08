@@ -35,7 +35,7 @@ class ClientManager:
             async for message in ps.listen():
                 if message["type"] == "subscribe":
                     continue
-                print(len(self._connections["BTCUSD"]))
+
                 await self._handle_price(message["data"].decode(), instrument)
 
     async def _handle_price(self, price: float, instrument: str) -> None:

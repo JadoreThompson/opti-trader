@@ -5,6 +5,7 @@ import warnings
 from collections import namedtuple
 from collections.abc import Iterable
 from r_mutex import Lock
+from typing import Callable
 from uuid import uuid4
 
 from enums import OrderStatus, OrderType, Side
@@ -12,7 +13,14 @@ from .enums import Tag
 from .order import Order
 from .orderbook import OrderBook
 from .pusher import Pusher
-from .utils import calc_sell_pl, calc_buy_pl, calculate_upl
+from .utils import (
+    EnginePayloadCategory,
+    EnginePayload,
+    calc_sell_pl,
+    calc_buy_pl,
+    calculate_upl,
+    dump_obj
+)
 
 
 MatchResult = namedtuple(
@@ -53,23 +61,29 @@ class FuturesEngine:
             raise RuntimeError("Failed to connect to pusher")
 
         self._order_books: dict[str, OrderBook] = {
-            "BTCUSD": OrderBook(
-                "BTCUSD", self.instrument_lock, 37, self.pusher
-            ),
+            "BTCUSD": OrderBook("BTCUSD", self.instrument_lock, 37, self.pusher),
         }
 
         await self._listen()
 
     async def _listen(self) -> None:
         await asyncio.sleep(0)
+
+        handlers: dict[EnginePayloadCategory, Callable] = {
+            EnginePayloadCategory.NEW: self._handle_new,
+            EnginePayloadCategory.MODIFY: self._handle_modify,
+        }
+
         while True:
             try:
-                self._handle(self.queue.get_nowait())
+                message: EnginePayload = self.queue.get_nowait()
+                print("[futures][_listen] - ", message)
+                handlers[message["category"]](message["content"])
             except Exception:
                 pass
             await asyncio.sleep(0.2)
 
-    def _handle(self, order_data: dict):
+    def _handle_new(self, order_data: dict):
         ob = self._order_books[order_data["instrument"]]
         order = Order(order_data, Tag.ENTRY, order_data["side"])
 
@@ -247,3 +261,26 @@ class FuturesEngine:
                 )
 
             self.pusher.append(order.payload)
+
+    def _handle_modify(self, order_data: dict) -> None:
+        try:
+            pos = self._order_books[order_data["instrument"]].get(
+                order_data["order_id"]
+            )
+
+            if pos.order.payload["status"] == OrderStatus.PENDING:
+                if order_data["limit_price"] is not None:
+                    pos.order.payload["limit_price"] = order_data["limit"]
+                    
+            if (
+                pos.order.payload["status"] != OrderStatus.PARTIALLY_CLOSED
+                and pos.order.payload["status"] != OrderStatus.CLOSED
+            ):
+                if order_data["take_profit"] is not None:
+                    pos.order.payload["take_profit"] = order_data["take_profit"]
+                if order_data["stop_loss"] is not None:
+                    pos.order.payload["stop_loss"] = order_data["stop_loss"]
+            
+            self.pusher.append(pos.order.payload)
+        except ValueError as e:
+            pass
