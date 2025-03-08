@@ -8,19 +8,29 @@ from .models import OrderWrite
 from ...config import FUTURES_QUEUE
 
 
-def validate_order_details(price: float, order: OrderWrite | Orders) -> bool:
+def validate_order_details(
+    price: float, order: OrderWrite | Orders, balance: float=None
+) -> bool:
     """
-
     Args:
         price (float)
         order (OrderWrite | Orders)
+        balance (Float)
 
     Raises:
         ValueError containing the error
 
     Returns:
-        bool: Order validated
+        bool:
+         - True Order validated
     """
+    if isinstance(order, OrderWrite):
+        try:
+            if balance < order.quantity * price:
+                raise ValueError("Insufficient balance to perform action")
+        except TypeError:
+            raise ValueError('Missing balance')
+
     if order.side == Side.SELL:
         if order.limit_price is not None:
             if order.limit_price <= price:
@@ -46,20 +56,20 @@ def validate_order_details(price: float, order: OrderWrite | Orders) -> bool:
     return True
 
 
-async def enter_new_order(details: dict, user_id: str) -> None:
+async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
     details["standing_quantity"] = details["quantity"]
     details["user_id"] = user_id
 
     async with DB_LOCK:
         async with get_db_session() as sess:
-            res = await sess.execute(
-                select(Users.balance).where(Users.user_id == user_id)
-            )
+            # res = await sess.execute(
+            #     select(Users.balance).where(Users.user_id == user_id)
+            # )
 
-            balance = res.first()[0] - (details["amount"] * details["quantity"])
-            if balance < 0:
-                raise ValueError("Insufficient balance")
+            # if balance < 0:
+            #     raise ValueError("Insufficient balance")
 
+            balance -= details["amount"]
             await sess.execute(
                 update(Users).values(balance=balance).where(Users.user_id == user_id)
             )
@@ -70,6 +80,8 @@ async def enter_new_order(details: dict, user_id: str) -> None:
     if details["market_type"] == MarketType.FUTURES:
         payload = vars(order)
         del payload["_sa_instance_state"]
+        payload["order_id"] = str(payload["order_id"])
+        # print("Pushing this payload to the futures engine - ", payload)
         FUTURES_QUEUE.put_nowait(
             {"category": EnginePayloadCategory.NEW, "content": payload}
         )
@@ -82,6 +94,18 @@ def enter_modify_order(
     take_profit: float = None,
     stop_loss: float = None,
 ):
+    """Enters modify order into engine
+
+    Args:
+        current_market_price (float)
+        order (Orders)
+        limit_price (float, optional)
+        take_profit (float, optional)
+        stop_loss (float, optional)
+
+    Raises:
+        - raises ValueError if values contradict price or constraints
+    """
     if order.status != OrderStatus.PENDING and limit_price is not None:
         raise ValueError("Cannot change limit price on already filled order")
 
@@ -104,6 +128,23 @@ def enter_modify_order(
     if order.market_type == MarketType.FUTURES:
         payload = vars(order)
         del payload["_sa_instance_state"]
+        payload["order_id"] = str(payload["order_id"])
         FUTURES_QUEUE.put_nowait(
             {"category": EnginePayloadCategory.MODIFY, "content": payload}
+        )
+
+
+def enter_close_order(
+    order_id: str, market_type: MarketType, instrument: str, current_price: float
+) -> None:
+    if market_type == MarketType.FUTURES:
+        FUTURES_QUEUE.put_nowait(
+            {
+                "category": EnginePayloadCategory.CLOSE,
+                "content": {
+                    "order_id": order_id,
+                    "instrument": instrument,
+                    "price": current_price,
+                },
+            }
         )

@@ -1,5 +1,7 @@
 import asyncio
+import math
 import multiprocessing
+import traceback
 import warnings
 
 from collections import namedtuple
@@ -9,7 +11,7 @@ from typing import Callable
 from uuid import uuid4
 
 from enums import OrderStatus, OrderType, Side
-from .enums import Tag
+from .enums import PositionStatus, Tag
 from .order import Order
 from .orderbook import OrderBook
 from .pusher import Pusher
@@ -19,7 +21,6 @@ from .utils import (
     calc_sell_pl,
     calc_buy_pl,
     calculate_upl,
-    dump_obj
 )
 
 
@@ -72,12 +73,12 @@ class FuturesEngine:
         handlers: dict[EnginePayloadCategory, Callable] = {
             EnginePayloadCategory.NEW: self._handle_new,
             EnginePayloadCategory.MODIFY: self._handle_modify,
+            EnginePayloadCategory.CLOSE: self._handle_close,
         }
 
         while True:
             try:
                 message: EnginePayload = self.queue.get_nowait()
-                print("[futures][_listen] - ", message)
                 handlers[message["category"]](message["content"])
             except Exception:
                 pass
@@ -111,7 +112,7 @@ class FuturesEngine:
         self.pusher.append(order_data)
 
     def _handle_market(self, order: Order, ob: OrderBook):
-        order.payload["price"] = ob.price
+        # order.payload["price"] = ob.price
         return self._match(order.payload, ob, order.payload["price"], 20)
 
     def _handle_limit(self, order: Order, ob: OrderBook) -> None:
@@ -142,7 +143,7 @@ class FuturesEngine:
                 Not filled: (0, None)
         """
         touched: list[Order] = []
-        filled: list[Order] = []
+        filled: list[tuple[Order, int]] = []
         book = "bids" if order["side"] == Side.SELL else "asks"
         target_price = ob.best_price(order["side"], price)
 
@@ -153,6 +154,8 @@ class FuturesEngine:
             return MatchResult(0, None)
 
         for existing_order in ob[book][target_price]:
+            # existing_order.position.status = PositionStatus.TOUCHED
+            
             leftover_quant = (
                 existing_order.payload["standing_quantity"] - order["standing_quantity"]
             )
@@ -163,8 +166,9 @@ class FuturesEngine:
                     "standing_quantity"
                 ]
                 order["standing_quantity"] = 0
+                
             else:
-                filled.append(existing_order)
+                filled.append((existing_order, existing_order.payload["standing_quantity"]))
                 order["standing_quantity"] -= existing_order.payload[
                     "standing_quantity"
                 ]
@@ -176,24 +180,8 @@ class FuturesEngine:
         if touched or filled:
             ob.set_price(price)
 
-        for t_order in touched:
-            if t_order.tag == Tag.ENTRY:
-                if t_order.payload["standing_quantity"] > 0:
-                    t_order.payload["status"] = OrderStatus.PARTIALLY_FILLED
-                else:
-                    filled.append(t_order)
-            else:
-                t_order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
-
-            calculate_upl(t_order, target_price, ob)
-
-            if t_order.payload["status"] == OrderStatus.FILLED:
-                filled.append(t_order.payload)
-            if t_order.payload["status"] == OrderStatus.CLOSED:
-                self.pusher.append(t_order.payload, "balance")
-            self.pusher.append(t_order.payload)
-
-        self._handle_filled_orders(filled, ob, target_price, tag=uuid4())
+        self._handle_touched_orders(touched, target_price, ob, filled)
+        self._handle_filled_orders(filled, ob, target_price)
 
         if order["standing_quantity"] == 0:
             return MatchResult(2, target_price)
@@ -201,7 +189,7 @@ class FuturesEngine:
         if attempt != max_attempts:
             attempt += 1
             self._match(order, ob, target_price, max_attempts, attempt)
-
+            
         return MatchResult(1, None)
 
     def _place_tp_sl(self, order: Order, ob: OrderBook):
@@ -224,9 +212,9 @@ class FuturesEngine:
             ob.append(sl_order, order.payload["stop_loss"], tag=uuid4())
 
     def _handle_filled_orders(
-        self, orders: Iterable[Order], ob: OrderBook, price: float, **kwargs
+        self, orders: Iterable[tuple[Order, int]], ob: OrderBook, price: float
     ) -> None:
-        for order in orders:
+        for order, standing_quantity in orders:
             ob.remove(order)
 
             if order.tag == Tag.ENTRY:
@@ -241,12 +229,12 @@ class FuturesEngine:
                 order.payload["unrealised_pnl"] = 0
 
                 if order.payload["side"] == Side.BUY:
-                    order.payload["realised_pnl"] = calc_buy_pl(
-                        order.payload["amount"], order.payload["filled_price"], price
+                    order.payload["realised_pnl"] += calc_buy_pl(
+                        order.payload["filled_price"] * standing_quantity, order.payload["filled_price"], price
                     )
                 else:
-                    order.payload["realised_pnl"] = calc_sell_pl(
-                        order.payload["amount"], order.payload["filled_price"], price
+                    order.payload["realised_pnl"] += calc_sell_pl(
+                        order.payload["filled_price"] * standing_quantity, order.payload["filled_price"], price
                     )
 
             if order.payload["status"] == OrderStatus.FILLED:
@@ -262,6 +250,33 @@ class FuturesEngine:
 
             self.pusher.append(order.payload)
 
+    def _handle_touched_orders(
+        self,
+        orders: Iterable[Order],
+        price: float,
+        ob: OrderBook,
+        filled_orders: list[tuple[Order, int]],
+    ) -> None:
+        for order in orders:
+            if order.tag == Tag.ENTRY:
+                if order.payload["standing_quantity"] > 0:
+                    order.payload["status"] = OrderStatus.PARTIALLY_FILLED
+                else:
+                    filled_orders.append((order, order.payload['standing_quantity']))
+                continue
+            else:
+                order.position.status = PositionStatus.TOUCHED
+                order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
+
+            calculate_upl(order, price, ob)
+
+            if order.payload["status"] == OrderStatus.FILLED:
+                filled_orders.append(order)
+            if order.payload["status"] == OrderStatus.CLOSED:
+                self.pusher.append(order.payload, "balance")
+                
+            self.pusher.append(order.payload)
+
     def _handle_modify(self, order_data: dict) -> None:
         try:
             pos = self._order_books[order_data["instrument"]].get(
@@ -271,7 +286,7 @@ class FuturesEngine:
             if pos.order.payload["status"] == OrderStatus.PENDING:
                 if order_data["limit_price"] is not None:
                     pos.order.payload["limit_price"] = order_data["limit"]
-                    
+
             if (
                 pos.order.payload["status"] != OrderStatus.PARTIALLY_CLOSED
                 and pos.order.payload["status"] != OrderStatus.CLOSED
@@ -280,7 +295,56 @@ class FuturesEngine:
                     pos.order.payload["take_profit"] = order_data["take_profit"]
                 if order_data["stop_loss"] is not None:
                     pos.order.payload["stop_loss"] = order_data["stop_loss"]
-            
+
             self.pusher.append(pos.order.payload)
-        except ValueError as e:
+        except ValueError:
             pass
+
+    def _handle_close(self, payload: dict) -> None:
+        try:
+            ob = self._order_books[payload["instrument"]]
+            pos = ob.get(payload["order_id"])
+            ob.remove_all(pos.order)
+            before_standing_quantity: int = pos.order.payload['standing_quantity']
+            result: MatchResult = self._match(pos.order.payload, ob, payload["price"])
+
+            if result.outcome == 2:
+                ob.set_price(result.price)
+                pos.order.payload["status"] = OrderStatus.CLOSED
+                pos_value: float = before_standing_quantity * pos.order.payload['filled_price'],
+                
+                if pos.order.payload["side"] == Side.BUY:
+                    pos.order.payload["realised_pnl"] += calc_buy_pl(
+                        pos_value,
+                        pos.order.payload["filled_price"],
+                        payload["price"],
+                    )
+                else:
+                    pos.order.payload["realised_pnl"] += calc_sell_pl(
+                        pos_value,
+                        pos.order.payload["filled_price"],
+                        payload["price"],
+                    )
+                    
+                pos.order.payload["unrealised_pnl"] = 0
+                self.pusher.append(pos.order.payload, mode="fast")
+                
+            else:
+                new_pos = ob.append(pos.order, payload['price'])
+                
+                if pos.take_profit is not None:
+                    ob.append(pos.take_profit, payload['price'])
+                if pos.stop_loss is not None:
+                    ob.append(pos.stop_loss, payload['price'])
+                    
+                if (
+                    new_pos.order.payload["standing_quantity"]
+                    != new_pos.order.payload["quantity"]
+                ):
+                    new_pos.order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
+
+                self.pusher.append(new_pos.order.payload)
+        except ValueError:
+            pass
+        except Exception:
+            traceback.print_exc()

@@ -7,7 +7,7 @@ from ...base import CustomBase
 
 
 class OrderWrite(CustomBase):
-    amount: float
+    # amount: float
     quantity: int = Field(..., ge=1)
     instrument: str
     market_type: MarketType
@@ -96,3 +96,6 @@ class ModifyOrder(CustomBase):
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
     
+    
+class CloseOrder(CustomBase):
+    order_id: str

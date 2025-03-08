@@ -7,7 +7,6 @@ from datetime import datetime
 from r_mutex import Lock
 from sqlalchemy import insert
 from typing import Literal, Optional
-from uuid import UUID
 
 from config import REDIS_CLIENT
 from db_models import MarketData
@@ -50,7 +49,7 @@ class OrderBook:
         self.ask_levels = self.asks.keys()
         self._tracker: dict[str, Position] = {}
 
-    def append(self, order: Order, price: float, **kwargs) -> None:
+    def append(self, order: Order, price: float, **kwargs) -> Position:
         """
         Appends order to tracking and to the book
         """
@@ -67,8 +66,10 @@ class OrderBook:
             create_position = True
 
         if create_position:
-            self._tracker.setdefault(order.payload["order_id"], Position(order))
+            pos = self._tracker.setdefault(order.payload["order_id"], Position(order))
 
+        order.position = pos
+        
         if order.side == Side.BUY:
             self.bids.setdefault(price, [])
             self.bids[price].append(order)
@@ -76,6 +77,8 @@ class OrderBook:
         elif order.side == Side.SELL:
             self.asks.setdefault(price, [])
             self.asks[price].append(order)
+            
+        return pos
 
     def track(self, order: Order) -> Position:
         pos = self._tracker.setdefault(order.payload["order_id"], Position(order))
@@ -119,7 +122,7 @@ class OrderBook:
             except (ValueError, KeyError):
                 pass
 
-    def remove_all(self, order: Order) -> None:
+    def remove_all(self, order: Order) -> Position:
         pos: Position = self._tracker.pop(order.payload["order_id"])
         self.remove_single(order)
 
@@ -127,12 +130,25 @@ class OrderBook:
             self.remove_single(pos.take_profit)
         if pos.stop_loss is not None:
             self.remove_single(pos.stop_loss)
+        return pos
 
-    def get(self, order_id: str | UUID) -> Optional[Position]:
+    def get(self, order_id: str) -> Position:
+        """Throws ValueError if position with order id doesn't exist"""
         pos = self._tracker.get(order_id)
         if pos is None:
             raise ValueError("Position related to order doesn't exist")
         return pos
+    
+    # def pop(self, order_id: str) -> Position:
+    #     try:
+    #         print(type(order_id))
+    #         for _, pos in self._tracker.items():
+    #             print(pos.order.payload['order_id'], type(pos.order.payload['order_id']))
+    #         pos = self._tracker.pop(order_id)
+    #         self.remove_all(pos.order)
+    #         return pos
+    #     except KeyError:
+    #         raise ValueError("Position related to order doesn't exist")
 
     def best_price(self, side: Side, price: float) -> Optional[float]:
         price_levels = self.bid_levels if side == Side.BUY else self.ask_levels

@@ -1,4 +1,6 @@
 from typing import Optional
+
+from engine.enums import PositionStatus
 from .order import Order
 
 
@@ -6,6 +8,8 @@ class Position:
     def __init__(self, order: Order) -> None:
         self._instrument = order.payload["instrument"]
         self._order = order
+        # self.status = PositionStatus.UNTOUCHED
+        # Status only to be referrenced when calculating pnl
         self.stop_loss: Optional[Order] = None
         self.take_profit: Optional[Order] = None
 

@@ -1,12 +1,14 @@
 from enums import Side
+# from .position import Position
 from .enums import Tag
 
 
 class Order:
-    def __init__(self, order_data: dict, tag: Tag, side: Side) -> None:
+    def __init__(self, order_data: dict, tag: Tag, side: Side, position=None) -> None:
         self._payload = order_data
         self._tag = tag
         self._side = side
+        self.position = position
 
     @property
     def tag(self) -> Tag:

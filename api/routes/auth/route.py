@@ -8,7 +8,7 @@ from db_models import Users
 from utils.db import get_db_session
 from .models import LoginCredentials, RegisterCredentials
 from ...middleware import JWT, generate_token, verify_cookie_http
-from ...config import COOKIE_KEY
+from ...config import COOKIE_ALIAS
 
 auth = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,7 +29,7 @@ async def register(body: RegisterCredentials) -> None:
                 await sess.commit()
             resp = Response()
             resp.set_cookie(
-                COOKIE_KEY,
+                COOKIE_ALIAS,
                 generate_token(
                     {
                         "sub": str(user.user_id),
@@ -63,7 +63,7 @@ async def login(body: LoginCredentials) -> None:
 
     resp = Response()
     resp.set_cookie(
-        COOKIE_KEY,
+        COOKIE_ALIAS,
         generate_token(
             {
                 "sub": str(user.user_id),
@@ -84,5 +84,5 @@ async def verify_token(jwt: JWT = Depends(verify_cookie_http)):
 @auth.get("/remove-token")
 async def remove_token(jwt: JWT = Depends(verify_cookie_http)):
     res = Response()
-    res.delete_cookie(COOKIE_KEY)
+    res.delete_cookie(COOKIE_ALIAS)
     return res

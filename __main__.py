@@ -165,4 +165,4 @@ async def main(gen_fake: bool = False, num_users: int = 1, num_orders: int = 1) 
 
 
 if __name__ == "__main__":
-    asyncio.run(main(True, 1, 1))
+    asyncio.run(main(True, 2, 1_000_000))
