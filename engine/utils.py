@@ -5,74 +5,59 @@ from enum import Enum
 from typing import TypedDict
 from uuid import UUID
 
-from engine.enums import PositionStatus
 from enums import Side, OrderStatus
 from .order import Order
 
 
-calc_sell_pl = lambda amount, open_price, close_price: round(
-    amount * (1 + (open_price - close_price) / open_price), 2
-)
-calc_buy_pl = lambda amount, open_price, close_price: round(
-    (close_price / open_price) * amount, 2
-)
-dump_obj = lambda obj: json.dumps(
-    {k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in obj.items()}
-)
+def calc_sell_pl(amount: float, open_price: float, close_price: float) -> float:
+    """Returns the new value of the amount for sell order"""
+    return round(amount * (1 + (open_price - close_price) / open_price), 2)
+
+
+def calc_buy_pl(amount: float, open_price: float, close_price: float) -> float:
+    """Returns the new value of the amount for buy order"""
+    return round((close_price / open_price) * amount, 2)
+
+
+def dump_obj(obj: dict) -> str:
+    """
+    Handles the dumping of a dictionary, converting UUID and datetime fields to strings
+
+    Args:
+        obj (dict) - Non nested dictionary
+    """
+    return json.dumps(
+        {k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in obj.items()}
+    )
 
 
 class EnginePayloadCategory(int, Enum):
+    """All categories of payloads to be sent to the engine"""
+
     NEW = 0
     MODIFY = 1
     CLOSE = 2
 
 
 class EnginePayload(TypedDict):
+    """Payload Schema for submitting requests to the engine"""
+
     category: EnginePayloadCategory
     content: dict
 
 
 def calculate_upl(order: Order, new_price: float, ob) -> None:
     """
+    Calculates the Unrealised PnL for a given order.
+    If the calcualted pnl equals to the negative value for the
+    value of the position, it's assigned order status CLOSED, 
+    standing quantity and unrealised pnl of 0, realised pnl is then calculated.
+    
     Args:
         order (Order)
         price (float)
         ob (OrderBook)
     """
-    # upl: float = None
-    # # old_position_value: float = order.payload["filled_price"] * order.payload["quantity"]
-    # new_position_value: float = (
-    #     order.payload["filled_price"] * order.payload["standing_quantity"]
-    # )
-
-    # if order.payload["filled_price"] is None:
-    #     return
-
-    # if order.payload["side"] == Side.SELL:  # Must be a buy
-    #     upl = calc_buy_pl(
-    #         order.payload["unrealised_pnl"] + new_position_value,
-    #         order.payload["filled_price"],
-    #         price,
-    #     )
-    # else:
-    #     upl = calc_sell_pl(
-    #         order.payload["unrealised_pnl"] + new_position_value,
-    #         order.payload["filled_price"],
-    #         price,
-    #     )
-
-    # print("Upl - ",upl, "order id - ", order.payload['order_id'])
-    # if order.payload["unrealised_pnl"] is not None:
-    #     if upl <= order.payload["amount"] * -1:
-    #         ob.remove(order, "all")
-    #         order.payload["status"] = OrderStatus.CLOSED
-    #         order.payload["closed_price"] = price
-    #         order.payload["unrealised_pnl"] = 0
-    #         order.payload["realised_pnl"] += upl
-    #         return
-
-    # order.payload["unrealised_pnl"] += upl
-    # try:
     if order.payload["filled_price"] is None:
         return
 
@@ -92,42 +77,16 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
             new_price,
         )
 
-    # upl_value = (
-    #     order.payload["realised_pnl"]
-    #     if order.position.status == PositionStatus.TOUCHED
-    #     else order.payload["unrealised_pnl"]
-    # )
-
     new_upl = round(-(pos_value - upl), 2)
-    # cupl = order.payload['unrealised_pnl']
+    
     if new_upl:
-        if new_upl <= pos_value:
-            ob.remove(order, "all")
+        if new_upl <= -pos_value:
+            ob.remove_all(order)
             order.payload["status"] = OrderStatus.CLOSED
+            order.payload["closed_at"] = datetime.now()
             order.payload["closed_price"] = new_price
-            order.payload["unrealised_pnl"] = 0
+            order.payload["standing_quantity"] = order.payload["unrealised_pnl"] = 0
             order.payload["realised_pnl"] += new_upl
 
         else:
             order.payload["unrealised_pnl"] = new_upl
-
-        # print(
-        #     "Order ID=",
-        #     order.payload["order_id"],
-        #     "Calculated UPL=",
-        #     new_upl,
-        #     "Assigned UPL=",
-        #     order.payload["unrealised_pnl"],
-        #     "Current Price=",
-        #     new_price,
-        #     "Filled Price=",
-        #     order.payload["filled_price"],
-        #     "Quantity=",
-        #     order.payload["quantity"],
-        #     "Side=",
-        #     order.payload["side"],
-        # )
-        # else:
-        #     print()
-    # except Exception as e:
-    #     print(type(e), str(e))

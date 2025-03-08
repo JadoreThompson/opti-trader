@@ -41,9 +41,7 @@ async def register(body: RegisterCredentials) -> None:
             )
             return resp
     except IntegrityError:
-        raise HTTPException(status_code=401, detail="Credentials already exist")
-    except Exception as e:
-        print("[/auth/register]", type(e), str(e))
+        raise HTTPException(status_code=409, detail="Credentials already exist")
 
 
 @auth.post("/login")

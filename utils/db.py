@@ -17,6 +17,8 @@ smaker = sessionmaker(
 )
 
 def write_sqlalchemy_url(db_url: str) -> None:
+    """Writes db url into the alamebic.ini file"""
+    
     sqlalc_uri = \
         db_url.format(quote(os.getenv('DB_PASSWORD')))\
             .replace('+asyncpg', '')
@@ -32,25 +34,13 @@ def write_sqlalchemy_url(db_url: str) -> None:
 
 
 def remove_sqlalchemy_url():
+    """removes the db url into the alamebic.ini file"""
     config = configparser.ConfigParser(interpolation=None)
     config.read('alembic.ini')
     config['alembic'].update({'sqlalchemy.url': ''})
     
     with open('alembic.ini', 'w') as f:
         config.write(f)    
-
-def alembic_upgrade_head() -> None:
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    with open('alembic.ini', 'r') as f:
-        alembic_ini = f.read()
-        
-    write_sqlalchemy_url(DB_URL)
-    subprocess.run(['alembic', 'upgrade', 'head'])
-    
-    with open('alembic.ini', 'w') as f:
-        f.write(alembic_ini)
 
 
 @asynccontextmanager

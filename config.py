@@ -1,31 +1,34 @@
+import os
 import logging
+import sys
+
+import argon2
+import redis
 import redis.asyncio
 import redis.asyncio.connection
-import argon2
-import os
-import redis
-import sys
 
 from dotenv import load_dotenv
 from r_mutex import Lock
-from sqlalchemy.ext.asyncio import create_async_engine
 from urllib.parse import quote
+from sqlalchemy.ext.asyncio import create_async_engine
 
 load_dotenv()
 
+BASE_PATH = os.getcwd()
 DEV_MODE = True
+
 logger = logging.getLogger()
 logging.basicConfig(
-    filename=f"app.log",
+    filename="app.log",
     level=logging.INFO,
     format="[%(levelname)s][%(asctime)s] %(name)s - %(funcName)s - %(message)s",
 )
 
-
 def handle_exc(exc_type, exc_value, tcb):
+    """Global Exception Handler"""
     if not issubclass(exc_type, KeyboardInterrupt):
         logging.error("Uncaught Exc - ", exc_info=(exc_type, exc_value, tcb))
-
+        
 sys.excepthook = handle_exc
 
 
@@ -36,8 +39,8 @@ REDIS_CLIENT = redis.asyncio.Redis(
         max_connections=100,
     )
 )
-ORDER_UPDATE_CHANNEL = "order.updates"
-BALANCE_UPDATE_CHANNEL = "balance.updates"
+ORDER_UPDATE_CHANNEL = os.getenv("ORDER_UPDATE_CHANNEL")
+BALANCE_UPDATE_CHANNEL = os.getenv("BALANCE_UPDATE_CHANNEL")
 
 
 # DB
@@ -51,12 +54,14 @@ DB_ENGINE = create_async_engine(
     pool_timeout=30,
     pool_recycle=600,
 )
-DB_LOCK = Lock(REDIS_CLIENT, 'orderlock')
+ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
+INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
+DB_LOCK = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX)
 
 
-# Misc
+###
 PH = argon2.PasswordHasher(
-    time_cost=2,
-    memory_cost=1_024_000,
-    parallelism=8,
+    time_cost=int(os.getenv("TIME_COST")),
+    memory_cost=int(os.getenv("MEMORY_COST")),
+    parallelism=int(os.getenv("PARALLELISM")),
 )

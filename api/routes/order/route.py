@@ -60,7 +60,6 @@ async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http))
         details = body.model_dump()
         details['price'] = current_market_price
         details["amount"] = round(details["quantity"] * current_market_price, 2)
-        # print(body.quantity, current_market_price, "Total - ", details["amount"])
         await enter_new_order(details, jwt["sub"], balance[0])
         return JSONResponse(status_code=201, content={"message": "Order placed"})
     except ValueError as e:

@@ -62,13 +62,6 @@ async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
 
     async with DB_LOCK:
         async with get_db_session() as sess:
-            # res = await sess.execute(
-            #     select(Users.balance).where(Users.user_id == user_id)
-            # )
-
-            # if balance < 0:
-            #     raise ValueError("Insufficient balance")
-
             balance -= details["amount"]
             await sess.execute(
                 update(Users).values(balance=balance).where(Users.user_id == user_id)
@@ -81,7 +74,7 @@ async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
         payload = vars(order)
         del payload["_sa_instance_state"]
         payload["order_id"] = str(payload["order_id"])
-        # print("Pushing this payload to the futures engine - ", payload)
+        
         FUTURES_QUEUE.put_nowait(
             {"category": EnginePayloadCategory.NEW, "content": payload}
         )

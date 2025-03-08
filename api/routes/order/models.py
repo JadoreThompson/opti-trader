@@ -7,7 +7,6 @@ from ...base import CustomBase
 
 
 class OrderWrite(CustomBase):
-    # amount: float
     quantity: int = Field(..., ge=1)
     instrument: str
     market_type: MarketType

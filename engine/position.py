@@ -1,15 +1,23 @@
 from typing import Optional
-
-from engine.enums import PositionStatus
 from .order import Order
 
 
 class Position:
+    """
+    Represents a trading position. It is used to locate the entry, take profit,
+    and stop loss orders from within and outside the order book.
+
+    This class manages the entry order, stop loss order, and take profit order 
+    associated with a position.
+
+    Attributes:
+        stop_loss (Optional[Order]): The stop loss order for this position, if any.
+        take_profit (Optional[Order]): The take profit order for this position, if any.
+        instrument (str): The instrument associated with the position.
+    """
     def __init__(self, order: Order) -> None:
         self._instrument = order.payload["instrument"]
         self._order = order
-        # self.status = PositionStatus.UNTOUCHED
-        # Status only to be referrenced when calculating pnl
         self.stop_loss: Optional[Order] = None
         self.take_profit: Optional[Order] = None
 

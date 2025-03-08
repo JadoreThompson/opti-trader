@@ -57,6 +57,7 @@ class Orders(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
+    closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     instrument: Mapped[str] = mapped_column(String, nullable=False)
     side: Mapped[str] = mapped_column(String, nullable=False)
     market_type: Mapped[str] = mapped_column(String, nullable=False)

@@ -1,14 +1,22 @@
 from enums import Side
-# from .position import Position
 from .enums import Tag
 
 
 class Order:
-    def __init__(self, order_data: dict, tag: Tag, side: Side, position=None) -> None:
+    """
+    Represents a trading order in the system. The order contains information
+    about the order data, its side (buy or sell), its associated tag
+
+    Attributes:
+        tag (Tag): The tag of the order.
+        side (Side): The side of the order, indicating whether it is a buy or sell.
+        payload (dict): The order data containing the order's details.
+    """
+
+    def __init__(self, order_data: dict, tag: Tag, side: Side) -> None:
         self._payload = order_data
         self._tag = tag
         self._side = side
-        self.position = position
 
     @property
     def tag(self) -> Tag:
