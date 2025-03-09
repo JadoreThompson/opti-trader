@@ -5,7 +5,6 @@ import uvicorn
 
 from sqlalchemy import text
 from r_mutex import Lock
-from api import config as apiconfig
 from engine.futures_engine import FuturesEngine
 from engine.pusher import Pusher
 from config import (
@@ -14,17 +13,15 @@ from config import (
     REDIS_CLIENT,
     DB_LOCK,
     DEV_MODE,
-    DB_URL
+    DB_URL,
 )
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 
-async def handle_run_server(queue: multiprocessing.Queue) -> None:
-    """Handles uvicorn config and run
-    Args:
-        queue (multiprocessing.Queue): Queue used to ingest orders into the engine
+async def handle_run_server() -> None:
     """
-    apiconfig.FUTURES_QUEUE = queue
+    Handles uvicorn config and run
+    """
     fa_config = uvicorn.Config(
         "api.app:app",
         workers=3,
@@ -38,25 +35,18 @@ async def handle_run_server(queue: multiprocessing.Queue) -> None:
     await fa_server.serve()
 
 
-def run_server(queue: multiprocessing.Queue) -> None:
-    """Server entrypoint
-    
-    Args:
-        queue (multiprocessing.Queue): Queue used to ingest orders into the engine
-    """
-    asyncio.run(handle_run_server(queue))
+def run_server() -> None:
+    """Server entrypoint"""
+    asyncio.run(handle_run_server())
 
 
-async def handle_run_engine(queue: multiprocessing.Queue) -> None:
-    """Handles configs for engine and running it
-    Args:
-        queue (multiprocessing.Queue): Queue used to ingest orders into the engine
-    """
+async def handle_run_engine() -> None:
+    """Handles configs for engine and running it"""
     order_lock = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX, is_manager=False)
     instrument_lock = Lock(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX)
 
     pusher = Pusher(order_lock)
-    engine = FuturesEngine(order_lock, instrument_lock, pusher, queue)
+    engine = FuturesEngine(order_lock, instrument_lock, pusher)
 
     asyncio.create_task(order_lock.run())
     asyncio.create_task(instrument_lock.run())
@@ -64,15 +54,9 @@ async def handle_run_engine(queue: multiprocessing.Queue) -> None:
     await engine.run()
 
 
-def run_engine(
-    queue: multiprocessing.Queue,
-) -> None:
-    """Engine Entrypoint
-
-    Args:
-        queue (multiprocessing.Queue): Queue used to ingest orders into the engine
-    """    
-    asyncio.run(handle_run_engine(queue))
+def run_engine() -> None:
+    """Engine Entrypoint"""
+    asyncio.run(handle_run_engine())
 
 
 async def migrate() -> None:
@@ -90,14 +74,14 @@ async def migrate() -> None:
 
 
 async def main() -> None:
-    """Main Entrypoint
+    """
+    Main Entrypoint
     Creates and manages seperate processes for server and engine
     """
-    queue = multiprocessing.Queue()
 
     ps = [
-        multiprocessing.Process(target=run_server, args=(queue,), name="server"),
-        multiprocessing.Process(target=run_engine, args=(queue,), name="engine"),
+        multiprocessing.Process(target=run_server, name="server"),
+        multiprocessing.Process(target=run_engine, name="engine"),
     ]
 
     for p in ps:

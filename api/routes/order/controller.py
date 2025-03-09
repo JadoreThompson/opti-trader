@@ -1,15 +1,16 @@
-from sqlalchemy import insert, select, update
-from config import DB_LOCK
+import json
+from sqlalchemy import insert, update
+from config import DB_LOCK, REDIS_CLIENT
 from db_models import Orders, Users
 from enums import MarketType, OrderStatus, OrderType, Side
-from engine.utils import EnginePayloadCategory
+from engine.utils import EnginePayloadCategory, dump_obj
 from utils.db import get_db_session
 from .models import OrderWrite
-from ...config import FUTURES_QUEUE
+from config import FUTURES_QUEUE_KEY
 
 
 def validate_order_details(
-    price: float, order: OrderWrite | Orders, balance: float=None
+    price: float, order: OrderWrite | Orders, balance: float = None
 ) -> bool:
     """
     Args:
@@ -29,7 +30,7 @@ def validate_order_details(
             if balance < order.quantity * price:
                 raise ValueError("Insufficient balance to perform action")
         except TypeError:
-            raise ValueError('Missing balance')
+            raise ValueError("Missing balance")
 
     if order.side == Side.SELL:
         if order.limit_price is not None:
@@ -74,13 +75,15 @@ async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
         payload = vars(order)
         del payload["_sa_instance_state"]
         payload["order_id"] = str(payload["order_id"])
-        
-        FUTURES_QUEUE.put_nowait(
-            {"category": EnginePayloadCategory.NEW, "content": payload}
+        await REDIS_CLIENT.publish(
+            FUTURES_QUEUE_KEY,
+            json.dumps(
+                {"category": EnginePayloadCategory.NEW, "content": dump_obj(payload)}
+            ),
         )
 
 
-def enter_modify_order(
+async def enter_modify_order(
     current_market_price: float,
     order: Orders,
     limit_price: float = None,
@@ -122,22 +125,30 @@ def enter_modify_order(
         payload = vars(order)
         del payload["_sa_instance_state"]
         payload["order_id"] = str(payload["order_id"])
-        FUTURES_QUEUE.put_nowait(
-            {"category": EnginePayloadCategory.MODIFY, "content": payload}
+        await REDIS_CLIENT.publish(
+            FUTURES_QUEUE_KEY,
+            json.dumps(
+                {"category": EnginePayloadCategory.MODIFY, "content": dump_obj(payload)}
+            ),
         )
 
 
-def enter_close_order(
+async def enter_close_order(
     order_id: str, market_type: MarketType, instrument: str, current_price: float
 ) -> None:
     if market_type == MarketType.FUTURES:
-        FUTURES_QUEUE.put_nowait(
-            {
-                "category": EnginePayloadCategory.CLOSE,
-                "content": {
-                    "order_id": order_id,
-                    "instrument": instrument,
-                    "price": current_price,
-                },
-            }
+        await REDIS_CLIENT.publish(
+            FUTURES_QUEUE_KEY,
+            json.dumps(
+                {
+                    "category": EnginePayloadCategory.CLOSE,
+                    "content": dump_obj(
+                        {
+                            "order_id": order_id,
+                            "instrument": instrument,
+                            "price": current_price,
+                        }
+                    ),
+                }
+            ),
         )

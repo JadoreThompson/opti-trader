@@ -1,7 +1,6 @@
 import asyncio
-import multiprocessing
+import json
 import warnings
-import queue
 
 from datetime import datetime
 from collections import namedtuple
@@ -9,6 +8,7 @@ from collections.abc import Iterable
 from r_mutex import Lock
 from typing import Callable
 
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
 from .enums import Tag
 from .exceptions import PositionNotFound
@@ -39,12 +39,10 @@ class FuturesEngine:
         order_lock: Lock,
         instrument_lock: Lock,
         pusher: Pusher,
-        queue: multiprocessing.Queue,
     ) -> None:
         self.pusher = pusher
         self.order_lock = order_lock
         self.instrument_lock = instrument_lock
-        self.queue = queue
 
     async def run(self):
         """
@@ -86,13 +84,14 @@ class FuturesEngine:
             EnginePayloadCategory.CLOSE: self._handle_close,
         }
 
-        while True:
-            try:
-                message: EnginePayload = self.queue.get_nowait()
-                handlers[message["category"]](message["content"])
-            except queue.Empty:
-                pass
-            await asyncio.sleep(0.2)
+        async with REDIS_CLIENT.pubsub() as ps:
+            await ps.subscribe(FUTURES_QUEUE_KEY)
+            async for message in ps.listen():
+                if message["type"] == "subscribe":
+                    continue
+
+                payload: EnginePayload = json.loads(message["data"])
+                handlers[payload["category"]](json.loads(payload["content"]))
 
     def _handle_new(self, order_data: dict):
         """

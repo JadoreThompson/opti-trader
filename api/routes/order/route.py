@@ -1,4 +1,3 @@
-import stat
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket
 from fastapi.responses import JSONResponse
@@ -80,7 +79,7 @@ async def modify_order(body: ModifyOrder, jwt: JWT = Depends(verify_cookie_http)
         raise HTTPException(status_code=400, detail="Order doesn't exist")
 
     try:
-        enter_modify_order(
+        await enter_modify_order(
             float((await REDIS_CLIENT.get(f"{order.instrument}.price")).decode()),
             order,
             body.limit_price,
@@ -117,7 +116,7 @@ async def close_order(body: CloseOrder, jwt: JWT = Depends(verify_cookie_http)):
             status_code=403, detail="Cannot perform action on partiall or closed orders"
         )
 
-    enter_close_order(
+    await enter_close_order(
         body.order_id,
         details[0],
         details[1],

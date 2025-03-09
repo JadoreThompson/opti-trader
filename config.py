@@ -12,6 +12,7 @@ from r_mutex import Lock
 from urllib.parse import quote
 from sqlalchemy.ext.asyncio import create_async_engine
 
+
 load_dotenv()
 
 BASE_PATH = os.getcwd()
@@ -65,3 +66,4 @@ PH = argon2.PasswordHasher(
     memory_cost=int(os.getenv("MEMORY_COST")),
     parallelism=int(os.getenv("PARALLELISM")),
 )
+FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY")
