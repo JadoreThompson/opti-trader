@@ -20,6 +20,8 @@ async def instrument_ws(ws: WebSocket, instrument: str) -> None:
 
         while True:
             await ws.receive()
+    except RuntimeError:
+        pass
     finally:
         manager.disconnect(ws, instrument)
 

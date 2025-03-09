@@ -27,7 +27,7 @@ async def handle_run_server() -> None:
         workers=3,
         host="0.0.0.0",
         port=8000,
-        # log_config=None,
+        log_config=None,
     )
     fa_server = uvicorn.Server(fa_config)
 

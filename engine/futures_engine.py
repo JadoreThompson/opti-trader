@@ -167,9 +167,6 @@ class FuturesEngine:
         if target_price is None:
             return MatchResult(0, None)
 
-        if target_price not in ob[book]:
-            return MatchResult(0, None)
-
         for existing_order in ob[book][target_price]:
             leftover_quant = (
                 existing_order.payload["standing_quantity"] - order["standing_quantity"]
