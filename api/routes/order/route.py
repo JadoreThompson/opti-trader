@@ -15,7 +15,7 @@ from .controller import (
     enter_new_order,
     validate_order_details,
 )
-from .manager import ClientManager
+from .client_manager import ClientManager
 from .models import CloseOrder, ModifyOrder, OrderWrite
 from ...middleware import JWT, verify_cookie, verify_cookie_http
 

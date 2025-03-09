@@ -62,7 +62,7 @@ class Pusher:
         """Initialise and run the pusher"""
         asyncio.create_task(self._push_fast())
         asyncio.create_task(self._push_slow())
-        asyncio.create_task(self._update_balance())
+        asyncio.create_task(self._push_balance())
         await asyncio.sleep(2)
 
     def append(
@@ -150,7 +150,7 @@ class Pusher:
 
             await asyncio.sleep(self._fast_delay)
 
-    async def _update_balance(self):
+    async def _push_balance(self):
         """
         Conducts updates to records and updates to the pubsub channel
         of the user's balance periodically based on the balance delay

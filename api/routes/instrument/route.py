@@ -6,7 +6,7 @@ from sqlalchemy import select
 from db_models import MarketData
 from utils.db import get_db_session
 from .controllers import generate_ohlc
-from .manager import ClientManager
+from .client_manager import ClientManager
 from .models import OHLC, Timeframe
 
 instrument = APIRouter(prefix="/instrument", tags=["instrument"])
