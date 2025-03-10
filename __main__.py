@@ -15,6 +15,7 @@ from config import (
     DEV_MODE,
     DB_URL,
 )
+from engine.spot_engine import SpotEngine
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 
@@ -46,12 +47,13 @@ async def handle_run_engine() -> None:
     instrument_lock = Lock(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX)
 
     pusher = Pusher(order_lock)
-    engine = FuturesEngine(order_lock, instrument_lock, pusher)
+    futures_engine = FuturesEngine(instrument_lock, pusher)
+    spot_engine = SpotEngine(instrument_lock, pusher)
 
     asyncio.create_task(order_lock.run())
     asyncio.create_task(instrument_lock.run())
 
-    await engine.run()
+    await asyncio.gather(*[futures_engine.run(), spot_engine.run()])
 
 
 def run_engine() -> None:

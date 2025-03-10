@@ -16,13 +16,21 @@ class OrderWrite(CustomBase):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
 
+    @field_validator("market_type")
+    def validate_market_type(
+        cls, value: MarketType, values: ValidationInfo
+    ) -> MarketType:
+        if value == MarketType.SPOT:
+            values.data["side"] = Side.BUY
+        return value
+
     @field_validator("limit_price")
-    def validate_limit_price(cls, value):
+    def validate_limit_price(cls, value: Optional[float]) -> Optional[float]:
         if value:
             return round(value, 2)
 
     @field_validator("side")
-    def tp_sl_validator(cls, value: Side, values: ValidationInfo):
+    def validate_tp_sl(cls, value: Side, values: ValidationInfo) -> Side:
         tp = values.data.get("take_profit")
         sl = values.data.get("stop_loss")
 
@@ -60,7 +68,7 @@ class OrderRead(CustomBase):
     take_profit: Optional[float] = None
 
     @field_validator("order_id", mode="before")
-    def order_id_validator(cls, value):
+    def order_id_validator(cls, value) -> str:
         if isinstance(value, UUID):
             value = str(value)
         return value
@@ -74,7 +82,7 @@ class OrderRead(CustomBase):
         "stop_loss",
         "take_profit",
     )
-    def formatter_serialiser(self, value):
+    def formatter_serialiser(self, value) -> Optional[str]:
         if value is not None:
             return f"{round(value, 2):.2f}"
         return value
@@ -83,9 +91,9 @@ class OrderRead(CustomBase):
 class BalancePayload(CustomBase):
     user_id: str
     balance: float
-    
-    @field_serializer('balance')
-    def balance_serialiser(self, value):
+
+    @field_serializer("balance")
+    def balance_serialiser(self, value) -> str:
         return f"{value:.2f}"
 
 
@@ -94,7 +102,7 @@ class ModifyOrder(CustomBase):
     limit_price: Optional[float] = None
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
-    
-    
+
+
 class CloseOrder(CustomBase):
     order_id: str

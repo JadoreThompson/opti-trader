@@ -1,5 +1,6 @@
 import json
 
+from collections import namedtuple
 from datetime import datetime
 from enum import Enum
 from typing import TypedDict
@@ -50,9 +51,9 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
     """
     Calculates the Unrealised PnL for a given order.
     If the calcualted pnl equals to the negative value for the
-    value of the position, it's assigned order status CLOSED, 
+    value of the position, it's assigned order status CLOSED,
     standing quantity and unrealised pnl of 0, realised pnl is then calculated.
-    
+
     Args:
         order (Order)
         price (float)
@@ -78,7 +79,7 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
         )
 
     new_upl = round(-(pos_value - upl), 2)
-    
+
     if new_upl:
         if new_upl <= -pos_value:
             ob.remove_all(order)
@@ -90,3 +91,12 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
 
         else:
             order.payload["unrealised_pnl"] = new_upl
+
+
+MatchResult = namedtuple(
+    "MatchResult",
+    (
+        "outcome",
+        "price",
+    ),
+)

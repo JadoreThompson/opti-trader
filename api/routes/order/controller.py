@@ -1,6 +1,6 @@
 import json
 from sqlalchemy import insert, update
-from config import DB_LOCK, REDIS_CLIENT
+from config import DB_LOCK, REDIS_CLIENT, SPOT_QUEUE_KEY
 from db_models import Orders, Users
 from enums import MarketType, OrderStatus, OrderType, Side
 from engine.utils import EnginePayloadCategory, dump_obj
@@ -71,16 +71,20 @@ async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
             order = res.scalar()
             await sess.commit()
 
-    if details["market_type"] == MarketType.FUTURES:
-        payload = vars(order)
-        del payload["_sa_instance_state"]
-        payload["order_id"] = str(payload["order_id"])
-        await REDIS_CLIENT.publish(
-            FUTURES_QUEUE_KEY,
-            json.dumps(
-                {"category": EnginePayloadCategory.NEW, "content": dump_obj(payload)}
-            ),
-        )
+    payload = vars(order)
+    del payload["_sa_instance_state"]
+    payload["order_id"] = str(payload["order_id"])
+
+    await REDIS_CLIENT.publish(
+        (
+            FUTURES_QUEUE_KEY
+            if payload["market_type"] == MarketType.FUTURES
+            else SPOT_QUEUE_KEY
+        ),
+        json.dumps(
+            {"category": EnginePayloadCategory.NEW, "content": dump_obj(payload)}
+        ),
+    )
 
 
 async def enter_modify_order(

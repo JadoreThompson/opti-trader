@@ -33,17 +33,6 @@ def handle_exc(exc_type, exc_value, tcb):
 sys.excepthook = handle_exc
 
 
-# Redis
-REDIS_CLIENT = redis.asyncio.Redis(
-    connection_pool=redis.asyncio.connection.ConnectionPool(
-        connection_class=redis.asyncio.connection.Connection,
-        max_connections=100,
-    )
-)
-ORDER_UPDATE_CHANNEL = os.getenv("ORDER_UPDATE_CHANNEL")
-BALANCE_UPDATE_CHANNEL = os.getenv("BALANCE_UPDATE_CHANNEL")
-
-
 # DB
 DB_URL = f"postgresql+asyncpg://{os.getenv("DB_USER")}:{{}}@{os.getenv("DB_HOST")}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
 DB_ENGINE = create_async_engine(
@@ -55,9 +44,21 @@ DB_ENGINE = create_async_engine(
     pool_timeout=30,
     pool_recycle=600,
 )
+
+
+# Redis
+REDIS_CLIENT = redis.asyncio.Redis(
+    connection_pool=redis.asyncio.connection.ConnectionPool(
+        connection_class=redis.asyncio.connection.Connection,
+        max_connections=100,
+    )
+)
+ORDER_UPDATE_CHANNEL = os.getenv("ORDER_UPDATE_CHANNEL")
+BALANCE_UPDATE_CHANNEL = os.getenv("BALANCE_UPDATE_CHANNEL")
+FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY")
+SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY")
 ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
 INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
-DB_LOCK = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX)
 
 
 ###
@@ -66,4 +67,5 @@ PH = argon2.PasswordHasher(
     memory_cost=int(os.getenv("MEMORY_COST")),
     parallelism=int(os.getenv("PARALLELISM")),
 )
-FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY")
+
+DB_LOCK = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX)

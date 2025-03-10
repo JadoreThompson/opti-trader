@@ -6,7 +6,7 @@ from sqlalchemy import select
 from api.config import COOKIE_ALIAS
 from config import REDIS_CLIENT
 from db_models import Orders, Users
-from enums import OrderStatus
+from enums import MarketType, OrderStatus
 from utils.db import get_db_session
 from .controller import (
     enter_close_order,
@@ -38,9 +38,13 @@ async def order_stream(ws: WebSocket) -> None:
 
 @order.post("/")
 async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http)):
+    # if body.market_type == MarketType.SPOT:
+    #     print(body)
+        
     cmp: Optional[bytes] = await REDIS_CLIENT.get(f"{body.instrument}.price")
     if cmp is None:
         raise HTTPException(status_code=400, detail="Instrument isn't listed")
+    
     current_market_price = float(cmp.decode())
 
     async with get_db_session() as sess:

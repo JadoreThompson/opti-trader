@@ -1,9 +1,9 @@
 import asyncio
 import random
+import httpx
 
 from typing import Optional
 from faker import Faker
-from httpx import AsyncClient, Cookies
 
 from enums import MarketType, OrderType, Side
 from ..config import BASE_URL
@@ -12,8 +12,8 @@ from ..config import BASE_URL
 fkr = Faker()
 
 
-async def test_user_creation() -> tuple[AsyncClient, int, Cookies]:
-    sess = AsyncClient()
+async def test_user_creation() -> tuple[httpx.AsyncClient, int, httpx.Cookies]:
+    sess = httpx.AsyncClient()
 
     payload = {
         "username": fkr.first_name(),
@@ -26,7 +26,10 @@ async def test_user_creation() -> tuple[AsyncClient, int, Cookies]:
 
 
 async def test_order_creation(
-    quantity: int = 10, delay: float = None, session: AsyncClient = None, cookies=None
+    quantity: int = 10,
+    delay: float = None,
+    session: httpx.AsyncClient = None,
+    cookies=None,
 ) -> list[list[int, Optional[str]]]:
     randnum = lambda: round(random.random() * 100, 2)
     rtn_value: list[list[int, Optional[str]]] = []
@@ -36,15 +39,15 @@ async def test_order_creation(
 
     for _ in range(quantity):
         await asyncio.sleep(delay or randnum())
-        # order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
-        order_type = OrderType.MARKET
+        order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
+        market_type = random.choice([MarketType.FUTURES, MarketType.SPOT])
+        # order_type = OrderType.MARKET
 
         payload = {
             "quantity": random.randint(1, 50),
             "instrument": "BTCUSD",
-            "market_type": MarketType.FUTURES,
+            "market_type": MarketType.SPOT,  # market_type,
             "order_type": order_type,
-            "side": random.choice([Side.BUY, Side.SELL]),
             "take_profit": random.choice([randnum(), None]),
             "stop_loss": random.choice([randnum(), None]),
         }
@@ -52,16 +55,22 @@ async def test_order_creation(
         if order_type == OrderType.LIMIT:
             payload["limit_price"] = randnum()
 
-        rsp = await session.post(
-            BASE_URL + "/order/",
-            json=payload,
-            cookies=cookies,
-        )
+        if market_type == MarketType.FUTURES:
+            payload["side"] = random.choice([Side.BUY, Side.SELL])
 
-        val = [rsp.status_code]
-        if not rsp.is_success:
-            val.append(rsp.json()["detail"])
-        rtn_value.append(val)
+        try:
+            rsp = await session.post(
+                BASE_URL + "/order/",
+                json=payload,
+                cookies=cookies,
+            )
+
+            val = [rsp.status_code]
+            if not rsp.is_success:
+                val.append(rsp.json()["detail"])
+            rtn_value.append(val)
+        except httpx.ReadTimeout:
+            pass
 
     await session.aclose()
     return rtn_value

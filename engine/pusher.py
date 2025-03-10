@@ -2,8 +2,10 @@ import asyncio
 import json
 
 from collections import deque
+from datetime import datetime
 from sqlalchemy import case, update
 from typing import Literal
+from uuid import UUID
 from r_mutex import Lock
 
 from api.routes.order.models import BalancePayload
@@ -95,21 +97,38 @@ class Pusher:
             else:
                 self._balance_queue.append(obj)
 
+    def _get_batch(self) -> list[dict]:
+        """
+        Converts the data types to the appropriate types
+        """
+        ret_value: list[dict] = []
+        
+        for _ in range(self.batch_size):
+            try:
+                obj = self._slow_queue.popleft()
+                obj_copy = obj.copy()
+                
+                obj_copy['user_id'] = UUID(obj['user_id'])
+                obj_copy['order_id'] = UUID(obj['order_id'])
+                obj_copy['created_at'] = datetime.fromisoformat(obj_copy['created_at'])
+                    
+                ret_value.append(obj_copy)
+            except IndexError:
+                break
+            
+        return ret_value
+
     async def _push_slow(self) -> None:
         """
         Conducts updates to records and updates to the pubsub channel
         periodically based on the slow delay attribute.
         """
         self._slow_running = True
+        
         while True:
             if self._slow_queue:
-                collection = []
-                for _ in range(self.batch_size):
-                    try:
-                        collection.append(self._slow_queue.popleft())
-                    except IndexError:
-                        break
-
+                collection = self._get_batch()
+                                    
                 async with self.lock:
                     async with get_db_session() as sess:
                         await sess.execute(update(Orders), collection)
@@ -131,12 +150,7 @@ class Pusher:
         self._fast_running = True
         while True:
             if self._fast_queue:
-                collection = []
-                for _ in range(self.batch_size):
-                    try:
-                        collection.append(self._fast_queue.popleft())
-                    except IndexError:
-                        break
+                collection = self._get_batch()
 
                 async with self.lock:
                     async with get_db_session() as sess:
@@ -163,7 +177,9 @@ class Pusher:
                 collection = []
                 for _ in range(self.batch_size):
                     try:
-                        collection.append(self._balance_queue.popleft())
+                        item = self._balance_queue.popleft()
+                        item['user_id'] = UUID(item['user_id'])
+                        collection.append(item)
                     except IndexError:
                         break
 
