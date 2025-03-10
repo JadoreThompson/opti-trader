@@ -20,7 +20,7 @@ async def test_user_creation() -> tuple[httpx.AsyncClient, int, httpx.Cookies]:
         "email": fkr.email(),
         "password": fkr.word(),
     }
-
+    print(payload)
     rsp = await sess.post(BASE_URL + "/auth/register", json=payload)
     return sess, rsp.status_code, rsp.cookies
 
@@ -28,6 +28,8 @@ async def test_user_creation() -> tuple[httpx.AsyncClient, int, httpx.Cookies]:
 async def test_order_creation(
     quantity: int = 10,
     delay: float = None,
+    order_type: OrderType = None,
+    market_type: MarketType = None,
     session: httpx.AsyncClient = None,
     cookies=None,
 ) -> list[list[int, Optional[str]]]:
@@ -39,14 +41,17 @@ async def test_order_creation(
 
     for _ in range(quantity):
         await asyncio.sleep(delay or randnum())
-        order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
-        market_type = random.choice([MarketType.FUTURES, MarketType.SPOT])
-        # order_type = OrderType.MARKET
+
+        if order_type is None:
+            order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
+        
+        if market_type is None:
+            market_type = random.choice([MarketType.FUTURES, MarketType.SPOT])
 
         payload = {
             "quantity": random.randint(1, 50),
             "instrument": "BTCUSD",
-            "market_type": MarketType.SPOT,  # market_type,
+            "market_type": MarketType.SPOT,
             "order_type": order_type,
             "take_profit": random.choice([randnum(), None]),
             "stop_loss": random.choice([randnum(), None]),

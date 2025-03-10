@@ -10,6 +10,30 @@ from enums import Side, OrderStatus
 from .order import Order
 
 
+MatchResult = namedtuple(
+    "MatchResult",
+    (
+        "outcome",
+        "price",
+    ),
+)
+
+
+class EnginePayloadCategory(int, Enum):
+    """All categories of payloads to be sent to the engine"""
+
+    NEW = 0
+    MODIFY = 1
+    CLOSE = 2
+
+
+class EnginePayload(TypedDict):
+    """Payload Schema for submitting requests to the engine"""
+
+    category: EnginePayloadCategory
+    content: dict
+
+
 def calc_sell_pl(amount: float, open_price: float, close_price: float) -> float:
     """Returns the new value of the amount for sell order"""
     return round(amount * (1 + (open_price - close_price) / open_price), 2)
@@ -32,31 +56,17 @@ def dump_obj(obj: dict) -> str:
     )
 
 
-class EnginePayloadCategory(int, Enum):
-    """All categories of payloads to be sent to the engine"""
-
-    NEW = 0
-    MODIFY = 1
-    CLOSE = 2
-
-
-class EnginePayload(TypedDict):
-    """Payload Schema for submitting requests to the engine"""
-
-    category: EnginePayloadCategory
-    content: dict
-
-
 def calculate_upl(order: Order, new_price: float, ob) -> None:
     """
     Calculates the Unrealised PnL for a given order.
     If the calcualted pnl equals to the negative value for the
     value of the position, it's assigned order status CLOSED,
-    standing quantity and unrealised pnl of 0, realised pnl is then calculated.
+    standing quantity and unrealised pnl of 0, realised pnl
+    is then calculated.
 
     Args:
         order (Order)
-        price (float)
+        new_price (float)
         ob (OrderBook)
     """
     if order.payload["filled_price"] is None:
@@ -91,12 +101,3 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
 
         else:
             order.payload["unrealised_pnl"] = new_upl
-
-
-MatchResult = namedtuple(
-    "MatchResult",
-    (
-        "outcome",
-        "price",
-    ),
-)

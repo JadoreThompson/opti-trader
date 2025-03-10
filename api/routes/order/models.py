@@ -16,14 +16,6 @@ class OrderWrite(CustomBase):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
 
-    @field_validator("market_type")
-    def validate_market_type(
-        cls, value: MarketType, values: ValidationInfo
-    ) -> MarketType:
-        if value == MarketType.SPOT:
-            values.data["side"] = Side.BUY
-        return value
-
     @field_validator("limit_price")
     def validate_limit_price(cls, value: Optional[float]) -> Optional[float]:
         if value:
@@ -48,6 +40,12 @@ class OrderWrite(CustomBase):
                 if sl > tp:
                     raise ValueError("TP must be greater than SL")
 
+        return value
+
+    @field_validator("side")
+    def validate_side(cls, value: Side, values: ValidationInfo) -> Side:
+        if values.data.get("market_type") == MarketType.SPOT:
+            value = Side.BUY
         return value
 
 
@@ -104,5 +102,10 @@ class ModifyOrder(CustomBase):
     stop_loss: Optional[float] = None
 
 
-class CloseOrder(CustomBase):
+class FuturesCloseOrder(CustomBase):
     order_id: str
+
+
+class SpotCloseOrder(CustomBase):
+    quantity: int = Field(..., ge=1)
+    instrument: str

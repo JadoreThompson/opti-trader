@@ -3,8 +3,9 @@ import json
 
 from datetime import datetime
 from collections.abc import Iterable
+from random import random
 from r_mutex import Lock
-from typing import Callable
+from typing import Callable, TypedDict, Tuple
 
 from config import SPOT_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
@@ -17,16 +18,23 @@ from .pusher import Pusher
 from .utils import (
     EnginePayloadCategory,
     EnginePayload,
-    calc_sell_pl,
     calc_buy_pl,
     calculate_upl,
     MatchResult,
 )
 
 
+class CloseOrderPayload(TypedDict):
+    quantity: int
+    order_ids: Tuple[str]
+    instrument: str
+    price: float
+
+
 class SpotEngine(BaseEngine):
     def __init__(self, instrument_lock: Lock, pusher: Pusher) -> None:
         super().__init__(instrument_lock, pusher)
+        self.count = 0
 
     async def _listen(self) -> None:
         """Listens to the pubsub channel for incoming orders and delegates them to appropriate handlers."""
@@ -46,6 +54,86 @@ class SpotEngine(BaseEngine):
 
                 payload: EnginePayload = json.loads(message["data"])
                 handlers[payload["category"]](json.loads(payload["content"]))
+
+    def _handle_touched_orders(
+        self,
+        orders: Iterable[Order],
+        price: float,
+        ob: OrderBook,
+        filled_orders: list[tuple[Order, int]],
+    ) -> None:
+        for order in orders:
+            if order.tag == Tag.ENTRY:
+                if order.payload["standing_quantity"] > 0:
+                    order.payload["status"] = OrderStatus.PARTIALLY_FILLED
+                else:
+                    filled_orders.append((order, order.payload["standing_quantity"]))
+                continue
+            else:
+                order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
+
+            calculate_upl(order, price, ob)
+
+            if order.payload["status"] == OrderStatus.FILLED:
+                filled_orders.append(order)
+            if order.payload["status"] == OrderStatus.CLOSED:
+                self.pusher.append(
+                    {
+                        "user_id": order.payload["user_id"],
+                        "amount": order.payload["realised_pnl"],
+                    },
+                    "balance",
+                )
+
+            self.pusher.append(order.payload)
+
+    def _handle_filled_orders(
+        self, orders: Iterable[tuple[Order, int]], ob: OrderBook, price: float
+    ) -> None:
+        """
+        Handles the assigning of new order status', pnls and closure details
+        for all orders that were filled during matching process. Each order within
+        the iterable must have a standing quantity of 0 given to it by the match fucntion
+
+        Args:
+            orders (Iterable[tuple[Order, int]])
+            ob (OrderBook)
+            price (float)
+        """
+        for order, standing_quantity in orders:
+            ob.remove(order)
+
+            if order.tag == Tag.ENTRY:
+                order.payload["status"] = OrderStatus.FILLED
+                order.payload["standing_quantity"] = order.payload["quantity"]
+                order.payload["filled_price"] = price
+                self._place_tp_sl(order, ob)
+            else:
+                ob.remove_all(order)
+                order.payload["status"] = OrderStatus.CLOSED
+                order.payload["closed_at"] = datetime.now()
+                order.payload["closed_price"] = price
+                order.payload["unrealised_pnl"] = order.payload["standing_quantity"] = (
+                    0.0
+                )
+                order.payload["realised_pnl"] += calc_buy_pl(
+                    order.payload["filled_price"] * standing_quantity,
+                    order.payload["filled_price"],
+                    price,
+                )
+
+            if order.payload["status"] == OrderStatus.FILLED:
+                calculate_upl(order, price, ob)
+            else:
+                self.pusher.append(
+                    {
+                        "user_id": order.payload["user_id"],
+                        "amount": order.payload["realised_pnl"],
+                    },
+                    "balance",
+                )
+
+            self.pusher.append(order.payload)
 
     def _match(
         self,
@@ -107,8 +195,8 @@ class SpotEngine(BaseEngine):
         if touched or filled:
             ob.set_price(price)
 
-        # self._handle_touched_orders(touched, target_price, ob, filled)
-        # self._handle_filled_orders(filled, ob, target_price)
+        self._handle_touched_orders(touched, target_price, ob, filled)
+        self._handle_filled_orders(filled, ob, target_price)
 
         if order["standing_quantity"] == 0:
             return MatchResult(2, target_price)
@@ -122,32 +210,40 @@ class SpotEngine(BaseEngine):
     def _handle_new(self, payload: dict) -> None:
         """
         Handles the result of a new order by matching it against the order book.
-        Depending on the order type (market or limit), the order is either matched immediately
-        or added to the order book for future matching. If the order is filled, take profit and
-        stop loss orders are placed if applicable.
+        Depending on the order type (market or limit), the order is either
+        matched immediately or added to the order book for future matching.
+        If the order is filled, take profit and stop loss orders are placed
+        if applicable.
 
         Args:
-            payload (dict): The order data, including order type, side, price, and quantity.
+            payload (dict): The order data, including order type, side, price,
+                and quantity.
         """
+
         ob = self._order_books[payload["instrument"]]
-        order = Order(payload, Tag.ENTRY, payload["side"])
+        order = Order(payload, Tag.ENTRY, Side.BUY)
 
         func: dict[OrderType, Callable] = {
             OrderType.MARKET: self._handle_market_order,
             OrderType.LIMIT: self._handle_limit_order,
         }[payload["order_type"]]
 
-        result: MatchResult = func(order, ob)
+        # Only here for testing
+        self.count += 1
+        if self.count % 2 == 0 and payload["order_type"] == OrderType.MARKET:
+            result = MatchResult(2, round(random() * 100, 2))
+        else:
+            result: MatchResult = func(order, ob)
 
         if payload["order_type"] == OrderType.LIMIT:
             return
-        print(result)
+
         if result.outcome == 2:
             ob.set_price(result.price)
             payload["status"] = OrderStatus.FILLED
             payload["standing_quantity"] = payload["quantity"]
             payload["filled_price"] = result.price
-            # self._place_tp_sl(order, ob)
+            self._place_tp_sl(order, ob)
         else:
             ob.append(order, payload["price"])
             if payload["standing_quantity"] != payload["quantity"]:
@@ -161,11 +257,107 @@ class SpotEngine(BaseEngine):
     def _handle_limit_order(self, order: Order, ob: OrderBook) -> None:
         ob.append(order, order.payload["limit_price"])
 
-    def _handle_touched_orders(
-        self,
-        orders: Iterable[Order],
-        price: float,
-        ob: OrderBook,
-        filled_orders: list[tuple[Order, int]],
-    ) -> None:
-        return super()._handle_touched_orders(orders, price, ob, filled_orders)
+    def _place_tp_sl(self, order: Order, ob: OrderBook) -> None:
+        """
+        Handles the submission of an orders take profit and stop loss
+        to the orderbook. Must only be called for orders that are filled
+
+        Args:
+            order (Order)
+            ob (OrderBook)
+        """
+        ob.track(order)
+
+        if order.payload["take_profit"] is not None:
+            ob.append(
+                Order(
+                    order.payload,
+                    Tag.TAKE_PROFIT,
+                    Side.SELL,
+                ),
+                order.payload["take_profit"],
+            )
+
+        if order.payload["stop_loss"] is not None:
+            ob.append(
+                Order(
+                    order.payload,
+                    Tag.STOP_LOSS,
+                    Side.SELL,
+                ),
+                order.payload["stop_loss"],
+            )
+
+    def _handle_close(self, payload: CloseOrderPayload) -> None:
+        """
+        Generates and attempts to match a sell order for each orderid
+        passed within the payload. If a prtial fill occurs or the requested
+        quantity is fulfilled, the loop is exited.
+
+        Args:
+            payload (CloseOrderPayload)
+        """
+        ob = self._order_books[payload["instrument"]]
+        requested_quantity = payload["quantity"]
+        execution_price: float = payload["price"]
+
+        for oid in payload["order_ids"]:
+            try:
+                pos = ob.get(oid)
+            except PositionNotFound:
+                continue
+
+            og_standing_quantity: float = pos.order.payload["standing_quantity"]
+            taken_standing_quantity: float = min(
+                og_standing_quantity, requested_quantity
+            )
+            dummy_order = {
+                **pos.order.payload,
+                "standing_quantity": taken_standing_quantity,
+            }
+
+            result: MatchResult = self._match(
+                dummy_order, Side.SELL, ob, execution_price
+            )
+
+            cleared_quantity: int = (
+                taken_standing_quantity - dummy_order["standing_quantity"]
+            )
+
+            if result.outcome == 2:
+                pos.order.payload["standing_quantity"] -= taken_standing_quantity
+                execution_price = result.price
+
+                if pos.order.payload["standing_quantity"] == 0:
+                    ob.remove_all(pos.order)
+                    pos.order.payload["status"] = OrderStatus.CLOSED
+                    pos.order.payload["close_price"] = result.price
+                    pos.order.payload["closed_at"] = datetime.now()
+                    pos.order.payload["realised_pnl"] += calc_buy_pl(
+                        pos.order.payload["filled_price"] * og_standing_quantity,
+                        pos.order.payload["filled_price"],
+                        result.price,
+                    )
+                    pos.order.payload["unrealised_pnl"] = 0
+
+                self.pusher.append(pos.order.payload, speed="fast")
+                self.pusher.append(
+                    {
+                        "user_id": pos.order.payload["user_id"],
+                        "amount": pos.order.payload["realised_pnl"],
+                    },
+                    "balance",
+                )
+            else:
+                pos.order.payload["standing_quantity"] -= cleared_quantity
+
+                if result.outcome == 1:
+                    pos.order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
+
+                self.pusher.append(pos.order.payload)
+                break
+
+            requested_quantity -= cleared_quantity
+
+            if requested_quantity == 0:
+                break

@@ -1,10 +1,5 @@
 import asyncio
-from .performance.test_engine import test_throughput
 from .intergration.test_api import test_order_creation
-
-
-async def run_engine_throughput_test():
-    await test_throughput()
 
 
 async def run_order_test() -> None:

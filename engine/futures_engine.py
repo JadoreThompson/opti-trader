@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from collections.abc import Iterable
 from r_mutex import Lock
-from typing import Callable
+from typing import Callable, TypedDict
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
@@ -22,6 +22,12 @@ from .utils import (
     calculate_upl,
     MatchResult,
 )
+
+
+class CloseOrderPayload(TypedDict):
+    order_id: str
+    instrument: str
+    price: float
 
 
 class FuturesEngine(BaseEngine):
@@ -77,7 +83,7 @@ class FuturesEngine(BaseEngine):
 
         if payload["order_type"] == OrderType.LIMIT:
             return
-        # print(result)
+
         if result.outcome == 2:
             ob.set_price(result.price)
             payload["status"] = OrderStatus.FILLED
@@ -188,20 +194,24 @@ class FuturesEngine(BaseEngine):
         ob.track(order)
 
         if order.payload["take_profit"] is not None:
-            tp_order = Order(
-                order.payload,
-                Tag.TAKE_PROFIT,
-                Side.SELL if order.payload["side"] == Side.BUY else Side.BUY,
+            ob.append(
+                Order(
+                    order.payload,
+                    Tag.TAKE_PROFIT,
+                    Side.SELL if order.payload["side"] == Side.BUY else Side.BUY,
+                ),
+                order.payload["take_profit"],
             )
-            ob.append(tp_order, order.payload["take_profit"])
 
         if order.payload["stop_loss"] is not None:
-            sl_order = Order(
-                order.payload,
-                Tag.STOP_LOSS,
-                Side.SELL if order.payload["side"] == Side.BUY else Side.BUY,
+            ob.append(
+                Order(
+                    order.payload,
+                    Tag.STOP_LOSS,
+                    Side.SELL if order.payload["side"] == Side.BUY else Side.BUY,
+                ),
+                order.payload["stop_loss"],
             )
-            ob.append(sl_order, order.payload["stop_loss"])
 
     def _handle_filled_orders(
         self, orders: Iterable[tuple[Order, int]], ob: OrderBook, price: float
@@ -301,34 +311,7 @@ class FuturesEngine(BaseEngine):
 
             self.pusher.append(order.payload)
 
-    def _handle_modify(self, payload: dict) -> None:
-        """
-        Handles the reassignment of values to an order within the orderbook
-
-        Args:
-            payload (dict)
-        """
-        try:
-            pos = self._order_books[payload["instrument"]].get(payload["order_id"])
-
-            if pos.order.payload["status"] == OrderStatus.PENDING:
-                if payload["limit_price"] is not None:
-                    pos.order.payload["limit_price"] = payload["limit"]
-
-            if (
-                pos.order.payload["status"] != OrderStatus.PARTIALLY_CLOSED
-                and pos.order.payload["status"] != OrderStatus.CLOSED
-            ):
-                if payload["take_profit"] is not None:
-                    pos.order.payload["take_profit"] = payload["take_profit"]
-                if payload["stop_loss"] is not None:
-                    pos.order.payload["stop_loss"] = payload["stop_loss"]
-
-            self.pusher.append(pos.order.payload)
-        except PositionNotFound:
-            pass
-
-    def _handle_close(self, payload: dict) -> None:
+    def _handle_close(self, payload: CloseOrderPayload) -> None:
         """
         Handles the result from attempting to match the order
         in order to close it

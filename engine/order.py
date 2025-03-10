@@ -8,13 +8,13 @@ class Order:
     about the order data, its side (buy or sell), its associated tag
 
     Attributes:
+        payload (dict): The order data containing the order's details.
         tag (Tag): The tag of the order.
         side (Side): The side of the order, indicating whether it is a buy or sell.
-        payload (dict): The order data containing the order's details.
     """
 
-    def __init__(self, order_data: dict, tag: Tag, side: Side) -> None:
-        self._payload = order_data
+    def __init__(self, payload: dict, tag: Tag, side: Side) -> None:
+        self._payload = payload
         self._tag = tag
         self._side = side
 
