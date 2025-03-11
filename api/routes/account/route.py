@@ -25,8 +25,17 @@ async def get_account(jwt: JWT = Depends(verify_cookie_http)) -> Profile:
 
 
 @account.get("/orders")
-async def get_orders(jwt: JWT = Depends(verify_cookie_http)) -> list[OrderRead]:
+async def get_orders(
+    jwt: JWT = Depends(verify_cookie_http), page: int = 0, quantity: int = 10
+) -> list[OrderRead]:
+    quantity = min(quantity, 50)
+
     async with DB_LOCK:
         async with get_db_session() as sess:
-            res = await sess.execute(select(Orders).where(Orders.user_id == jwt["sub"]))
+            res = await sess.execute(
+                select(Orders)
+                .where(Orders.user_id == jwt["sub"])
+                .offset(page * quantity)
+                .limit(quantity)
+            )
     return [OrderRead(**vars(order)) for order in res.scalars().all()]

@@ -97,7 +97,7 @@ class Pusher:
             else:
                 self._balance_queue.append(obj)
 
-    def _get_batch(self) -> list[dict]:
+    def _get_batch(self, queue: deque) -> list[dict]:
         """
         Converts the data types to the appropriate types
         """
@@ -105,7 +105,7 @@ class Pusher:
         
         for _ in range(self.batch_size):
             try:
-                obj = self._slow_queue.popleft()
+                obj = queue.popleft()
                 obj_copy = obj.copy()
                 
                 obj_copy['user_id'] = UUID(obj['user_id'])
@@ -127,8 +127,8 @@ class Pusher:
         
         while True:
             if self._slow_queue:
-                collection = self._get_batch()
-                                    
+                collection = self._get_batch(self._slow_queue)
+                # print("Slow Collection: \n", collection, end="\n\n")
                 async with self.lock:
                     async with get_db_session() as sess:
                         await sess.execute(update(Orders), collection)
@@ -150,8 +150,8 @@ class Pusher:
         self._fast_running = True
         while True:
             if self._fast_queue:
-                collection = self._get_batch()
-
+                collection = self._get_batch(self._fast_queue)
+                # print("Fast Collection: \n", collection, end="\n\n")
                 async with self.lock:
                     async with get_db_session() as sess:
                         await sess.execute(update(Orders), collection)

@@ -29,6 +29,7 @@ def handle_exc(exc_type, exc_value, tcb):
     """Global Exception Handler"""
     if not issubclass(exc_type, KeyboardInterrupt):
         logging.error("Uncaught Exc - ", exc_info=(exc_type, exc_value, tcb))
+        print(exc_type, exc_value)
         
 sys.excepthook = handle_exc
 

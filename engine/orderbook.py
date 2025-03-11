@@ -155,18 +155,18 @@ class OrderBook:
             if price in self.asks:
                 self.asks.pop(price, None)
 
-    def remove_all(self, order: Order) -> Position:
+    def remove_all(self, order: Order) -> None:
         """
         Removes the order and it's counterparts both from the
         tracker and their corresponding price levels
 
         Args:
             order (Order)
-
-        Returns:
-            Position
         """
-        pos: Position = self._tracker.pop(order.payload["order_id"])
+        pos: Position | None = self._tracker.pop(order.payload["order_id"], None)
+        if pos is None:
+            return
+        
         self.remove(order)
 
         if pos.take_profit is not None:
@@ -188,7 +188,7 @@ class OrderBook:
         """
         pos = self._tracker.get(order_id)
         if pos is None:
-            raise PositionNotFound("Position related to order doesn't exist")
+            raise PositionNotFound(f"Position related to order id {order_id} doesn't exist")
         return pos
 
     def best_price(

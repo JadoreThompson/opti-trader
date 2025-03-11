@@ -38,10 +38,8 @@ def verify_cookie_http(req: Request) -> JWT:
 
 def verify_cookie(cookies: dict[str, str]) -> JWT:
     token: str | None = cookies.get(COOKIE_ALIAS, None)
-
     if token is None:
         raise HTTPException(status_code=401, detail="Unauthorised")
-
     try:
         return jwt.decode(token, COOKIE_SECRET_KEY, algorithms=[COOKIE_ALGO])
     except jwt.ExpiredSignatureError:

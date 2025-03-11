@@ -27,11 +27,10 @@ manager = ClientManager()
 
 @order.websocket("/ws")
 async def order_stream(ws: WebSocket) -> None:
+    jwt = verify_cookie(ws.cookies)
+    
     try:
-        jwt = verify_cookie(ws.cookies)
-        await manager.connect(ws)
-        manager.append(ws, jwt["sub"])
-
+        await manager.connect(ws, jwt['sub'])
         while True:
             await ws.receive()
     except RuntimeError:
@@ -101,6 +100,11 @@ async def close_order(
     market_type: MarketType = (
         MarketType.FUTURES if isinstance(body, FuturesCloseOrder) else MarketType.SPOT
     )
+    
+    # price: Optional[bytes] = await REDIS_CLIENT.get(f"{details['instrument']}.price")
+    # if price is None:
+    #     raise HTTPException(status_code=400,)
+    
 
     try:
         if market_type == MarketType.SPOT:

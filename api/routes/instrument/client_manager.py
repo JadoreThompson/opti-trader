@@ -7,7 +7,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from config import REDIS_CLIENT
 from .models import PricePayload
-from ...utils import SocketPayload, SocketPayloadCategory
+from ...utils import SocketPayload, SocketPayloadCategory, handle_ws_errors
 
 
 class ClientManager:
@@ -24,10 +24,8 @@ class ClientManager:
         self._connections[instrument].append(ws)
 
     def disconnect(self, ws: WebSocket, instrument: str) -> None:
-        try:
+        if ws in self._connections.get(instrument, []):
             self._connections[instrument].remove(ws)
-        except ValueError:
-            pass
 
     async def listen_to_price(self, instrument: str) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
@@ -38,6 +36,7 @@ class ClientManager:
 
                 await self._handle_price(message["data"].decode(), instrument)
 
+    @handle_ws_errors
     async def _handle_price(self, price: float, instrument: str) -> None:
         payload = json.dumps(
             SocketPayload(

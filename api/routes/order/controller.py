@@ -199,6 +199,7 @@ async def get_spot_close_order_details(
         .where(
             (Orders.user_id == user_id)
             & (Orders.status.in_((OrderStatus.PARTIALLY_CLOSED, OrderStatus.FILLED)))
+            & (Orders.instrument == payload.instrument)
         )
         .subquery()
     )

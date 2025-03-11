@@ -300,6 +300,7 @@ class FuturesEngine(BaseEngine):
 
             if order.payload["status"] == OrderStatus.FILLED:
                 filled_orders.append(order)
+                continue
             if order.payload["status"] == OrderStatus.CLOSED:
                 self.pusher.append(
                     {
@@ -340,21 +341,33 @@ class FuturesEngine(BaseEngine):
             pos.order.payload["status"] = OrderStatus.CLOSED
             pos.order.payload["closed_at"] = datetime.now()
             pos_value: float = (
-                before_standing_quantity * pos.order.payload["filled_price"],
+                before_standing_quantity * pos.order.payload["filled_price"]
+            )
+            calc_pl_fn = (
+                calc_buy_pl if pos.order.payload["side"] == Side.BUY else calc_sell_pl
+            )
+            pos.order.payload["realised_pnl"] += calc_pl_fn(
+                pos_value,
+                pos.order.payload["filled_price"],
+                result.price,
             )
 
-            if pos.order.payload["side"] == Side.BUY:
-                pos.order.payload["realised_pnl"] += calc_buy_pl(
-                    pos_value,
-                    pos.order.payload["filled_price"],
-                    result.price,
-                )
-            else:
-                pos.order.payload["realised_pnl"] += calc_sell_pl(
-                    pos_value,
-                    pos.order.payload["filled_price"],
-                    result.price,
-                )
+            # if pos.order.payload["side"] == Side.BUY:
+            #     print(
+            #         pos.order.payload["filled_price"],
+            #         result.price,
+            #     )
+            #     pos.order.payload["realised_pnl"] += calc_buy_pl(
+            #         pos_value,
+            #         pos.order.payload["filled_price"],
+            #         result.price,
+            #     )
+            # else:
+            #     pos.order.payload["realised_pnl"] += calc_sell_pl(
+            #         pos_value,
+            #         pos.order.payload["filled_price"],
+            #         result.price,
+            #     )
 
             pos.order.payload["standing_quantity"] = pos.order.payload[
                 "unrealised_pnl"

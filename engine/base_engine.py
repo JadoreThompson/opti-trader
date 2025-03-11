@@ -115,16 +115,19 @@ class BaseEngine:
         try:
             pos = self._order_books[payload["instrument"]].get(payload["order_id"])
             ob = self._order_books[pos.order.payload["instrument"]]
-        except PositionNotFound:
-            pass
+        except PositionNotFound as e:
+            print(str(e))
+            print("*" * 20, end="\n\n")
+            return
 
         if pos.order.payload["status"] == OrderStatus.PENDING:
             if payload["limit_price"] is not None:
                 self._modify_limit_order(ob, pos, payload["limit_price"])
 
-        if (
-            pos.order.payload["status"] != OrderStatus.PARTIALLY_CLOSED
-            and pos.order.payload["status"] != OrderStatus.CLOSED
+        if pos.order.payload["status"] not in (
+            OrderStatus.PENDING,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.CLOSED,
         ):
             self._modify_tp_sl(ob, pos, payload["take_profit"], payload["stop_loss"])
 
@@ -171,7 +174,7 @@ class BaseEngine:
                     (Side.BUY if pos.order.payload["side"] == Side.SELL else Side.BUY),
                 )
 
-            ob.append(pos.take_profit)
+            ob.append(pos.take_profit, new_take_profit)
 
         if new_stop_loss is not None:
             pos.order.payload["stop_loss"] = new_stop_loss
@@ -186,4 +189,4 @@ class BaseEngine:
                     (Side.BUY if pos.order.payload["side"] == Side.SELL else Side.BUY),
                 )
 
-            ob.append(pos.stop_loss)
+            ob.append(pos.stop_loss, new_stop_loss)
