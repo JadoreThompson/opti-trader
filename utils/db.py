@@ -44,6 +44,6 @@ def remove_sqlalchemy_url():
 
 
 @asynccontextmanager
-async def get_db_session() -> AsyncGenerator[None, AsyncSession]:
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     async with smaker.begin() as session:
         yield session

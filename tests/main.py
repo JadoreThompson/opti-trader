@@ -31,4 +31,4 @@ async def run_order_close_test():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_order_modification_test())
+    asyncio.run(run_order_creation_test())

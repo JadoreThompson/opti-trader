@@ -6,7 +6,8 @@ from config import DB_LOCK
 from db_models import Orders, Users
 from enums import MarketType, OrderStatus
 from utils.db import get_db_session
-from .model import Profile, UpdateProfile
+from .controller import calculate_aum
+from .model import AUM, Profile, UpdateProfile
 from ...middleware import JWT, verify_jwt_http
 from ..order.models import OrderRead, PaginatedOrders
 
@@ -71,10 +72,9 @@ async def get_orders(
     else:
         status = (OrderStatus.CLOSED,)
         query = query.where(
-            Orders.user_id
-            == select(Users.user_id).where(Users.username == username)
+            Orders.user_id == select(Users.user_id).where(Users.username == username)
         )
-    
+
     async with DB_LOCK:
         async with get_db_session() as sess:
             res = await sess.execute(
@@ -84,8 +84,16 @@ async def get_orders(
             )
 
             orders = res.scalars().all()
-    
+
     return PaginatedOrders(
         orders=[OrderRead(**vars(order)) for order in orders[:quantity]],
         has_next_page=len(orders) > quantity,
     )
+
+
+@account.get("/assets")
+async def get_assets(
+    username: Optional[str] = None,
+    jwt: JWT = Depends(verify_jwt_http),
+) -> list[Optional[AUM]]:
+    return await calculate_aum(jwt, username)

@@ -136,7 +136,7 @@ async def test_order_creation(
 
         payload = {
             "quantity": random.randint(1, 50),
-            "instrument": "BTXUSD",
+            "instrument": "BTCUSD",
             "market_type": market_type,
             "order_type": order_type,
             "side": random.choice([Side.BUY, Side.SELL]),
