@@ -1,4 +1,5 @@
 import json
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -25,9 +26,9 @@ from .controller import (
     get_spot_close_order_details,
     validate_order_details,
 )
-from .models import FuturesCloseOrder, ModifyOrder, OrderWrite, SpotCloseOrder
+from .models import FuturesCloseOrder, ModifyOrder, OrderWrite, OrderWriteResponse, SpotCloseOrder
 from ...config import JWT_ALIAS
-from ...middleware import JWT, decrypt_token, encrypt_jwt, verify_jwt, verify_jwt_http
+from ...middleware import JWT, decrypt_token, encrypt_jwt, verify_jwt_http
 
 
 order = APIRouter(prefix="/order", tags=["order"])
@@ -58,8 +59,12 @@ async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_jwt_http)):
         details = body.model_dump()
         details["price"] = current_market_price
         details["amount"] = round(details["quantity"] * current_market_price, 2)
-        await enter_new_order(details, jwt["sub"], balance[0])
-        return JSONResponse(status_code=201, content={"message": "Order placed"})
+        return JSONResponse(
+            status_code=201,
+            content=OrderWriteResponse(
+                balance=await enter_new_order(details, jwt["sub"], balance[0])
+            ).model_dump(),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

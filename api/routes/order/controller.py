@@ -60,7 +60,7 @@ def validate_order_details(
     return True
 
 
-async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
+async def enter_new_order(details: dict, user_id: str, balance: float) -> float:
     details["standing_quantity"] = details["quantity"]
     details["user_id"] = user_id
 
@@ -88,6 +88,8 @@ async def enter_new_order(details: dict, user_id: str, balance: float) -> None:
             {"category": EnginePayloadCategory.NEW, "content": dump_obj(payload)}
         ),
     )
+    
+    return balance
 
 
 async def enter_modify_order(

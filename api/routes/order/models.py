@@ -49,6 +49,14 @@ class OrderWrite(CustomBase):
         return value
 
 
+class OrderWriteResponse(CustomBase):
+    balance: float # The new balance after deductions
+    
+    @field_serializer('balance')
+    def balance_formatter(self, value: float) -> str:
+        return f"{round(value, 2):.2f}"        
+
+
 class OrderRead(CustomBase):
     order_id: str
     amount: float
