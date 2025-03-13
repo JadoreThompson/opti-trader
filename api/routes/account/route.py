@@ -61,35 +61,30 @@ async def get_orders(
     quantity: int = 10,
     jwt: JWT = Depends(verify_jwt_http),
 ) -> PaginatedOrders:
-    query = select(Orders).where(
-        (Orders.user_id == jwt["sub"])
-        & (Orders.market_type == market_type)
-        & (Orders.instrument == instrument)
-        & (Orders.status.in_(status))
-    )
+    query = select(Orders).where(Orders.market_type == market_type)
 
     if instrument is not None:
         query = query.where(Orders.instrument == instrument)
 
-    if username is not None:
-        if username != jwt["username"]:
-            status = (OrderStatus.CLOSED,)
-
+    if username is None or username == jwt["username"]:
+        query = query.where(Orders.user_id == jwt["sub"])
+    else:
+        status = (OrderStatus.CLOSED,)
+        query = query.where(
+            Orders.user_id
+            == select(Users.user_id).where(Users.username == username)
+        )
+    
     async with DB_LOCK:
         async with get_db_session() as sess:
             res = await sess.execute(
-                # select(Orders)
-                # .where(
-                #     (Orders.user_id == jwt["sub"])
-                #     & (Orders.market_type == market_type)
-                #     & (Orders.instrument == instrument)
-                #     & (Orders.status.in_(status))
-                # )
-                query.offset(page * min(quantity, 50)).limit(quantity + 1)
+                query.where(Orders.status.in_(status))
+                .offset(page * min(quantity, 50))
+                .limit(quantity + 1)
             )
 
             orders = res.scalars().all()
-
+    
     return PaginatedOrders(
         orders=[OrderRead(**vars(order)) for order in orders[:quantity]],
         has_next_page=len(orders) > quantity,

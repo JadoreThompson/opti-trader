@@ -9,6 +9,7 @@ from fastapi import (
     WebSocketException,
 )
 from fastapi.responses import JSONResponse
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select
 from typing import Optional
 
@@ -173,21 +174,16 @@ async def order_stream(ws: WebSocket) -> None:
     Args:
         ws (WebSocket)
     """
-    print(1)
     await manager.connect(ws)
-    print(2)
+
     try:
-        print(3)
         jwt: JWT = decrypt_token(json.loads(await ws.receive_text()).get("token"))
-    except InvalidJWT as e:
-        raise WebSocketException(code=1008, reason=str(e))
+        manager.append(jwt["sub"], ws)
 
-    print(4)
-    manager.append(jwt["sub"], ws)
-
-    try:
         while True:
-            print(5)
             await ws.receive()
-    except RuntimeError:
+    except (RuntimeError, WebSocketDisconnect):
         manager.disconnect(jwt["sub"])
+    except InvalidJWT as e:
+        manager.disconnect(jwt["sub"])
+        raise WebSocketException(code=1008, reason=str(e))
