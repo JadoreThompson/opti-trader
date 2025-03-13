@@ -136,7 +136,7 @@ async def test_order_creation(
 
         payload = {
             "quantity": random.randint(1, 50),
-            "instrument": "BTCUSD",
+            "instrument": "BTXUSD",
             "market_type": market_type,
             "order_type": order_type,
             "side": random.choice([Side.BUY, Side.SELL]),
@@ -178,7 +178,6 @@ async def test_order_modification(
     async for msg in yield_order_ws(cookies):
         if "order_id" in msg["content"]:
             res = await put_modify_order(msg["content"]["order_id"], session, cookies)
-            print(res)
 
 
 async def test_order_close(
@@ -199,7 +198,6 @@ async def test_order_close(
                 session,
                 cookies,
             )
-            print(res)
 
 
 async def test_order_ws(num_users: int): ...

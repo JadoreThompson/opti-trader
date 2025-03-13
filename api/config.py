@@ -6,7 +6,7 @@ from config import BASE_PATH
 load_dotenv(dotenv_path=os.path.join(BASE_PATH, ".env"))
 
 
-COOKIE_ALIAS = os.getenv("COOKIE_ALIAS")
-COOKIE_ALGO = os.getenv("COOKIE_ALGO")
-COOKIE_EXP = timedelta(days=1000)
-COOKIE_SECRET_KEY = os.getenv("COOKIE_SECRET")
+JWT_ALIAS = os.getenv("JWT_ALIAS")
+JWT_ALGO = os.getenv("JWT_ALGO")
+JWT_EXP = timedelta(days=1000)
+JWT_SECRET_KEY = os.getenv("JWT_SECRET")

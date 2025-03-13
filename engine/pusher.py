@@ -128,7 +128,7 @@ class Pusher:
         while True:
             if self._slow_queue:
                 collection = self._get_batch(self._slow_queue)
-                # print("Slow Collection: \n", collection, end="\n\n")
+                
                 async with self.lock:
                     async with get_db_session() as sess:
                         await sess.execute(update(Orders), collection)
@@ -151,7 +151,7 @@ class Pusher:
         while True:
             if self._fast_queue:
                 collection = self._get_batch(self._fast_queue)
-                # print("Fast Collection: \n", collection, end="\n\n")
+
                 async with self.lock:
                     async with get_db_session() as sess:
                         await sess.execute(update(Orders), collection)

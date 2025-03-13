@@ -1,13 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket
+import json
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Response,
+    WebSocket,
+    WebSocketException,
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from typing import Optional
 
-from api.config import COOKIE_ALIAS
+from api.exc import InvalidJWT
 from config import REDIS_CLIENT
 from db_models import Orders, Users
 from enums import MarketType
 from utils.db import get_db_session
+from .client_manager import ClientManager
 from .controller import (
     enter_close_order,
     enter_modify_order,
@@ -16,29 +25,17 @@ from .controller import (
     get_spot_close_order_details,
     validate_order_details,
 )
-from .client_manager import ClientManager
 from .models import FuturesCloseOrder, ModifyOrder, OrderWrite, SpotCloseOrder
-from ...middleware import JWT, verify_cookie, verify_cookie_http
+from ...config import JWT_ALIAS
+from ...middleware import JWT, decrypt_token, encrypt_jwt, verify_jwt, verify_jwt_http
 
 
 order = APIRouter(prefix="/order", tags=["order"])
 manager = ClientManager()
 
 
-@order.websocket("/ws")
-async def order_stream(ws: WebSocket) -> None:
-    jwt = verify_cookie(ws.cookies)
-    
-    try:
-        await manager.connect(ws, jwt['sub'])
-        while True:
-            await ws.receive()
-    except RuntimeError:
-        manager.disconnect(jwt["sub"])
-
-
 @order.post("/")
-async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http)):
+async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_jwt_http)):
     cmp: Optional[bytes] = await REDIS_CLIENT.get(f"{body.instrument}.price")
     if cmp is None:
         raise HTTPException(status_code=400, detail="Instrument isn't listed")
@@ -53,7 +50,7 @@ async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http))
 
     if balance is None:
         response = Response(status_code=403)
-        response.delete_cookie(COOKIE_ALIAS)
+        response.delete_cookie(JWT_ALIAS)
         return response
 
     try:
@@ -68,7 +65,7 @@ async def create_order(body: OrderWrite, jwt: JWT = Depends(verify_cookie_http))
 
 
 @order.put("/modify")
-async def modify_order(body: ModifyOrder, jwt: JWT = Depends(verify_cookie_http)):
+async def modify_order(body: ModifyOrder, jwt: JWT = Depends(verify_jwt_http)):
     async with get_db_session() as sess:
         res = await sess.execute(
             select(Orders).where(
@@ -95,16 +92,11 @@ async def modify_order(body: ModifyOrder, jwt: JWT = Depends(verify_cookie_http)
 
 @order.put("/close")
 async def close_order(
-    body: FuturesCloseOrder | SpotCloseOrder, jwt: JWT = Depends(verify_cookie_http)
+    body: FuturesCloseOrder | SpotCloseOrder, jwt: JWT = Depends(verify_jwt_http)
 ):
     market_type: MarketType = (
         MarketType.FUTURES if isinstance(body, FuturesCloseOrder) else MarketType.SPOT
     )
-    
-    # price: Optional[bytes] = await REDIS_CLIENT.get(f"{details['instrument']}.price")
-    # if price is None:
-    #     raise HTTPException(status_code=400,)
-    
 
     try:
         if market_type == MarketType.SPOT:
@@ -129,3 +121,40 @@ async def close_order(
     )
 
     return Response(status_code=201)
+
+
+@order.get("/ws/get-token")
+async def get_websocket_token(jwt: JWT = Depends(verify_jwt_http)) -> None:
+    return {"token": encrypt_jwt(jwt)}
+
+
+@order.websocket("/ws")
+async def order_stream(ws: WebSocket) -> None:
+    """
+    Establishes connection to the manager.
+    Expects a payload of {"token": encrypted_token} of which
+    was gained by the /ws/get-token endpoint. Upon successfull
+    verification a connetion is made else the error is raised to
+    the client.
+
+    Args:
+        ws (WebSocket)
+    """
+    print(1)
+    await manager.connect(ws)
+    print(2)
+    try:
+        print(3)
+        jwt: JWT = decrypt_token(json.loads(await ws.receive_text()).get("token"))
+    except InvalidJWT as e:
+        raise WebSocketException(code=1008, reason=str(e))
+
+    print(4)
+    manager.append(jwt["sub"], ws)
+
+    try:
+        while True:
+            print(5)
+            await ws.receive()
+    except RuntimeError:
+        manager.disconnect(jwt["sub"])

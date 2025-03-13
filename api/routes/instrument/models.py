@@ -35,3 +35,13 @@ class OHLC(CustomBase):
     low: float
     close: float
     time: float
+
+
+class InstrumentCreate(CustomBase):
+    name: str
+    price: float
+    
+
+class InstrumentObject(CustomBase):
+    name: str
+    price: float

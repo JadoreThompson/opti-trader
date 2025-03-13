@@ -53,7 +53,12 @@ class SpotEngine(BaseEngine):
                     continue
 
                 payload: EnginePayload = json.loads(message["data"])
-                handlers[payload["category"]](json.loads(payload["content"]))
+                func = handlers[payload["category"]]
+
+                if asyncio.iscoroutine(func):
+                    await func(json.loads(payload["content"]))
+                else:
+                    func(json.loads(payload["content"]))
 
     def _handle_touched_orders(
         self,
@@ -207,7 +212,7 @@ class SpotEngine(BaseEngine):
 
         return MatchResult(1, None)
 
-    def _handle_new(self, payload: dict) -> None:
+    async def _handle_new(self, payload: dict) -> None:
         """
         Handles the result of a new order by matching it against the order book.
         Depending on the order type (market or limit), the order is either

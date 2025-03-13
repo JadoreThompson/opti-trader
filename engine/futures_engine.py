@@ -1,5 +1,6 @@
 import asyncio
 import json
+import inspect
 
 from datetime import datetime
 from collections.abc import Iterable
@@ -58,9 +59,12 @@ class FuturesEngine(BaseEngine):
                     continue
 
                 payload: EnginePayload = json.loads(message["data"])
-                handlers[payload["category"]](json.loads(payload["content"]))
+                func = handlers[payload["category"]](json.loads(payload["content"]))
+                
+                if inspect.iscoroutine(func):
+                    await func
 
-    def _handle_new(self, payload: dict) -> None:
+    async def _handle_new(self, payload: dict) -> None:
         """
         Handles the result of a new order by matching it against the order book.
         Depending on the order type (market or limit), the order is either matched
@@ -71,7 +75,17 @@ class FuturesEngine(BaseEngine):
         Args:
             payload (dict): The order data, including order type, side, price, and quantity.
         """
-        ob = self._order_books[payload["instrument"]]
+        instrument: str = payload["instrument"]
+
+        ob = self._order_books.get(
+            instrument,
+            OrderBook(
+                instrument,
+                self.instrument_lock,
+                float((await REDIS_CLIENT.get(f"{instrument}.price")).decode()),
+                self.pusher,
+            ),
+        )
         order = Order(payload, Tag.ENTRY, payload["side"])
 
         func: dict[OrderType, callable] = {
@@ -351,23 +365,6 @@ class FuturesEngine(BaseEngine):
                 pos.order.payload["filled_price"],
                 result.price,
             )
-
-            # if pos.order.payload["side"] == Side.BUY:
-            #     print(
-            #         pos.order.payload["filled_price"],
-            #         result.price,
-            #     )
-            #     pos.order.payload["realised_pnl"] += calc_buy_pl(
-            #         pos_value,
-            #         pos.order.payload["filled_price"],
-            #         result.price,
-            #     )
-            # else:
-            #     pos.order.payload["realised_pnl"] += calc_sell_pl(
-            #         pos_value,
-            #         pos.order.payload["filled_price"],
-            #         result.price,
-            #     )
 
             pos.order.payload["standing_quantity"] = pos.order.payload[
                 "unrealised_pnl"

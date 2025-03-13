@@ -86,6 +86,11 @@ class OrderRead(CustomBase):
         return value
 
 
+class PaginatedOrders(CustomBase):
+    orders: list[OrderRead]
+    has_next_page: bool
+
+
 class BalancePayload(CustomBase):
     user_id: str
     balance: float

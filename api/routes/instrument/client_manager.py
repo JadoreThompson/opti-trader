@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 import json
 
 from datetime import datetime
@@ -12,14 +13,14 @@ from ...utils import SocketPayload, SocketPayloadCategory, handle_ws_errors
 
 class ClientManager:
     def __init__(self) -> None:
-        self._connections: dict[str, list[WebSocket]] = {}
+        self._connections: dict[str, list[WebSocket]] = defaultdict(list)
 
     async def connect(self, ws: WebSocket, instrument: str) -> None:
         await ws.accept()
 
         if instrument not in self._connections:
             asyncio.create_task(self.listen_to_price(instrument))
-            self._connections.setdefault(instrument, [])
+            # self._connections.setdefault(instrument, [])
 
         self._connections[instrument].append(ws)
 
@@ -33,7 +34,7 @@ class ClientManager:
             async for message in ps.listen():
                 if message["type"] == "subscribe":
                     continue
-
+                
                 await self._handle_price(message["data"].decode(), instrument)
 
     @handle_ws_errors

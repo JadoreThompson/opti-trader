@@ -13,18 +13,19 @@ class ClientManager:
         self._is_running: bool = False
         self._connections: dict[str, WebSocket] = {}
 
-    async def connect(self, ws: WebSocket, user_id: str) -> None:
+    async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
 
         if not self._is_running:
             asyncio.create_task(self.listen_to_order_updates())
             asyncio.create_task(self.listen_to_balance_updates())
             self._is_running = True
-        
-        self._connections[user_id] = ws
 
     def disconnect(self, user_id: str) -> None:
         self._connections.pop(user_id, None)
+        
+    def append(self, user_id: str, ws: WebSocket) -> None:
+        self._connections[user_id] = ws
         
     async def listen_to_order_updates(self) -> None:
         async with REDIS_CLIENT.pubsub() as ps:

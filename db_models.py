@@ -88,8 +88,43 @@ class MarketData(Base):
         default=uuid4,
     )
     instrument: Mapped[str] = mapped_column(String, nullable=False)
+    instrument_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("instruments.instrument_id"),
+        nullable=False,
+    )
     time: Mapped[int] = mapped_column(Integer, nullable=False, default=datetime.now)
     price: Mapped[float] = mapped_column(
         Float,
         nullable=False,
+    )
+
+    # Relationship
+    instruments_relationship = relationship(
+        "Instruments", back_populates="market_data_relationship"
+    )
+
+
+class Instruments(Base):
+    __tablename__ = "instruments"
+
+    instrument_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        unique=True,
+    )
+    instrument: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    starting_price: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now,
+        nullable=False,
+    )
+
+    # Relationship
+    market_data_relationship = relationship(
+        MarketData,
+        back_populates="instruments_relationship",
+        cascade="all, delete-orphan",
     )

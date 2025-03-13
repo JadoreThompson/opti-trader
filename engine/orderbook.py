@@ -5,11 +5,11 @@ import warnings
 from collections import deque
 from datetime import datetime
 from r_mutex import Lock
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 from typing import Literal, Optional
 
 from config import REDIS_CLIENT
-from db_models import MarketData
+from db_models import Instruments, MarketData
 from enums import OrderStatus, Side
 from utils.db import get_db_session
 from .enums import Tag
@@ -31,6 +31,7 @@ class OrderBook:
 
     Attributes:
         instrument (str): The trading instrument (e.g., "BTCUSD").
+        _instrument_id (int): The id for the instrument within the instruments table.
         lock (r_mutex.Lock): A threading lock to ensure safe access to shared resources.
         _price (float): The current market price of the instrument.
         _price_delay (float): The delay (in seconds) between price updates.
@@ -67,6 +68,7 @@ class OrderBook:
 
         self.pusher = pusher
         self.instrument = instrument
+        self._instrument_id: int = None
         self.bids: dict[float, list[Order]] = {}
         self.asks: dict[float, list[Order]] = {}
         self.bid_levels = self.bids.keys()
@@ -109,7 +111,7 @@ class OrderBook:
     def track(self, order: Order) -> Position:
         """
         Appends an order to the tracker. If this is a take profit or stop loss
-        order, it's appended to the position. 
+        order, it's appended to the position.
 
         Args:
             order (Order)
@@ -166,7 +168,7 @@ class OrderBook:
         pos: Position | None = self._tracker.pop(order.payload["order_id"], None)
         if pos is None:
             return
-        
+
         self.remove(order)
 
         if pos.take_profit is not None:
@@ -174,7 +176,6 @@ class OrderBook:
         if pos.stop_loss is not None:
             self.remove(pos.stop_loss)
         return pos
-        
 
     def get(self, order_id: str) -> Position:
         """
@@ -188,7 +189,9 @@ class OrderBook:
         """
         pos = self._tracker.get(order_id)
         if pos is None:
-            raise PositionNotFound(f"Position related to order id {order_id} doesn't exist")
+            raise PositionNotFound(
+                f"Position related to order id {order_id} doesn't exist"
+            )
         return pos
 
     def best_price(
@@ -236,12 +239,24 @@ class OrderBook:
         self._price = price
         self._price_queue.append(price)
 
+    async def _fetch_instrument_id(self,) -> None:
+        async with get_db_session() as sess:
+            res = await sess.execute(
+                select(Instruments.instrument_id).where(
+                    Instruments.instrument == self.instrument
+                )
+            )
+            res = res.first()
+        
+        self._instrument_id = res[0]
+
     async def _publish_price(
         self,
     ) -> None:
         """
         Periodically posts price to the pubsub channel and writes to the db
         """
+        await self._fetch_instrument_id()
         await REDIS_CLIENT.set(f"{self.instrument}.price", self._price)
         await REDIS_CLIENT.publish(f"{self.instrument}.live", self._price)
 
@@ -259,25 +274,27 @@ class OrderBook:
             await REDIS_CLIENT.set(f"{self.instrument}.price", price)
             await REDIS_CLIENT.publish(f"{self.instrument}.live", price)
 
-            async with self.lock:
-                async with get_db_session() as sess:
-                    await sess.execute(
-                        insert(MarketData).values(
-                            instrument=self.instrument,
-                            time=datetime.now().timestamp(),
-                            price=price,
+            if self._instrument_id:
+                async with self.lock:
+                    async with get_db_session() as sess:
+                        await sess.execute(
+                            insert(MarketData).values(
+                                instrument=self.instrument,
+                                instrument_id=self._instrument_id,
+                                time=datetime.now().timestamp(),
+                                price=price,
+                            )
                         )
-                    )
-                    await sess.commit()
-            asyncio.create_task(self._update_upl(price))
+                        await sess.commit()
 
+            asyncio.create_task(self._update_upl(price))
             await asyncio.sleep(self._price_delay)
 
     async def _update_upl(self, price: float) -> None:
         """
         Updates upl for all filled and partially filled orders
         within the tracker
-        
+
         Args:
             price (float)
         """

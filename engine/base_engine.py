@@ -24,14 +24,14 @@ class BaseEngine:
         self.pusher = pusher
         self._order_books: dict[str, OrderBook] = None
 
-    async def run(self, instruments: List[str] = None):
+    async def run(self, instruments: List[str]) -> None:
         """
         Initializes the engine and starts the pusher.
 
         This method sets up the connection to the pusher and waits for it to start.
         Args:
             instruments (list[str]): A list of instruments of which OrderBook objects
-                will be initialised for. Defaults to ["BTCUSD"]
+                will be initialised for.
         Raises:
             RuntimeError: Pusher failed to connect within 210 seconds
         """
@@ -48,9 +48,6 @@ class BaseEngine:
 
         if i == 20:
             raise RuntimeError("Failed to connect to pusher")
-
-        if instruments is None:
-            instruments = ["BTCUSD"]
 
         self._order_books = {
             instr: OrderBook(instr, self.instrument_lock, 37, self.pusher)
@@ -115,9 +112,7 @@ class BaseEngine:
         try:
             pos = self._order_books[payload["instrument"]].get(payload["order_id"])
             ob = self._order_books[pos.order.payload["instrument"]]
-        except PositionNotFound as e:
-            print(str(e))
-            print("*" * 20, end="\n\n")
+        except PositionNotFound:
             return
 
         if pos.order.payload["status"] == OrderStatus.PENDING:

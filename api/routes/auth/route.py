@@ -7,8 +7,8 @@ from config import DB_LOCK, PH
 from db_models import Users
 from utils.db import get_db_session
 from .models import LoginCredentials, RegisterCredentials
-from ...middleware import JWT, generate_token, verify_cookie_http
-from ...config import COOKIE_ALIAS
+from ...middleware import JWT, generate_jwt_token, verify_jwt_http
+from ...config import JWT_ALIAS
 
 auth = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,11 +29,12 @@ async def register(body: RegisterCredentials) -> None:
                 await sess.commit()
             resp = Response()
             resp.set_cookie(
-                COOKIE_ALIAS,
-                generate_token(
+                JWT_ALIAS,
+                generate_jwt_token(
                     {
                         "sub": str(user.user_id),
                         "em": user.email,
+                        "username": user.username,
                     }
                 ),
                 httponly=True,
@@ -61,11 +62,12 @@ async def login(body: LoginCredentials) -> None:
 
     resp = Response()
     resp.set_cookie(
-        COOKIE_ALIAS,
-        generate_token(
+        JWT_ALIAS,
+        generate_jwt_token(
             {
                 "sub": str(user.user_id),
                 "em": user.email,
+                "username": user.username,
             }
         ),
         httponly=True,
@@ -75,12 +77,12 @@ async def login(body: LoginCredentials) -> None:
 
 
 @auth.get("/verify-token")
-async def verify_token(jwt: JWT = Depends(verify_cookie_http)):
+async def verify_token(jwt: JWT = Depends(verify_jwt_http)):
     pass
 
 
 @auth.get("/remove-token")
-async def remove_token(jwt: JWT = Depends(verify_cookie_http)):
+async def remove_token(jwt: JWT = Depends(verify_jwt_http)):
     res = Response()
-    res.delete_cookie(COOKIE_ALIAS)
+    res.delete_cookie(JWT_ALIAS)
     return res
