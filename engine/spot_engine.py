@@ -24,7 +24,7 @@ from .utils import (
 )
 
 
-class CloseOrderPayload(TypedDict):
+class SpotCloseOrderPayload(TypedDict):
     quantity: int
     order_ids: Tuple[str]
     instrument: str
@@ -44,6 +44,7 @@ class SpotEngine(BaseEngine):
             EnginePayloadCategory.NEW: self._handle_new,
             EnginePayloadCategory.MODIFY: self._handle_modify,
             EnginePayloadCategory.CLOSE: self._handle_close,
+            EnginePayloadCategory.CANCEL: self._handle_cancel,
         }
 
         async with REDIS_CLIENT.pubsub() as ps:
@@ -293,7 +294,7 @@ class SpotEngine(BaseEngine):
                 order.payload["stop_loss"],
             )
 
-    def _handle_close(self, payload: CloseOrderPayload) -> None:
+    def _handle_close(self, payload: SpotCloseOrderPayload) -> None:
         """
         Generates and attempts to match a sell order for each orderid
         passed within the payload. If a prtial fill occurs or the requested

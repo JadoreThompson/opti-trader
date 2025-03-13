@@ -53,25 +53,39 @@ async def update_account(body: UpdateProfile, jwt: JWT = Depends(verify_jwt_http
 
 @account.get("/orders")
 async def get_orders(
-    instrument: str,
+    username: str = None,
+    instrument: str = None,
     market_type: MarketType = MarketType.FUTURES,
-    status: Annotated[list[OrderStatus] | None, Query()] = [OrderStatus.FILLED],
+    status: Annotated[list[OrderStatus] | None, Query()] = [OrderStatus.CLOSED],
     page: int = 0,
     quantity: int = 10,
     jwt: JWT = Depends(verify_jwt_http),
 ) -> PaginatedOrders:
+    query = select(Orders).where(
+        (Orders.user_id == jwt["sub"])
+        & (Orders.market_type == market_type)
+        & (Orders.instrument == instrument)
+        & (Orders.status.in_(status))
+    )
+
+    if instrument is not None:
+        query = query.where(Orders.instrument == instrument)
+
+    if username is not None:
+        if username != jwt["username"]:
+            status = (OrderStatus.CLOSED,)
+
     async with DB_LOCK:
         async with get_db_session() as sess:
             res = await sess.execute(
-                select(Orders)
-                .where(
-                    (Orders.user_id == jwt["sub"])
-                    & (Orders.market_type == market_type)
-                    & (Orders.instrument == instrument)
-                    & (Orders.status.in_(status))
-                )
-                .offset(page * min(quantity, 50))
-                .limit(quantity + 1)
+                # select(Orders)
+                # .where(
+                #     (Orders.user_id == jwt["sub"])
+                #     & (Orders.market_type == market_type)
+                #     & (Orders.instrument == instrument)
+                #     & (Orders.status.in_(status))
+                # )
+                query.offset(page * min(quantity, 50)).limit(quantity + 1)
             )
 
             orders = res.scalars().all()

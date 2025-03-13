@@ -15,6 +15,7 @@ from typing import Optional
 from api.exc import InvalidJWT
 from config import REDIS_CLIENT
 from db_models import Orders, Users
+from engine.utils import EnginePayloadCategory
 from enums import MarketType
 from utils.db import get_db_session
 from .client_manager import ClientManager
@@ -24,9 +25,18 @@ from .controller import (
     enter_new_order,
     get_futures_close_order_details,
     get_spot_close_order_details,
+    fetch_order,
+    submit_to_engine,
     validate_order_details,
 )
-from .models import FuturesCloseOrder, ModifyOrder, OrderWrite, OrderWriteResponse, SpotCloseOrder
+from .models import (
+    FuturesCloseOrder,
+    ModifyOrder,
+    OrderId,
+    OrderWrite,
+    OrderWriteResponse,
+    SpotCloseOrder,
+)
 from ...config import JWT_ALIAS
 from ...middleware import JWT, decrypt_token, encrypt_jwt, verify_jwt_http
 
@@ -92,6 +102,24 @@ async def modify_order(body: ModifyOrder, jwt: JWT = Depends(verify_jwt_http)):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return Response(status_code=201)
+
+
+@order.put("/cancel")
+async def cancel_order(body: OrderId, jwt: JWT = Depends(verify_jwt_http)):
+    details = await fetch_order(body.order_id, jwt["sub"])
+
+    if not details:
+        raise HTTPException(
+            status_code=404,
+            detail="Cannot perform cancel on order that's not in pending state",
+        )
+
+    await submit_to_engine(
+        details["market_type"],
+        EnginePayloadCategory.CANCEL,
+        {"order_id": body.order_id, "instrument": details["instrument"]},
+    )
     return Response(status_code=201)
 
 

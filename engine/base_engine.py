@@ -1,7 +1,7 @@
 import asyncio
 import warnings
 
-from typing import Iterable, List, overload
+from typing import Iterable, TypedDict, List, overload
 from r_mutex import Lock
 
 from enums import OrderStatus, Side
@@ -12,6 +12,11 @@ from .orderbook import OrderBook
 from .position import Position
 from .pusher import Pusher
 from .utils import MatchResult
+
+
+class CancelOrderPayload(TypedDict):
+    order_id: str
+    instrument: str
 
 
 class BaseEngine:
@@ -75,6 +80,38 @@ class BaseEngine:
 
     @overload
     def _handle_modify(self, payload: dict) -> None: ...
+
+    # @overload
+    # def _handle_cancel(self, payload: CancelOrderPayload) -> None: ...
+
+    def _handle_cancel(self, payload: CancelOrderPayload) -> None:
+        """
+        Removes the order from tracking and the book and submits a
+        balance update, giving the user the position amount
+        Args:
+            payload (CancelOrderPayload): _description_
+        """
+        try:
+            ob = self._order_books[payload["instrument"]]
+            pos = ob.get(payload["order_id"])
+        except Position:
+            return
+
+        if (
+            pos.order.payload["status"] != OrderStatus.PENDING
+            or pos.order.payload["standing_quantity"] != pos.order.payload["quantity"]
+        ):
+            return
+
+        ob.remove_all(pos.order)
+        self.pusher.append(
+            {
+                "user_id": pos.order.payload["user_id"],
+                "amount": pos.order.payload["amount"],
+            }
+        )
+        pos.order.payload['status'] = OrderStatus.CLOSED
+        self.pusher.append(pos.order.payload, speed="fast")
 
     @overload
     def _handle_close(self, payload: dict) -> None: ...

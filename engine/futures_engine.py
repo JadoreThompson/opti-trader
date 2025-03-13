@@ -25,7 +25,7 @@ from .utils import (
 )
 
 
-class CloseOrderPayload(TypedDict):
+class FuturesCloseOrderPayload(TypedDict):
     order_id: str
     instrument: str
     price: float
@@ -50,6 +50,7 @@ class FuturesEngine(BaseEngine):
             EnginePayloadCategory.NEW: self._handle_new,
             EnginePayloadCategory.MODIFY: self._handle_modify,
             EnginePayloadCategory.CLOSE: self._handle_close,
+            EnginePayloadCategory.CANCEL: self._handle_cancel,
         }
 
         async with REDIS_CLIENT.pubsub() as ps:
@@ -60,7 +61,7 @@ class FuturesEngine(BaseEngine):
 
                 payload: EnginePayload = json.loads(message["data"])
                 func = handlers[payload["category"]](json.loads(payload["content"]))
-                
+
                 if inspect.iscoroutine(func):
                     await func
 
@@ -326,7 +327,9 @@ class FuturesEngine(BaseEngine):
 
             self.pusher.append(order.payload)
 
-    def _handle_close(self, payload: CloseOrderPayload) -> None:
+
+
+    def _handle_close(self, payload: FuturesCloseOrderPayload) -> None:
         """
         Handles the result from attempting to match the order
         in order to close it

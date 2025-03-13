@@ -6,6 +6,10 @@ from enums import MarketType, OrderStatus, OrderType, Side
 from ...base import CustomBase
 
 
+class OrderId(CustomBase):
+    order_id: str
+
+
 class OrderWrite(CustomBase):
     quantity: int = Field(..., ge=1)
     instrument: str
@@ -115,8 +119,8 @@ class ModifyOrder(CustomBase):
     stop_loss: Optional[float] = None
 
 
-class FuturesCloseOrder(CustomBase):
-    order_id: str
+class FuturesCloseOrder(OrderId):
+    pass
 
 
 class SpotCloseOrder(CustomBase):

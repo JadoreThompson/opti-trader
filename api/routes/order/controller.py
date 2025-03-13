@@ -1,15 +1,34 @@
 import json
 import sqlalchemy
 
+from typing import Optional
 from sqlalchemy import insert, select, update
+
 from config import DB_LOCK, REDIS_CLIENT, SPOT_QUEUE_KEY, FUTURES_QUEUE_KEY
 from db_models import Orders, Users
+from engine.base_engine import CancelOrderPayload
 from enums import MarketType, OrderStatus, OrderType, Side
 from engine.utils import EnginePayloadCategory, dump_obj
-from engine.futures_engine import CloseOrderPayload as FuturesCloseOrderPayload
-from engine.spot_engine import CloseOrderPayload as SpotCloseOrderPayload
+from engine.futures_engine import FuturesCloseOrderPayload
+from engine.spot_engine import SpotCloseOrderPayload
 from utils.db import get_db_session
 from .models import FuturesCloseOrder, OrderWrite, SpotCloseOrder
+
+
+async def submit_to_engine(
+    market_type: MarketType,
+    category: EnginePayloadCategory,
+    content: dict,
+) -> None:
+    await REDIS_CLIENT.publish(
+        FUTURES_QUEUE_KEY if market_type == MarketType.FUTURES else SPOT_QUEUE_KEY,
+        json.dumps(
+            {
+                "category": category,
+                "content": dump_obj(content),
+            }
+        ),
+    )
 
 
 def validate_order_details(
@@ -76,19 +95,8 @@ async def enter_new_order(details: dict, user_id: str, balance: float) -> float:
 
     payload = vars(order)
     del payload["_sa_instance_state"]
-    payload["order_id"] = str(payload["order_id"])
+    await submit_to_engine(payload["market_type"], EnginePayloadCategory.NEW, payload)
 
-    await REDIS_CLIENT.publish(
-        (
-            FUTURES_QUEUE_KEY
-            if payload["market_type"] == MarketType.FUTURES
-            else SPOT_QUEUE_KEY
-        ),
-        json.dumps(
-            {"category": EnginePayloadCategory.NEW, "content": dump_obj(payload)}
-        ),
-    )
-    
     return balance
 
 
@@ -133,13 +141,35 @@ async def enter_modify_order(
     if order.market_type == MarketType.FUTURES:
         payload = vars(order)
         del payload["_sa_instance_state"]
-        payload["order_id"] = str(payload["order_id"])
-        await REDIS_CLIENT.publish(
-            FUTURES_QUEUE_KEY,
-            json.dumps(
-                {"category": EnginePayloadCategory.MODIFY, "content": dump_obj(payload)}
-            ),
+        await submit_to_engine(
+            MarketType.FUTURES, EnginePayloadCategory.MODIFY, payload
         )
+
+
+async def fetch_order(order_id: str, user_id: str) -> Optional[dict]:
+    """
+    Fetches a pending order with the passed order id.
+    If it exists, it returns the order's market type.
+
+    Args:
+        order_id (str)
+        user_id (str)
+
+    Returns:
+        Optional[dict]
+    """
+    async with get_db_session() as sess:
+        res = await sess.execute(
+            select(Orders.market_type, Orders.instrument).where(
+                (Orders.order_id == order_id)
+                & (Orders.status == OrderStatus.PENDING)
+                & (Orders.user_id == user_id)
+            )
+        )
+        details = res.first()
+
+    if details:
+        return {'market_type': details[0], 'instrument': details[1]}
 
 
 async def get_futures_close_order_details(
@@ -236,13 +266,4 @@ async def enter_close_order(
     market_type: MarketType,
     details: FuturesCloseOrderPayload | SpotCloseOrderPayload,
 ) -> None:
-
-    await REDIS_CLIENT.publish(
-        FUTURES_QUEUE_KEY if market_type == MarketType.FUTURES else SPOT_QUEUE_KEY,
-        json.dumps(
-            {
-                "category": EnginePayloadCategory.CLOSE,
-                "content": dump_obj(details),
-            }
-        ),
-    )
+    await submit_to_engine(market_type, EnginePayloadCategory.CLOSE, details)
