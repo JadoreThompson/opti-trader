@@ -125,4 +125,4 @@ Both the OrderBook and Pusher classes use Redis' pub-sub system to send updates 
 The OrderBook and FuturesEngine both rely on a single client-facing method, `append`, to add data to the queue.
 
 # **Future**
-In the future, I plan to add a spot engine and integrate a crypto layer, enabling cryptocurrency trading within this engine. In the near future I'll be improving the throughput of the engine and posting benchmarks.
+In the future, I plan to add a spot engine. In the near future I'll be improving throuput of orders to the respective engines as this is the main bottleneck.
