@@ -4,7 +4,7 @@ import subprocess
 from typing import List
 import uvicorn
 
-from r_mutex import Lock
+from r_mutex import Lock, LockManager
 from sqlalchemy import select, text
 
 from api.routes.instrument.utils import cache_market_data
@@ -54,7 +54,7 @@ def run_server() -> None:
 
 async def handle_run_engine(engine_class) -> None:
     order_lock = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX, is_manager=False)
-    instrument_lock = Lock(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX)
+    instrument_lock = Lock(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX, is_manager=False)
 
     pusher = Pusher(order_lock)
     asyncio.create_task(order_lock.run())
@@ -116,10 +116,16 @@ async def main() -> None:
     Creates and manages seperate processes for server and engine
     """
 
+    asyncio.create_task(LockManager(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX).run())
+
     ps = [
         multiprocessing.Process(target=run_server, name="server"),
-        multiprocessing.Process(target=run_engine, args=(FuturesEngine,), name="futures engine"),
-        multiprocessing.Process(target=run_engine, args=(SpotEngine,), name="spot engine"),
+        multiprocessing.Process(
+            target=run_engine, args=(FuturesEngine,), name="futures engine"
+        ),
+        multiprocessing.Process(
+            target=run_engine, args=(SpotEngine,), name="spot engine"
+        ),
         multiprocessing.Process(target=run_market_data_cache, name="market data cache"),
     ]
 
