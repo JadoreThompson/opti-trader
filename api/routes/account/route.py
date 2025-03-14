@@ -37,13 +37,13 @@ async def get_account(
 
 
 @account.put("/update")
-async def update_account(body: UpdateProfile, jwt: JWT = Depends(verify_jwt_http)):
+async def update_account(
+    body: UpdateProfile, jwt: JWT = Depends(verify_jwt_http)
+) -> None:
     data: dict = body.model_dump()
 
     if all(key and data[key] is None for key in data):
-        raise HTTPException(
-            status_code=204,
-        )
+        raise HTTPException(status_code=204)
 
     async with get_db_session() as sess:
         await sess.execute(

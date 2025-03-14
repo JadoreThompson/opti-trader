@@ -40,10 +40,10 @@ DB_ENGINE = create_async_engine(
     DB_URL.format(quote(os.getenv("DB_PASSWORD"))),
     future=True,
     echo_pool=True,
-    pool_size=1000,
-    max_overflow=100,
+    pool_size=10,
+    max_overflow=20,
     pool_timeout=30,
-    pool_recycle=600,
+    pool_recycle=6000,
 )
 
 
