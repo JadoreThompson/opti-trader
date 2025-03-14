@@ -175,7 +175,8 @@ async def order_stream(ws: WebSocket) -> None:
         ws (WebSocket)
     """
     await manager.connect(ws)
-
+    jwt: JWT = {}
+    
     try:
         jwt: JWT = decrypt_token(json.loads(await ws.receive_text()).get("token"))
         manager.append(jwt["sub"], ws)
@@ -183,7 +184,9 @@ async def order_stream(ws: WebSocket) -> None:
         while True:
             await ws.receive()
     except (RuntimeError, WebSocketDisconnect):
-        manager.disconnect(jwt["sub"])
+        if jwt:
+            manager.disconnect(jwt["sub"])
     except InvalidJWT as e:
-        manager.disconnect(jwt["sub"])
+        if jwt:
+            manager.disconnect(jwt["sub"])
         raise WebSocketException(code=1008, reason=str(e))

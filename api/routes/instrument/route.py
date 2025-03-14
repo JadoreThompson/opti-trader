@@ -82,7 +82,7 @@ async def create_instrument(
 async def instrument_ws(ws: WebSocket, instrument: str) -> None:
     try:
         await manager.connect(ws, instrument)
-
+        
         while True:
             await ws.receive()
     except RuntimeError:

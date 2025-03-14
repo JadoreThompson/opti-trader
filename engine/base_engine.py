@@ -94,7 +94,7 @@ class BaseEngine:
         try:
             ob = self._order_books[payload["instrument"]]
             pos = ob.get(payload["order_id"])
-        except Position:
+        except PositionNotFound:
             return
 
         if (

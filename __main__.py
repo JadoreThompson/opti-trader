@@ -1,13 +1,12 @@
 import asyncio
 import multiprocessing
 import subprocess
-from typing import List
 import uvicorn
 
 from r_mutex import Lock, LockManager
 from sqlalchemy import select, text
+from typing import List
 
-from api.routes.instrument.utils import cache_market_data
 from config import (
     INSTRUMENT_LOCK_PREFIX,
     ORDER_LOCK_PREFIX,
@@ -17,6 +16,7 @@ from config import (
     DB_URL,
 )
 from db_models import Instruments
+from api.routes.instrument.utils import cache_market_data
 from engine.futures_engine import FuturesEngine
 from engine.pusher import Pusher
 from engine.spot_engine import SpotEngine
@@ -39,7 +39,7 @@ async def handle_run_server() -> None:
         workers=3,
         host="0.0.0.0",
         port=8000,
-        # log_config=None,
+        log_config=None,
     )
     fa_server = uvicorn.Server(fa_config)
 

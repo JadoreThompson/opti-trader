@@ -87,4 +87,4 @@ def decrypt_token(token: str) -> JWT:
         decrypted_token = CIPHER.decrypt(token.encode()).decode()
         return verify_jwt({JWT_ALIAS: decrypted_token})
     except FernetInvalidToken:
-        raise InvalidJWT
+        raise InvalidJWT("Invalid token")

@@ -1,7 +1,7 @@
 import asyncio
-from collections import defaultdict
 import json
 
+from collections import defaultdict
 from datetime import datetime
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
@@ -20,14 +20,13 @@ class ClientManager:
 
         if instrument not in self._connections:
             asyncio.create_task(self.listen_to_price(instrument))
-            # self._connections.setdefault(instrument, [])
 
         self._connections[instrument].append(ws)
 
-    def disconnect(self, ws: WebSocket, instrument: str) -> None:
+    def disconnect(self, ws: WebSocket, instrument: str) -> None:        
         if ws in self._connections.get(instrument, []):
             self._connections[instrument].remove(ws)
-
+            
     async def listen_to_price(self, instrument: str) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe(f"{instrument}.live")
@@ -52,4 +51,4 @@ class ClientManager:
             try:
                 await ws.send_text(payload)
             except WebSocketDisconnect:
-                pass
+                self.disconnect(ws, instrument)

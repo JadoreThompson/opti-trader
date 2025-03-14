@@ -113,7 +113,7 @@ async def test_user_creation() -> tuple[httpx.AsyncClient, int, httpx.Cookies]:
 
 
 async def test_order_creation(
-    quantity: int = 10,
+    num_orders: int = 10,
     delay: float = None,
     order_type: OrderType = None,
     market_type: MarketType = None,
@@ -125,7 +125,7 @@ async def test_order_creation(
     if session is None or cookies is None:
         session, _, cookies = await test_user_creation()
 
-    for _ in range(quantity):
+    for _ in range(num_orders):
         await asyncio.sleep(delay or randnum())
 
         if order_type is None:
@@ -200,7 +200,10 @@ async def test_order_close(
             )
 
 
-async def test_order_ws(num_users: int): ...
+async def test_order_ws(): ...
 
 
-async def test_price_ws(): ...
+async def test_price_ws():
+    async with connect(BASE_URL.replace("http", "ws") + "/instrument/ws/?instrument=BTCUSD") as ws:
+        while True:
+            message = await ws.recv()
