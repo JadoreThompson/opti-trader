@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 load_dotenv()
 
 BASE_PATH = os.getcwd()
-DEV_MODE = False
+DEV_MODE = True
 
 logger = logging.getLogger()
 logging.basicConfig(

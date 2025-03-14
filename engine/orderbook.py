@@ -214,7 +214,7 @@ class OrderBook:
         if any(price == None for price in price_levels):
             return
 
-        if book == Side.SELL:
+        if book == "asks":
             cleaned_prices = {
                 key: abs(price - key)
                 for key in price_levels

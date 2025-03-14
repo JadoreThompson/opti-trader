@@ -81,9 +81,6 @@ class BaseEngine:
     @overload
     def _handle_modify(self, payload: dict) -> None: ...
 
-    # @overload
-    # def _handle_cancel(self, payload: CancelOrderPayload) -> None: ...
-
     def _handle_cancel(self, payload: CancelOrderPayload) -> None:
         """
         Removes the order from tracking and the book and submits a
@@ -110,7 +107,7 @@ class BaseEngine:
                 "amount": pos.order.payload["amount"],
             }
         )
-        pos.order.payload['status'] = OrderStatus.CLOSED
+        pos.order.payload["status"] = OrderStatus.CLOSED
         self.pusher.append(pos.order.payload, speed="fast")
 
     @overload

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import inspect
+import math
+import time
 
 from datetime import datetime
 from collections.abc import Iterable
@@ -38,6 +40,11 @@ class FuturesEngine(BaseEngine):
         pusher: Pusher,
     ) -> None:
         super().__init__(instrument_lock, pusher)
+        self._handlers: dict[OrderType, callable] = {
+            OrderType.MARKET: self._handle_market_order,
+            OrderType.LIMIT: self._handle_limit_order,
+        }
+        # self.times = []
 
     async def _listen(self) -> None:
         """
@@ -52,18 +59,22 @@ class FuturesEngine(BaseEngine):
             EnginePayloadCategory.CLOSE: self._handle_close,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
         }
+        
+        # self.task = asyncio.create_task(self.func())
 
         async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe(FUTURES_QUEUE_KEY)
             async for message in ps.listen():
                 if message["type"] == "subscribe":
                     continue
-
+                
+                # self.task.cancel()
                 payload: EnginePayload = json.loads(message["data"])
                 func = handlers[payload["category"]](json.loads(payload["content"]))
 
                 if inspect.iscoroutine(func):
                     await func
+                # self.task = asyncio.create_task(self.func())
 
     async def _handle_new(self, payload: dict) -> None:
         """
@@ -88,17 +99,13 @@ class FuturesEngine(BaseEngine):
             ),
         )
         order = Order(payload, Tag.ENTRY, payload["side"])
-
-        func: dict[OrderType, callable] = {
-            OrderType.MARKET: self._handle_market_order,
-            OrderType.LIMIT: self._handle_limit_order,
-        }[payload["order_type"]]
-
-        result: MatchResult = func(order, ob)
-
+        # s = time.perf_counter()
+        result: MatchResult = self._handlers[payload["order_type"]](order, ob)
+        print(result)
         if payload["order_type"] == OrderType.LIMIT:
             return
-
+        # self.times.append(time.perf_counter() - s)
+        
         if result.outcome == 2:
             ob.set_price(result.price)
             payload["status"] = OrderStatus.FILLED
@@ -159,8 +166,10 @@ class FuturesEngine(BaseEngine):
             return MatchResult(0, None)
 
         for existing_order in ob[book][target_price]:
+            # payload = existing_order.payload
             leftover_quant = (
                 existing_order.payload["standing_quantity"] - order["standing_quantity"]
+                # payload["standing_quantity"] - order["standing_quantity"]
             )
 
             if leftover_quant >= 0:
@@ -168,16 +177,24 @@ class FuturesEngine(BaseEngine):
                 existing_order.payload["standing_quantity"] -= order[
                     "standing_quantity"
                 ]
+                # payload["standing_quantity"] -= order[
+                #     "standing_quantity"
+                # ]
                 order["standing_quantity"] = 0
 
             else:
                 filled.append(
                     (existing_order, existing_order.payload["standing_quantity"])
+                    # (existing_order, payload["standing_quantity"])
                 )
                 order["standing_quantity"] -= existing_order.payload[
                     "standing_quantity"
                 ]
+                # order["standing_quantity"] -= payload[
+                #     "standing_quantity"
+                # ]
                 existing_order.payload["standing_quantity"] = 0
+                # payload["standing_quantity"] = 0
 
             if order["standing_quantity"] == 0:
                 break
@@ -191,9 +208,9 @@ class FuturesEngine(BaseEngine):
         if order["standing_quantity"] == 0:
             return MatchResult(2, target_price)
 
-        if attempt != max_attempts:
-            attempt += 1
-            self._match(order, order_side, ob, target_price, max_attempts, attempt)
+        # if attempt != max_attempts:
+        #     attempt += 1
+        #     self._match(order, order_side, ob, target_price, max_attempts, attempt)
 
         return MatchResult(1, None)
 
@@ -326,8 +343,6 @@ class FuturesEngine(BaseEngine):
                 )
 
             self.pusher.append(order.payload)
-
-
 
     def _handle_close(self, payload: FuturesCloseOrderPayload) -> None:
         """
