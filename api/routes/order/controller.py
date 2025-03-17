@@ -6,7 +6,6 @@ from sqlalchemy import insert, select, update
 
 from config import DB_LOCK, REDIS_CLIENT, SPOT_QUEUE_KEY, FUTURES_QUEUE_KEY
 from db_models import Orders, Users
-from engine.base_engine import CancelOrderPayload
 from enums import MarketType, OrderStatus, OrderType, Side
 from engine.utils import EnginePayloadCategory, dump_obj
 from engine.futures_engine import FuturesCloseOrderPayload
@@ -169,7 +168,7 @@ async def fetch_order(order_id: str, user_id: str) -> Optional[dict]:
         details = res.first()
 
     if details:
-        return {'market_type': details[0], 'instrument': details[1]}
+        return {"market_type": details[0], "instrument": details[1]}
 
 
 async def get_futures_close_order_details(

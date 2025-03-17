@@ -3,9 +3,9 @@ import multiprocessing
 import subprocess
 import uvicorn
 
-from r_mutex import Lock, LockManager
+from r_mutex import LockClient, LockManager
 from sqlalchemy import select, text
-from typing import List
+from typing import List, Type
 
 from config import (
     INSTRUMENT_LOCK_PREFIX,
@@ -17,6 +17,7 @@ from config import (
 )
 from db_models import Instruments
 from api.routes.instrument.utils import cache_market_data
+from engine.base_engine import BaseEngine
 from engine.futures_engine import FuturesEngine
 from engine.pusher import Pusher
 from engine.spot_engine import SpotEngine
@@ -39,7 +40,7 @@ async def handle_run_server() -> None:
         workers=3,
         host="0.0.0.0",
         port=8000,
-        log_config=None,
+        # log_config=None,
     )
     fa_server = uvicorn.Server(fa_config)
 
@@ -52,9 +53,9 @@ def run_server() -> None:
     asyncio.run(handle_run_server())
 
 
-async def handle_run_engine(engine_class) -> None:
-    order_lock = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX, is_manager=False)
-    instrument_lock = Lock(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX, is_manager=False)
+async def handle_run_engine(engine_class: Type[BaseEngine]) -> None:
+    order_lock = LockClient(REDIS_CLIENT, ORDER_LOCK_PREFIX, is_manager=False)
+    instrument_lock = LockClient(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX, is_manager=False)
 
     pusher = Pusher(order_lock)
     asyncio.create_task(order_lock.run())
@@ -79,7 +80,7 @@ async def listen_for_instruments(instruments: List[str], lock: asyncio.Lock) -> 
                 instruments.append(message["data"])
 
 
-async def handle_market_data_cache():
+async def handle_market_data_cache() -> None:
     lock = asyncio.Lock()
     instruments = await fetch_instruments()
     sleep = 60 * 60 * 2  # seconds
@@ -92,7 +93,7 @@ async def handle_market_data_cache():
         await asyncio.sleep(sleep)
 
 
-def run_market_data_cache():
+def run_market_data_cache() -> None:
     asyncio.run(handle_market_data_cache())
 
 
@@ -116,29 +117,42 @@ async def main() -> None:
     Creates and manages seperate processes for server and engine
     """
 
-    asyncio.create_task(LockManager(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX).run())
+    instrument_lock_task = asyncio.create_task(
+        LockManager(REDIS_CLIENT, INSTRUMENT_LOCK_PREFIX).run()
+    )
+    order_lock_task = asyncio.create_task(
+        LockManager(REDIS_CLIENT, ORDER_LOCK_PREFIX).run()
+    )
+    await run_migrate()
 
-    ps = [
-        multiprocessing.Process(target=run_server, name="server"),
-        multiprocessing.Process(
-            target=run_engine, args=(FuturesEngine,), name="futures engine"
-        ),
-        multiprocessing.Process(
-            target=run_engine, args=(SpotEngine,), name="spot engine"
-        ),
-        multiprocessing.Process(target=run_market_data_cache, name="market data cache"),
+    ps_kwargs: list[dict] = [
+        {"target": run_server, "name": "server"},
+        {"target": run_engine, "args": (FuturesEngine,), "name": "futures engine"},
+        {"target": run_engine, "args": (SpotEngine,), "name": "spot engine"},
+        {"target": run_market_data_cache, "name": "market data cache"},
+    ]
+
+    ps: list[multiprocessing.Process] = [
+        multiprocessing.Process(**kwargs) for kwargs in ps_kwargs
     ]
 
     for p in ps:
         p.start()
 
-    await run_migrate()
-
     try:
+        print("[pm] Initialising managing process")
         while True:
-            for p in ps:
+            for ind, p in enumerate(ps.copy()):
                 if not p.is_alive():
-                    raise KeyboardInterrupt(f"{p.name} has died")
+                    print(f"{p.name} has died")
+                    ps.remove(p)
+
+                    new_p = multiprocessing.Process(**ps_kwargs[ind])
+                    ps.insert(ind, new_p)
+
+                    new_p.start()
+                    print(f"{new_p.name} has been restarted")
+
             await asyncio.sleep(2)
     except Exception as e:
         remove_sqlalchemy_url()
@@ -148,6 +162,8 @@ async def main() -> None:
             p.terminate()
             p.join()
             print(f"Terminated {p.name}")
+        order_lock_task.cancel()
+        instrument_lock_task.cancel()
         raise e
 
 

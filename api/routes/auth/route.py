@@ -1,4 +1,6 @@
 import argon2
+
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
@@ -27,20 +29,21 @@ async def register(body: RegisterCredentials) -> None:
                 )
                 user: Users = res.scalar()
                 await sess.commit()
-            resp = Response()
-            resp.set_cookie(
-                JWT_ALIAS,
-                generate_jwt_token(
-                    {
-                        "sub": str(user.user_id),
-                        "em": user.email,
-                        "username": user.username,
-                    }
-                ),
-                httponly=True,
-                # secure=True
-            )
-            return resp
+                
+        resp = Response()
+        resp.set_cookie(
+            JWT_ALIAS,
+            generate_jwt_token(
+                {
+                    "sub": str(user.user_id),
+                    "em": user.email,
+                    "username": user.username,
+                }
+            ),
+            httponly=True,
+            # secure=True
+        )
+        return resp
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Credentials already exist")
 
@@ -50,7 +53,7 @@ async def login(body: LoginCredentials) -> None:
     async with DB_LOCK:
         async with get_db_session() as sess:
             res = await sess.execute(select(Users).where(Users.email == body.email))
-            user: Users = res.scalar()
+            user: Optional[Users] = res.scalar()
 
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")

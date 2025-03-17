@@ -17,8 +17,8 @@ async def run_create_user_test():
 async def run_order_creation_test() -> None:
     await asyncio.gather(
         *[
-            test_order_creation(100_000, 0.1, market_type=MarketType.FUTURES)
-            for _ in range(1)
+            test_order_creation(100_000, 0, market_type=MarketType.FUTURES)
+            for _ in range(5)
         ]
     )
 

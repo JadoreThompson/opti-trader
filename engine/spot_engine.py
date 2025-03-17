@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from collections.abc import Iterable
 from random import random
-from r_mutex import Lock
+from r_mutex import LockClient
 from typing import Callable, TypedDict, Tuple
 
 from config import SPOT_QUEUE_KEY, REDIS_CLIENT
@@ -32,7 +32,7 @@ class SpotCloseOrderPayload(TypedDict):
 
 
 class SpotEngine(BaseEngine):
-    def __init__(self, instrument_lock: Lock, pusher: Pusher) -> None:
+    def __init__(self, instrument_lock: LockClient, pusher: Pusher) -> None:
         super().__init__(instrument_lock, pusher)
         self.count = 0
 
@@ -147,8 +147,6 @@ class SpotEngine(BaseEngine):
         order_side: Side,
         ob: OrderBook,
         price: float,
-        max_attempts: int = 5,
-        attempt: int = 0,
     ) -> MatchResult:
         """
         Matches order against opposing book
@@ -206,10 +204,6 @@ class SpotEngine(BaseEngine):
 
         if order["standing_quantity"] == 0:
             return MatchResult(2, target_price)
-
-        if attempt != max_attempts:
-            attempt += 1
-            self._match(order, order_side, ob, target_price, max_attempts, attempt)
 
         return MatchResult(1, None)
 

@@ -4,7 +4,8 @@ import warnings
 
 from collections import deque
 from datetime import datetime
-from r_mutex import Lock
+from r_mutex import LockClient
+from sortedcontainers.sorteddict import SortedDict
 from sqlalchemy import insert, select
 from typing import Literal, Optional
 
@@ -32,7 +33,7 @@ class OrderBook:
     Attributes:
         instrument (str): The trading instrument (e.g., "BTCUSD").
         _instrument_id (int): The id for the instrument within the instruments table.
-        lock (r_mutex.Lock): A threading lock to ensure safe access to shared resources.
+        lock (r_mutex.LockClient): A threading lock to ensure safe access to shared resources.
         _price (float): The current market price of the instrument.
         _price_delay (float): The delay (in seconds) between price updates.
         _price_queue (deque): A queue storing price updates. Used to enable throttling of
@@ -48,7 +49,7 @@ class OrderBook:
     def __init__(
         self,
         instrument: str,
-        lock: Lock,
+        lock: LockClient,
         price: float = 150,
         pusher: Pusher = None,
         delay: float = 1,
@@ -69,8 +70,8 @@ class OrderBook:
         self.pusher = pusher
         self.instrument = instrument
         self._instrument_id: int = None
-        self.bids: dict[float, list[Order]] = {}
-        self.asks: dict[float, list[Order]] = {}
+        self.bids: dict[float, list[Order]] = SortedDict()
+        self.asks: dict[float, list[Order]] = SortedDict()
         self.bid_levels = self.bids.keys()
         self.ask_levels = self.asks.keys()
         self._tracker: dict[str, Position] = {}
@@ -148,22 +149,30 @@ class OrderBook:
         if order.side == Side.BUY:
             if order in self.bids.get(price, []):
                 self.bids[price].remove(order)
-            if price in self.bids:
-                self.bids.pop(price, None)
+            
+                try:
+                    self.bids[price][0]
+                except IndexError:
+                    self.bids.pop(price)
 
         elif order.side == Side.SELL:
             if order in self.asks.get(price, []):
                 self.asks[price].remove(order)
-            if price in self.asks:
-                self.asks.pop(price, None)
 
-    def remove_all(self, order: Order) -> None:
+                try:
+                    self.asks[price][0]
+                except IndexError:
+                    self.asks.pop(price)
+           
+    def remove_all(self, order: Order) -> Optional[Position]:
         """
         Removes the order and it's counterparts both from the
         tracker and their corresponding price levels
 
         Args:
             order (Order)
+        Returns:
+            (Optional[Position])
         """
         pos: Position | None = self._tracker.pop(order.payload["order_id"], None)
         if pos is None:
@@ -205,30 +214,12 @@ class OrderBook:
         Args:
             book ("bids" or "asks"): The book you want to
         """
-        price_levels = self.bid_levels if book == "bids" else self.ask_levels
-        price_levels = list(price_levels)
-
-        if not price_levels:
-            return
-
-        if any(price == None for price in price_levels):
-            return
-
-        if book == "asks":
-            cleaned_prices = {
-                key: abs(price - key)
-                for key in price_levels
-                if key >= price and len(self.asks.get(key, [])) > 0
-            }
-        else:
-            cleaned_prices = {
-                key: abs(price - key)
-                for key in price_levels
-                if key <= price and len(self.bids.get(key, [])) > 0
-            }
-
-        if cleaned_prices:
-            return sorted(cleaned_prices.items(), key=lambda item: item[1])[0][0]
+        try:
+            if book == "asks":
+                return self.ask_levels[-1]
+            return self.bid_levels[-1]
+        except IndexError:
+            return 
 
     def set_price(self, price: float) -> None:
         """
@@ -269,7 +260,7 @@ class OrderBook:
             try:
                 price = self._price_queue.popleft()
             except IndexError:
-                price = self._price = randnum()
+                price = self._price = randnum() # Here during dev
 
             await REDIS_CLIENT.set(f"{self.instrument}.price", price)
             await REDIS_CLIENT.publish(f"{self.instrument}.live", price)

@@ -8,7 +8,7 @@ import redis.asyncio
 import redis.asyncio.connection
 
 from dotenv import load_dotenv
-from r_mutex import Lock
+from r_mutex import LockClient
 from urllib.parse import quote
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 load_dotenv()
 
 BASE_PATH = os.getcwd()
-DEV_MODE = True
+DEV_MODE = False
 
 logger = logging.getLogger()
 logging.basicConfig(
@@ -62,11 +62,11 @@ ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
 INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
 
 
-###
+### 
 PH = argon2.PasswordHasher(
     time_cost=int(os.getenv("TIME_COST")),
     memory_cost=int(os.getenv("MEMORY_COST")),
     parallelism=int(os.getenv("PARALLELISM")),
 )
 
-DB_LOCK = Lock(REDIS_CLIENT, ORDER_LOCK_PREFIX)
+DB_LOCK = LockClient(REDIS_CLIENT, ORDER_LOCK_PREFIX, is_manager=False)

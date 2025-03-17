@@ -2,7 +2,7 @@ import asyncio
 import warnings
 
 from typing import Iterable, TypedDict, List, overload
-from r_mutex import Lock
+from r_mutex import LockClient
 
 from enums import OrderStatus, Side
 from .enums import Tag
@@ -22,7 +22,7 @@ class CancelOrderPayload(TypedDict):
 class BaseEngine:
     def __init__(
         self,
-        instrument_lock: Lock,
+        instrument_lock: LockClient,
         pusher: Pusher,
     ) -> None:
         self.instrument_lock = instrument_lock
@@ -71,8 +71,6 @@ class BaseEngine:
         order_side: Side,
         ob: OrderBook,
         price: float,
-        max_attempts: int = 5,
-        attempt: int = 0,
     ) -> MatchResult: ...
 
     @overload

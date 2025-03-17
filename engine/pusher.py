@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import case, update
 from typing import Literal
 from uuid import UUID
-from r_mutex import Lock
+from r_mutex import LockClient
 
 from api.routes.order.models import BalancePayload
 from config import BALANCE_UPDATE_CHANNEL, ORDER_UPDATE_CHANNEL, REDIS_CLIENT
@@ -38,7 +38,7 @@ class Pusher:
 
     def __init__(
         self,
-        lock: Lock,
+        lock: LockClient,
         slow_delay: float = 2.0,
         fast_delay: float = 0.8,
         balance_delay: float = 3.5,

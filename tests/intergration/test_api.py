@@ -125,8 +125,11 @@ async def test_order_creation(
     if session is None or cookies is None:
         session, _, cookies = await test_user_creation()
 
+    await asyncio.sleep(0)
+
     for _ in range(num_orders):
-        await asyncio.sleep(delay or randnum())
+        print(_)
+        await asyncio.sleep(delay if delay is not None else randnum())
 
         if order_type is None:
             order_type = random.choice([OrderType.LIMIT, OrderType.MARKET])
@@ -138,8 +141,7 @@ async def test_order_creation(
             "quantity": random.randint(1, 50),
             "instrument": "BTCUSD",
             "market_type": market_type,
-            # "order_type": order_type,
-            "order_type": OrderType.MARKET,
+            "order_type": order_type,
             "side": random.choice([Side.BUY, Side.SELL]),
             "take_profit": random.choice([randnum(), None]),
             "stop_loss": random.choice([randnum(), None]),
@@ -160,7 +162,7 @@ async def test_order_creation(
                 val.append(rsp.json()["detail"])
             rtn_value.append(val)
         except httpx.ReadTimeout:
-            pass
+            break
 
     await session.aclose()
     return rtn_value
@@ -205,6 +207,8 @@ async def test_order_ws(): ...
 
 
 async def test_price_ws():
-    async with connect(BASE_URL.replace("http", "ws") + "/instrument/ws/?instrument=BTCUSD") as ws:
+    async with connect(
+        BASE_URL.replace("http", "ws") + "/instrument/ws/?instrument=BTCUSD"
+    ) as ws:
         while True:
             message = await ws.recv()
