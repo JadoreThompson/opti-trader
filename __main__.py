@@ -1,6 +1,8 @@
 import asyncio
 import multiprocessing
+import os
 import subprocess
+from urllib.parse import quote
 import uvicorn
 
 from r_mutex import LockClient, LockManager
@@ -99,7 +101,7 @@ def run_market_data_cache() -> None:
 
 async def run_migrate() -> None:
     """Runs alembic commands. To be run before before running server"""
-    write_sqlalchemy_url(DB_URL.replace("+asyncpg", ""))
+    write_sqlalchemy_url(DB_URL.format(quote(os.getenv("DB_PASSWORD"))))
     subprocess.run(["alembic", "upgrade", "head"], check=True)
 
     async with get_db_session() as sess:
@@ -155,16 +157,18 @@ async def main() -> None:
 
             await asyncio.sleep(2)
     except Exception as e:
-        remove_sqlalchemy_url()
-        print("[pm][Error] => ", str(e))
+        print("[pm][Error] => ", type(e), str(e))
         print("Terminating processes")
+
         for p in ps:
             p.terminate()
             p.join()
             print(f"Terminated {p.name}")
+
         order_lock_task.cancel()
         instrument_lock_task.cancel()
-        raise e
+    finally:
+        remove_sqlalchemy_url()
 
 
 if __name__ == "__main__":
