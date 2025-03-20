@@ -161,8 +161,8 @@ async def main() -> None:
         print("Terminating processes")
 
         for p in ps:
-            p.terminate()
             p.join()
+            p.terminate()
             print(f"Terminated {p.name}")
 
         order_lock_task.cancel()
