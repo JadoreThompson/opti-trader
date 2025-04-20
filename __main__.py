@@ -1,8 +1,6 @@
 import asyncio
 import multiprocessing
 import os
-import subprocess
-from urllib.parse import quote
 import uvicorn
 
 from r_mutex import LockClient, LockManager
@@ -39,7 +37,7 @@ async def handle_run_server() -> None:
     """
     fa_config = uvicorn.Config(
         "api.app:app",
-        workers=3,
+        # workers=3,
         host="0.0.0.0",
         port=8000,
         # log_config=None,
@@ -101,8 +99,8 @@ def run_market_data_cache() -> None:
 
 async def run_migrate() -> None:
     """Runs alembic commands. To be run before before running server"""
-    write_sqlalchemy_url(DB_URL.format(quote(os.getenv("DB_PASSWORD"))))
-    subprocess.run(["alembic", "upgrade", "head"], check=True)
+    write_sqlalchemy_url(DB_URL)
+    os.system("alembic upgrade head")
 
     async with get_db_session() as sess:
         if DEV_MODE:
@@ -125,16 +123,17 @@ async def main() -> None:
     order_lock_task = asyncio.create_task(
         LockManager(REDIS_CLIENT, ORDER_LOCK_PREFIX).run()
     )
+
     await run_migrate()
 
-    ps_kwargs: list[dict] = [
+    ps_kwargs = [
         {"target": run_server, "name": "server"},
         {"target": run_engine, "args": (FuturesEngine,), "name": "futures engine"},
         {"target": run_engine, "args": (SpotEngine,), "name": "spot engine"},
         {"target": run_market_data_cache, "name": "market data cache"},
     ]
 
-    ps: list[multiprocessing.Process] = [
+    ps = [
         multiprocessing.Process(**kwargs) for kwargs in ps_kwargs
     ]
 
@@ -144,30 +143,27 @@ async def main() -> None:
     try:
         print("[pm] Initialising managing process")
         while True:
-            for ind, p in enumerate(ps.copy()):
-                if not p.is_alive():
-                    print(f"{p.name} has died")
-                    ps.remove(p)
+            for i in range(len(ps)):
+                if not ps[i].is_alive():
+                    print(f"{ps[i].name} has died")
+                    ps[i].kill()
+                    ps[i].join()
+                    ps[i] = multiprocessing.Process(**ps_kwargs[i])
+                    ps[i].start()
+                    print(f"{ps[i].name} has been restarted")
 
-                    new_p = multiprocessing.Process(**ps_kwargs[ind])
-                    ps.insert(ind, new_p)
-
-                    new_p.start()
-                    print(f"{new_p.name} has been restarted")
-
-            await asyncio.sleep(2)
-    except Exception as e:
-        print("[pm][Error] => ", type(e), str(e))
+            await asyncio.sleep(5)
+    finally:
         print("Terminating processes")
 
         for p in ps:
+            p.kill()
             p.join()
-            p.terminate()
-            print(f"Terminated {p.name}")
+            print(f"Terminated {p.name} PID: {p.pid}")
 
         order_lock_task.cancel()
         instrument_lock_task.cancel()
-    finally:
+        
         remove_sqlalchemy_url()
 
 
