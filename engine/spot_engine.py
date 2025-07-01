@@ -13,7 +13,7 @@ from .base_engine import BaseEngine
 from .enums import Tag
 from .exceptions import PositionNotFound
 from .order import Order
-from .orderbook import OrderBook
+from .orderbook.orderbook import OrderBook
 from .pusher import Pusher
 from .utils import (
     EnginePayloadCategory,

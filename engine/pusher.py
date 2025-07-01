@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import UUID
 from r_mutex import LockClient
 
-from api.routes.order.models import BalancePayload
+from server.routes.order.models import BalancePayload
 from config import BALANCE_UPDATE_CHANNEL, ORDER_UPDATE_CHANNEL, REDIS_CLIENT
 from db_models import Orders, Users
 from utils.db import get_db_session

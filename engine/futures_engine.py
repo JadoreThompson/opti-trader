@@ -9,12 +9,13 @@ from r_mutex import LockClient
 from typing import Callable, TypedDict
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
+from engine.typing import MatchOutcome
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
 from .enums import Tag
 from .exceptions import PositionNotFound
 from .order import Order
-from .orderbook import OrderBook
+from .orderbook.orderbook import OrderBook
 from .pusher import Pusher
 from .utils import (
     EnginePayload,
@@ -39,11 +40,10 @@ class FuturesEngine(BaseEngine):
         pusher: Pusher,
     ) -> None:
         super().__init__(instrument_lock, pusher)
-        self._handlers: dict[OrderType, callable] = {
+        self._entry_type_handlers: dict[OrderType, Callable] = {
             OrderType.MARKET: self._handle_market_order,
             OrderType.LIMIT: self._handle_limit_order,
         }
-        self.times = []
 
     async def _listen(self) -> None:
         """
@@ -83,23 +83,15 @@ class FuturesEngine(BaseEngine):
             payload (dict): The order data, including order type, side, price, and quantity.
         """
         instrument: str = payload["instrument"]
-
-        ob = self._order_books.get(
-            instrument,
-            OrderBook(
-                instrument,
-                self.instrument_lock,
-                float((await REDIS_CLIENT.get(f"{instrument}.price")).decode()),
-                self.pusher,
-            ),
-        )
+        ob = self._order_books.get(instrument, OrderBook())
         order = Order(payload, Tag.ENTRY, payload["side"])
-        s = time.perf_counter()
-        result: MatchResult = self._handlers[payload["order_type"]](order, ob)
+
+        result: MatchResult = self._entry_type_handlers[payload["order_type"]](
+            order, ob
+        )
 
         if payload["order_type"] == OrderType.LIMIT:
             return
-        self.times.append(time.perf_counter() - s)
 
         if result.outcome == 2:
             ob.set_price(result.price)
@@ -147,28 +139,31 @@ class FuturesEngine(BaseEngine):
                 Partially filled: (1, None)
                 Not filled: (0, None)
         """
-        touched: list[Order] = []
-        filled: list[tuple[Order, int]] = []
-        book = "asks" if order_side == Side.BUY else "bids"
-        target_price = ob.best_price(book, price)
+        book = "asks" if order_side == Side.BUY else 'bids'
+        touched_orders: list[Order] = []
+        filled_orders: list[tuple[Order, int]] = []
+
+        if order_side == Side.BUY:
+            target_price = ob.best_ask
+        else:
+            target_price = ob.best_bid
 
         if target_price is None:
-            return MatchResult(0, None)
-
-        for existing_order in ob[book][target_price]:
+            return MatchResult(MatchOutcome.FAILURE, None)
+        
+        for existing_order in ob.get_orders(price, book):
             leftover_quant = (
                 existing_order.payload["standing_quantity"] - order["standing_quantity"]
             )
 
             if leftover_quant >= 0:
-                touched.append(existing_order)
+                touched_orders.append(existing_order)
                 existing_order.payload["standing_quantity"] -= order[
                     "standing_quantity"
                 ]
                 order["standing_quantity"] = 0
-
             else:
-                filled.append(
+                filled_orders.append(
                     (existing_order, existing_order.payload["standing_quantity"])
                 )
                 order["standing_quantity"] -= existing_order.payload[
@@ -179,16 +174,13 @@ class FuturesEngine(BaseEngine):
             if order["standing_quantity"] == 0:
                 break
 
-        if touched or filled:
-            ob.set_price(price)
-
-        self._handle_touched_orders(touched, target_price, ob, filled)
-        self._handle_filled_orders(filled, ob, target_price)
+        self._handle_touched_orders(touched_orders, filled_orders, price, ob)
+        self._handle_filled_orders(filled_orders, price, ob)
 
         if order["standing_quantity"] == 0:
-            return MatchResult(2, target_price)
+            return MatchResult(MatchOutcome.SUCCESS, target_price)
 
-        return MatchResult(1, None)
+        return MatchResult(MatchOutcome.PARTIAL, None)
 
     def _place_tp_sl(self, order: Order, ob: OrderBook) -> None:
         """
@@ -222,7 +214,7 @@ class FuturesEngine(BaseEngine):
             )
 
     def _handle_filled_orders(
-        self, orders: Iterable[tuple[Order, int]], ob: OrderBook, price: float
+        self, orders: Iterable[tuple[Order, int]], price:float, ob: OrderBook
     ) -> None:
         """
         Handles the assigning of new order status', pnls and closure details
@@ -280,9 +272,9 @@ class FuturesEngine(BaseEngine):
     def _handle_touched_orders(
         self,
         orders: Iterable[Order],
+        filled_orders: list[tuple[Order, int]],
         price: float,
         ob: OrderBook,
-        filled_orders: list[tuple[Order, int]],
     ) -> None:
         """
         Handles the assigning of new order status', pnls and closure details
@@ -329,10 +321,9 @@ class FuturesEngine(BaseEngine):
             payload (dict)
         """
         ob = self._order_books[payload["instrument"]]
+        pos = ob.get(payload["order_id"])
 
-        try:
-            pos = ob.get(payload["order_id"])
-        except PositionNotFound:
+        if pos is None:
             return
 
         ob.remove_all(pos.order)

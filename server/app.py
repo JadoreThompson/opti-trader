@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.exc import InvalidJWT
+from .exc import InvalidJWT
 from .routes.auth.route import auth
 from .routes.account.route import account
 from .routes.order.route import order

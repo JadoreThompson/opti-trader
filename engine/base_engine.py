@@ -8,7 +8,7 @@ from enums import OrderStatus, Side
 from .enums import Tag
 from .exceptions import PositionNotFound
 from .order import Order
-from .orderbook import OrderBook
+from .orderbook.orderbook import OrderBook
 from .position import Position
 from .pusher import Pusher
 from .utils import MatchResult
@@ -76,8 +76,37 @@ class BaseEngine:
     @overload
     def _handle_new(self, payload: dict) -> None: ...
 
-    @overload
-    def _handle_modify(self, payload: dict) -> None: ...
+    def _handle_modify(self, payload: dict) -> None:
+        """
+        Handles the reassignment of values to an order within the orderbook
+
+        Args:
+            payload (dict)
+        """
+        # try:
+        #     pos = self._order_books[payload["instrument"]].get(payload["order_id"])
+        #     ob = self._order_books[pos.order.payload["instrument"]]
+        # except PositionNotFound:
+        #     return
+
+        pos = self._order_books[payload["instrument"]].get(payload["order_id"])
+        if pos is None:
+            return
+
+        ob = self._order_books[pos.order.payload["instrument"]]
+
+        if pos.order.payload["status"] == OrderStatus.PENDING:
+            if payload["limit_price"] is not None:
+                self._modify_limit_order(ob, pos, payload["limit_price"])
+
+        if pos.order.payload["status"] not in (
+            OrderStatus.PENDING,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.CLOSED,
+        ):
+            self._modify_tp_sl(ob, pos, payload["take_profit"], payload["stop_loss"])
+
+        self.pusher.append(pos.order.payload)
 
     def _handle_cancel(self, payload: CancelOrderPayload) -> None:
         """
@@ -134,32 +163,6 @@ class BaseEngine:
         filled_orders: list[tuple[Order, int]],
     ) -> None: ...
 
-    def _handle_modify(self, payload: dict) -> None:
-        """
-        Handles the reassignment of values to an order within the orderbook
-
-        Args:
-            payload (dict)
-        """
-        try:
-            pos = self._order_books[payload["instrument"]].get(payload["order_id"])
-            ob = self._order_books[pos.order.payload["instrument"]]
-        except PositionNotFound:
-            return
-
-        if pos.order.payload["status"] == OrderStatus.PENDING:
-            if payload["limit_price"] is not None:
-                self._modify_limit_order(ob, pos, payload["limit_price"])
-
-        if pos.order.payload["status"] not in (
-            OrderStatus.PENDING,
-            OrderStatus.PARTIALLY_FILLED,
-            OrderStatus.CLOSED,
-        ):
-            self._modify_tp_sl(ob, pos, payload["take_profit"], payload["stop_loss"])
-
-        self.pusher.append(pos.order.payload)
-
     def _modify_limit_order(
         self,
         ob: OrderBook,
@@ -167,7 +170,7 @@ class BaseEngine:
         new_limit_price: float,
     ) -> None:
         pos.order.payload["limit_price"] = new_limit_price
-        ob = self._order_books[pos.order.payload["instrument"]]
+        # ob = self._order_books[pos.order.payload["instrument"]]
         ob.remove(pos.order)
         ob.append(pos.order, new_limit_price)
 

@@ -16,7 +16,7 @@ from config import (
     DB_URL,
 )
 from db_models import Instruments
-from api.routes.instrument.utils import cache_market_data
+from server.routes.instrument.utils import cache_market_data
 from engine.base_engine import BaseEngine
 from engine.futures_engine import FuturesEngine
 from engine.pusher import Pusher
@@ -35,17 +35,15 @@ async def handle_run_server() -> None:
     """
     Handles uvicorn config and run
     """
-    fa_config = uvicorn.Config(
-        "api.app:app",
-        # workers=3,
+    http_config = uvicorn.Config(
+        "server.app:app",
         host="0.0.0.0",
         port=8000,
-        # log_config=None,
     )
-    fa_server = uvicorn.Server(fa_config)
+    http_server = uvicorn.Server(http_config)
 
     asyncio.create_task(DB_LOCK.run())
-    await fa_server.serve()
+    await http_server.serve()
 
 
 def run_server() -> None:
@@ -133,9 +131,7 @@ async def main() -> None:
         {"target": run_market_data_cache, "name": "market data cache"},
     ]
 
-    ps = [
-        multiprocessing.Process(**kwargs) for kwargs in ps_kwargs
-    ]
+    ps = [multiprocessing.Process(**kwargs) for kwargs in ps_kwargs]
 
     for p in ps:
         p.start()
@@ -163,7 +159,7 @@ async def main() -> None:
 
         order_lock_task.cancel()
         instrument_lock_task.cancel()
-        
+
         remove_sqlalchemy_url()
 
 

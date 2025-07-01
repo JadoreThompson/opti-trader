@@ -8,6 +8,7 @@ __pycache__
 .env
 client_secret.json
 alembic.ini
+dockerfile
 
 **.log
 rec.py

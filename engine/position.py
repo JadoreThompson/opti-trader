@@ -1,4 +1,5 @@
 from typing import Optional
+from engine.enums import Tag
 from .order import Order
 
 
@@ -7,7 +8,7 @@ class Position:
     Represents a trading position. It is used to locate the entry, take profit,
     and stop loss orders from within and outside the order book.
 
-    This class manages the entry order, stop loss order, and take profit order 
+    This class manages the entry order, stop loss order, and take profit order
     associated with a position.
 
     Attributes:
@@ -15,7 +16,10 @@ class Position:
         take_profit (Optional[Order]): The take profit order for this position, if any.
         instrument (str): The instrument associated with the position.
     """
+
     def __init__(self, order: Order) -> None:
+        if order.tag != Tag.ENTRY:
+            raise ValueError("Order must be of type ENTRY to create a Position.")
         self._instrument = order.payload["instrument"]
         self._order = order
         self.stop_loss: Optional[Order] = None

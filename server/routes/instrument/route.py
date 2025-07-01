@@ -37,12 +37,14 @@ async def get_instrument(
 async def get_instruments(
     page: int = 0,
     quantity: int = 10,
-    jwt: JWT = Depends(verify_jwt_http),    
+    jwt: JWT = Depends(verify_jwt_http),
 ) -> PaginatedInstruments:
     async with DB_LOCK:
         async with get_db_session() as sess:
             res = await sess.execute(
-                select(Instruments.instrument).offset(page * quantity).limit(quantity + 1)
+                select(Instruments.instrument)
+                .offset(page * quantity)
+                .limit(quantity + 1)
             )
             instruments = res.all()
 
@@ -78,14 +80,19 @@ async def create_instrument(
     await REDIS_CLIENT.publish("instrument.new", body.name)
 
 
-@instrument.websocket("/ws/")
+@instrument.websocket("/ws/price")
 async def instrument_ws(ws: WebSocket, instrument: str) -> None:
     try:
         await manager.connect(ws, instrument)
-        
+
         while True:
             await ws.receive()
     except RuntimeError:
         pass
     finally:
         manager.disconnect(ws, instrument)
+
+
+@instrument.websocket("/ws/orderbook")
+async def instrument_ws(ws: WebSocket, instrument: str) -> None:
+    pass

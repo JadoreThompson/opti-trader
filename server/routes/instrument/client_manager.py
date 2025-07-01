@@ -23,18 +23,26 @@ class ClientManager:
 
         self._connections[instrument].append(ws)
 
-    def disconnect(self, ws: WebSocket, instrument: str) -> None:        
+    def disconnect(self, ws: WebSocket, instrument: str) -> None:
         if ws in self._connections.get(instrument, []):
             self._connections[instrument].remove(ws)
-            
+
     async def listen_to_price(self, instrument: str) -> None:
+        last_push = None
+
         async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe(f"{instrument}.live")
             async for message in ps.listen():
                 if message["type"] == "subscribe":
                     continue
+
+                if last_push is not None:
+                    await asyncio.sleep(
+                        max(0, 60 - (datetime.now().timestamp() - last_push))
+                    )
                 
                 await self._handle_price(message["data"].decode(), instrument)
+                last_push = datetime.now().timestamp()
 
     @handle_ws_errors
     async def _handle_price(self, price: float, instrument: str) -> None:

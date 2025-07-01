@@ -13,7 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select
 from typing import Optional
 
-from api.exc import InvalidJWT
+from server.exc import InvalidJWT
 from config import REDIS_CLIENT
 from db_models import Orders, Users
 from engine.utils import EnginePayloadCategory
@@ -88,10 +88,10 @@ async def modify_order(body: ModifyOrder, jwt: JWT = Depends(verify_jwt_http)):
                 (Orders.order_id == body.order_id) & (Orders.user_id == jwt["sub"])
             )
         )
-        order: Orders = res.scalar()
+        order: Orders = res.scalar_one_or_none()
 
     if not order:
-        raise HTTPException(status_code=400, detail="Order doesn't exist")
+        raise HTTPException(status_code=404, detail="Order doesn't exist")
 
     try:
         await enter_modify_order(
@@ -176,17 +176,18 @@ async def order_stream(ws: WebSocket) -> None:
     """
     await manager.connect(ws)
     jwt: JWT = {}
-    
+
     try:
         jwt: JWT = decrypt_token(json.loads(await ws.receive_text()).get("token"))
         manager.append(jwt["sub"], ws)
 
         while True:
             await ws.receive()
-    except (RuntimeError, WebSocketDisconnect):
-        if jwt:
-            manager.disconnect(jwt["sub"])
     except InvalidJWT as e:
+        raise WebSocketException(code=1008, reason=str(e))
+    except (RuntimeError, WebSocketDisconnect):
+        # Client disconnected
+        pass
+    finally:
         if jwt:
             manager.disconnect(jwt["sub"])
-        raise WebSocketException(code=1008, reason=str(e))
