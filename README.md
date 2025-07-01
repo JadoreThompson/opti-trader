@@ -123,6 +123,3 @@ It has three distinct methods: `_push_fast`, `_push_slow`, and `_push_balance`. 
 Both the OrderBook and Pusher classes use Redis' pub-sub system to send updates to the manager class within the `/instrument` and `/order` WebSocket endpoints. The corresponding `ClientManager` classes subscribe to these updates.
 
 The OrderBook and FuturesEngine both rely on a single client-facing method, `append`, to add data to the queue.
-
-# **Future**
-In the future, I plan to add a spot engine. In the near future I'll be improving throuput of orders to the respective engines as this is the main bottleneck.
