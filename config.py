@@ -45,7 +45,8 @@ REDIS_CLIENT = redis.asyncio.Redis(
     connection_pool=redis.asyncio.connection.ConnectionPool(
         connection_class=redis.asyncio.connection.Connection,
         max_connections=100,
-    )
+    ),
+    decode_responses=True,
 )
 ORDER_UPDATE_CHANNEL = os.getenv("ORDER_UPDATE_CHANNEL")
 BALANCE_UPDATE_CHANNEL = os.getenv("BALANCE_UPDATE_CHANNEL")

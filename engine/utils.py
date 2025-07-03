@@ -1,38 +1,9 @@
 import json
 
-from collections import namedtuple
 from datetime import datetime
-from enum import Enum
-from typing import TypedDict
 from uuid import UUID
-
 from enums import Side, OrderStatus
 from .order import Order
-
-
-MatchResult = namedtuple(
-    "MatchResult",
-    (
-        "outcome",
-        "price",
-    ),
-)
-
-
-class EnginePayloadCategory(int, Enum):
-    """All categories of payloads to be sent to the engine"""
-
-    NEW = 0
-    MODIFY = 1
-    CLOSE = 2
-    CANCEL = 4
-
-
-class EnginePayload(TypedDict):
-    """Payload Schema for submitting requests to the engine"""
-
-    category: EnginePayloadCategory
-    content: dict
 
 
 def calc_sell_pl(amount: float, open_price: float, close_price: float) -> float:
@@ -63,6 +34,7 @@ def dump_obj(obj: dict) -> str:
     )
 
 
+# DANGER !!!
 def calculate_upl(order: Order, new_price: float, ob) -> None:
     """
     Calculates the Unrealised PnL for a given order.
@@ -79,12 +51,6 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
     if order.payload["filled_price"] is None:
         return
 
-    # print(
-    #     "Filled price:",
-    #     order.payload["filled_price"],
-    #     "Standing qty:",
-    #     order.payload["standing_quantity"],
-    # )
     pos_value = order.payload["filled_price"] * order.payload["standing_quantity"]
 
     if order.payload["side"] == Side.ASK:

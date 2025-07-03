@@ -75,7 +75,8 @@ async def listen_for_instruments(instruments: List[str], lock: asyncio.Lock) -> 
                 continue
 
             async with lock:
-                instruments.append(message["data"])
+                # instruments.append(message["data"])
+                _Instrument(**message["data"]).name
 
 
 async def handle_market_data_cache() -> None:
@@ -128,7 +129,7 @@ async def main() -> None:
         {"target": run_server, "name": "server"},
         {"target": run_engine, "args": (FuturesEngine,), "name": "futures engine"},
         {"target": run_engine, "args": (SpotEngine,), "name": "spot engine"},
-        {"target": run_market_data_cache, "name": "market data cache"},
+        # {"target": run_market_data_cache, "name": "market data cache"},
     ]
 
     ps = [multiprocessing.Process(**kwargs) for kwargs in ps_kwargs]

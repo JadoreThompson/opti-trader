@@ -7,22 +7,24 @@ from r_mutex import LockClient
 from typing import Callable, TypedDict
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
-from engine.position import Position
-from engine.position_manager import PositionManager
-from engine.typing import MatchOutcome
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
 from .enums import Tag
 from .order import Order
 from .orderbook import OrderBook
+from .position import Position
+from .position_manager import PositionManager
 from .pusher import Pusher
-from .utils import (
-    EnginePayload,
+from .typing import (
+    EnginePayload, 
     EnginePayloadCategory,
+    MatchResult,
+    MatchOutcome
+)
+from .utils import (    
     calc_sell_pl,
     calc_buy_pl,
     calculate_upl,
-    MatchResult,
 )
 
 
@@ -53,6 +55,7 @@ class FuturesEngine(BaseEngine):
             EnginePayloadCategory.MODIFY: self._handle_modify,
             EnginePayloadCategory.CLOSE: self._handle_close,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
+            EnginePayloadCategory.APPEND: self._handle_append_ob,
         }
 
         async with REDIS_CLIENT.pubsub() as ps:
@@ -61,8 +64,10 @@ class FuturesEngine(BaseEngine):
                 if message["type"] == "subscribe":
                     continue
 
-                payload: EnginePayload = json.loads(message["data"])
-                handlers[payload["category"]](json.loads(payload["content"]))
+                # payload: EnginePayload = json.loads(message["data"])
+                # handlers[payload["category"]](json.loads(payload["content"]))
+                payload = message['data']
+                handlers[payload["category"]](payload["content"])
 
     def place_order(self, payload: dict) -> None:
         """
@@ -350,3 +355,7 @@ class FuturesEngine(BaseEngine):
                 new_pos.order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
             self.pusher.append(new_pos.order.payload)
+
+    
+    def _handle_append_ob(self, data: dict) -> None:
+        self._order_books.setdefault(data['instrument'], OrderBook(data['price']))

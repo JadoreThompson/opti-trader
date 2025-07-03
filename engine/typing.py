@@ -25,6 +25,7 @@ class EnginePayloadCategory(int, Enum):
     MODIFY = 1
     CLOSE = 2
     CANCEL = 4
+    APPEND = 5
 
 
 class EnginePayload(TypedDict):

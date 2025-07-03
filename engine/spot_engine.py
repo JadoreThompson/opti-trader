@@ -15,12 +15,18 @@ from .exc import PositionNotFound
 from .order import Order
 from .orderbook.orderbook import OrderBook
 from .pusher import Pusher
-from .utils import (
+from .typing import (
+    EnginePayload, 
     EnginePayloadCategory,
-    EnginePayload,
+    MatchResult,
+    MatchOutcome
+)
+from .utils import (
+    # EnginePayloadCategory,
+    # EnginePayload,
     calc_buy_pl,
     calculate_upl,
-    MatchResult,
+    # MatchResult,
 )
 
 

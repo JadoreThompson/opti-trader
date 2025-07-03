@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import Optional
 from pydantic import field_serializer
+
+from services.typing import _Instrument
 from ...base import CustomBase
 
 
@@ -38,11 +40,6 @@ class OHLC(CustomBase):
     time: float
 
 
-class InstrumentObject(CustomBase):
-    name: str
-    price: float
-
-
 class PaginatedInstruments(CustomBase):
-    instruments: list[Optional[InstrumentObject]]
+    instruments: list[Optional[_Instrument]]
     has_next_page: bool
