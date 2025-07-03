@@ -6,7 +6,6 @@ from r_mutex import LockClient
 
 from enums import OrderStatus, Side
 from .enums import Tag
-from .exceptions import PositionNotFound
 from .order import Order
 from .orderbook.orderbook import OrderBook
 from .position import Position
@@ -27,7 +26,7 @@ class BaseEngine:
     ) -> None:
         self.instrument_lock = instrument_lock
         self.pusher = pusher
-        self._order_books: dict[str, OrderBook] = None
+        self._order_books: dict[str, OrderBook] = {}
 
     async def run(self, instruments: List[str]) -> None:
         """
@@ -74,21 +73,16 @@ class BaseEngine:
     ) -> MatchResult: ...
 
     @overload
-    def _handle_new(self, payload: dict) -> None: ...
+    def place_order(self, payload: dict) -> None: ...
 
     def _handle_modify(self, payload: dict) -> None:
         """
+        DONT USE !!!
         Handles the reassignment of values to an order within the orderbook
 
         Args:
             payload (dict)
         """
-        # try:
-        #     pos = self._order_books[payload["instrument"]].get(payload["order_id"])
-        #     ob = self._order_books[pos.order.payload["instrument"]]
-        # except PositionNotFound:
-        #     return
-
         pos = self._order_books[payload["instrument"]].get(payload["order_id"])
         if pos is None:
             return
@@ -110,16 +104,15 @@ class BaseEngine:
 
     def _handle_cancel(self, payload: CancelOrderPayload) -> None:
         """
+        DONT USE !!!
+        
         Removes the order from tracking and the book and submits a
         balance update, giving the user the position amount
         Args:
             payload (CancelOrderPayload): _description_
         """
-        try:
-            ob = self._order_books[payload["instrument"]]
-            pos = ob.get(payload["order_id"])
-        except PositionNotFound:
-            return
+        ob = self._order_books[payload["instrument"]]
+        pos = ob.get(payload["order_id"])
 
         if (
             pos.order.payload["status"] != OrderStatus.PENDING
@@ -169,8 +162,8 @@ class BaseEngine:
         pos: Position,
         new_limit_price: float,
     ) -> None:
+        """DONT USE !!!"""
         pos.order.payload["limit_price"] = new_limit_price
-        # ob = self._order_books[pos.order.payload["instrument"]]
         ob.remove(pos.order)
         ob.append(pos.order, new_limit_price)
 
@@ -182,6 +175,7 @@ class BaseEngine:
         new_stop_loss: float = None,
     ) -> None:
         """
+        DONT USE !!!
         Replacing of the position's entry, take profit and stop loss
         orders within the book to reflect the requested changes
 
@@ -201,7 +195,7 @@ class BaseEngine:
                 pos.take_profit = Order(
                     pos.order.payload,
                     Tag.TAKE_PROFIT,
-                    (Side.BUY if pos.order.payload["side"] == Side.SELL else Side.BUY),
+                    (Side.BID if pos.order.payload["side"] == Side.ASK else Side.BID),
                 )
 
             ob.append(pos.take_profit, new_take_profit)
@@ -216,7 +210,7 @@ class BaseEngine:
                 pos.stop_loss = Order(
                     pos.order.payload,
                     Tag.STOP_LOSS,
-                    (Side.BUY if pos.order.payload["side"] == Side.SELL else Side.BUY),
+                    (Side.BID if pos.order.payload["side"] == Side.ASK else Side.BID),
                 )
 
             ob.append(pos.stop_loss, new_stop_loss)

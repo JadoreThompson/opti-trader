@@ -1,4 +1,3 @@
-from typing import Optional
 from engine.enums import Tag
 from .order import Order
 
@@ -17,13 +16,18 @@ class Position:
         instrument (str): The instrument associated with the position.
     """
 
-    def __init__(self, order: Order) -> None:
+    def __init__(
+        self,
+        order: Order,
+        stop_loss: Order | None = None,
+        take_profit: Order | None = None,
+    ) -> None:
         if order.tag != Tag.ENTRY:
             raise ValueError("Order must be of type ENTRY to create a Position.")
         self._instrument = order.payload["instrument"]
         self._order = order
-        self.stop_loss: Optional[Order] = None
-        self.take_profit: Optional[Order] = None
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
 
     @property
     def order(self) -> Order:

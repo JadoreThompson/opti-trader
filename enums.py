@@ -14,8 +14,8 @@ class OrderType(str, Enum):
 
 
 class Side(str, Enum):
-    BUY = "buy"
-    SELL = "sell"
+    BID = "bid"
+    ASK = "ask"
 
 
 class OrderStatus(str, Enum):

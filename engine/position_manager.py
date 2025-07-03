@@ -1,4 +1,5 @@
-from engine.order import Order
+from .enums import Tag
+from .order import Order
 from .position import Position
 
 
@@ -7,11 +8,20 @@ class PositionManager:
         self._positions: dict[str, Position] = {}
 
     def create(self, order: Order) -> Position:
-        if order.tag != "ENTRY":
+        if order.tag != Tag.ENTRY:
             raise ValueError("Order must be of type ENTRY to create a Position.")
+
+        if order.payload["order_id"] in self._positions:
+            raise ValueError(
+                f"Order with order id {order.payload["order_id"]} already exists."
+            )
+
         pos = Position(order)
         self._positions[order.payload["order_id"]] = pos
         return pos
 
     def get(self, order_id: str) -> Position | None:
         return self._positions.get(order_id)
+
+    def remove(self, order_id: str) -> None:
+        self._positions.pop(order_id)

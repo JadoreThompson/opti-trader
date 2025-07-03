@@ -1,11 +1,18 @@
+import asyncio
+
+# IN CONSTRUCTION
 class PriceManager:
     def __init__(self, orderbook: OrderBook):
         self.orderbook = orderbook
         self._current_price = 0.0
 
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task()
+
     async def update_price(self, price: float):
         self._current_price = price
-        
+
     async def _publish_price(
         self,
     ) -> None:
@@ -45,30 +52,3 @@ class PriceManager:
 
             asyncio.create_task(self._update_upl(price))
             await asyncio.sleep(self._price_delay)
-
-    async def _update_upl(self, price: float) -> None:
-        """
-        Updates upl for all filled and partially filled orders
-        within the tracker
-
-        Args:
-            price (float)
-        """
-        if self._tracker:
-            tracker_copy = self._tracker.copy()
-            for _, pos in tracker_copy.items():
-                if pos.order.payload["status"] in (
-                    OrderStatus.FILLED,
-                    OrderStatus.PARTIALLY_CLOSED,
-                ):
-                    calculate_upl(pos.order, price, self)
-                    self._pusher.append(pos.order.payload, speed="fast")
-
-                    if pos.order.payload["status"] == OrderStatus.CLOSED:
-                        self._pusher.append(
-                            {
-                                "user_id": pos.order.payload["user_id"],
-                                "amount": pos.order.payload["realised_pnl"],
-                            },
-                            "balance",
-                        )

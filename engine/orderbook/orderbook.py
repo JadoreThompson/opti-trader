@@ -1,11 +1,10 @@
 from sortedcontainers.sorteddict import SortedDict
 from typing import Iterable, KeysView, Literal
 
-from .orderbook_item import OrderbookItem
 from enums import Side
-from ..enums import Tag
-from ..exceptions import PositionNotFound
+from .orderbook_item import OrderbookItem
 from .node import Node
+from ..enums import Tag
 from ..order import Order
 from ..position import Position
 
@@ -34,17 +33,18 @@ class OrderBook:
         _tracker (dict[str, Position]): Tracks positions associated with order IDs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, price=100) -> None:
         self._bids: dict[float, OrderbookItem] = SortedDict()
         self._asks: dict[float, OrderbookItem] = SortedDict()
         self._bid_levels = self._bids.keys()
         self._ask_levels = self._asks.keys()
         self._best_bid_price = None
         self._best_ask_price = None
-        self._cur_price = 0.0
+        self._starting_price = price
+        self._cur_price = price
         self._tracker: dict[str, Position] = {}
 
-    def append(self, order: Order, price: float) -> Position:
+    def append(self, order: Order, price: float | None = None) -> None:
         """
         Appends order to tracking and to the book
 
@@ -52,26 +52,22 @@ class OrderBook:
             order (Order)
             price (float) - Price level to be appended to
         """
-        pos: Position | None = self.get(order.payload["order_id"])
-
-        if pos is not None:
-            if order.tag == Tag.TAKE_PROFIT:
-                pos.take_profit = order
-            else:
-                pos.stop_loss = order
+        if price is not None:
+            price = round(price, 2)
         else:
-            if order.tag != Tag.ENTRY:
-                raise ValueError("Cannot append non-entry order without a position.")
+            price = self._cur_price
 
-            pos = Position(order)
-            self._tracker[order.payload["order_id"]] = pos
-
-        if order.side == Side.BUY:
+        if order.side == Side.BID:
             ob_item = self._bids.setdefault(price, OrderbookItem())
-        elif order.side == Side.SELL:
+        elif order.side == Side.ASK:
             ob_item = self._asks.setdefault(price, OrderbookItem())
         else:
             raise ValueError(f"Invalid order side: {order.side}")
+
+        if order.payload["order_id"] in ob_item.tracker:
+            raise ValueError(
+                f"Order with id {order.payload['order_id']} already on level."
+            )
 
         new_node = Node(order)
         head = ob_item.head
@@ -86,9 +82,7 @@ class OrderBook:
 
         ob_item.tracker[order.payload["order_id"]] = new_node
 
-        return pos
-
-    def remove(self, order: Order) -> None:
+    def remove(self, order: Order, price: float) -> None:
         """
         Removes an order from the price level it situates. To be used
         when an order isn't in the filled state since it won't be situated
@@ -98,29 +92,11 @@ class OrderBook:
         Args:
             order (Order)
         """
-        if order.tag == Tag.ENTRY:
-            price = order.payload["limit_price"] or order.payload["price"]
-        elif order.tag == Tag.TAKE_PROFIT:
-            price = order.payload["take_profit"]
-        elif order.tag == Tag.STOP_LOSS:
-            price = order.payload["stop_loss"]
-        else:
-            raise ValueError(f"Invalid order tag: {order.tag}")
-
-        if order.side == Side.BUY:
-            ob_item = self._bids.get(price)
-            if ob_item is None:
-                return
-
-            orders_node = ob_item.tracker[order.payload["order_id"]]
+        if order.side == Side.BID:
+            ob_item = self._bids[price]
             book = self._bids
-
-        elif order.side == Side.SELL:
-            ob_item = self._asks.get(price)
-            if ob_item is None:
-                return
-
-            orders_node = ob_item.tracker[order.payload["order_id"]]
+        elif order.side == Side.ASK:
+            ob_item = self._asks[price]
             book = self._asks
 
         # Remove the order from the tracker
@@ -143,36 +119,15 @@ class OrderBook:
         orders_node.next = None
         ob_item.tracker.pop(order.payload["order_id"], None)
 
-        if ob_item.head is None:
+        if ob_item.head is None and len(book) > 1:
             book.pop(price, None)
 
         # Invalidation
-        if self._best_bid_price == price:
+        if self._best_bid_price == price and self._bids.get(price) is None:
             self._best_bid_price = None
-        if self._best_ask_price == price:
+
+        if self._best_ask_price == price and self._asks.get(price) is None:
             self._best_ask_price = None
-
-    def remove_all(self, order: Order) -> Position | None:
-        """
-        Removes the order and it's counterparts both from the
-        tracker and their corresponding price levels
-
-        Args:
-            order (Order)
-        Returns:
-            Position or None: Returns the position object if it exists, otherwise None.
-        """
-        pos: Position | None = self._tracker.pop(order.payload["order_id"], None)
-        if pos is None:
-            return
-
-        self.remove(order)
-
-        if pos.take_profit is not None:
-            self.remove(pos.take_profit)
-        if pos.stop_loss is not None:
-            self.remove(pos.stop_loss)
-        return pos
 
     def get(self, order_id: str) -> Position | None:
         """
@@ -201,10 +156,7 @@ class OrderBook:
                 "Cannot track an entry order directly. Use append instead."
             )
 
-        pos = self._tracker.get(order.payload["order_id"])
-
-        if not pos:
-            raise PositionNotFound("Position not found for the given order ID.")
+        pos = self._tracker[order.payload["order_id"]]
 
         if order.tag == Tag.STOP_LOSS:
             pos.stop_loss = order
@@ -214,6 +166,8 @@ class OrderBook:
         return pos
 
     def set_price(self, price: float) -> None:
+        price = round(price, 2)
+        self._cur_price = price
         self._best_bid_price = self._find_best_bid(price)
         self._best_ask_price = self._find_best_ask(price)
 
@@ -225,21 +179,21 @@ class OrderBook:
             bid_price = self._bids.peekitem(i)[0]
 
             if self._bids[bid_price].head is not None:
-                return bid_price
+                return round(bid_price, 2)
 
-        return None
+        return price
 
     def _find_best_ask(self, price: float) -> float | None:
         """Find lowest ask price >= current price that has orders"""
-        idx = self._asks.bisect_left(price)
+        idx = self._asks.bisect_right(price)
 
         for i in range(idx, len(self._asks)):
             ask_price = self._asks.peekitem(i)[0]
 
             if self._asks[ask_price].head is not None:
-                return ask_price
+                return round(ask_price, 2)
 
-        return None
+        return price
 
     def get_orders(self, price: float, book: Book) -> Iterable[Order] | None:
         if book not in ("bids", "asks"):
@@ -255,18 +209,6 @@ class OrderBook:
 
         while cur:
             yield cur.order
-            cur = cur.next
-
-    def get_bids(self, price: float) -> Iterable[Order] | None:
-        if price not in self._bids:
-            return
-
-        ob_item = self._bids[price]
-        cur = ob_item.head
-
-        while ob_item.head:
-            yield cur.order
-            ob_item.head = cur.next
             cur = cur.next
 
     @property
@@ -296,14 +238,3 @@ class OrderBook:
         if self._best_ask_price is None:
             self._best_ask_price = self._find_best_ask(self._cur_price)
         return self._best_ask_price
-
-    # def __getitem__(self, book: Book) -> dict:
-    #     if book not in ("bids", "asks"):
-    #         raise ValueError(f"Invalid book type: {book}. Must be 'bids' or 'asks'.")
-    #     return self._bids if book == "bids" else self.asks
-
-    def __str__(self) -> str:
-        return self.__repr__()
-
-    def __repr__(self) -> str:
-        return f"Orderbook({self.instrument}, price={self.price}, bids={sum(len(self._bids[key]) for key in self._bids)}, asks={sum(len(self.asks[key]) for key in self.asks)})"

@@ -1,3 +1,5 @@
+import trace
+import traceback
 import os
 import logging
 import sys
@@ -15,23 +17,14 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 load_dotenv()
 
-BASE_PATH = os.getcwd()
-DEV_MODE = False
-
-logger = logging.getLogger()
 logging.basicConfig(
     filename="app.log",
     level=logging.INFO,
     format="[%(levelname)s][%(asctime)s] %(name)s - %(funcName)s - %(message)s",
 )
 
-def handle_exc(exc_type, exc_value, tcb):
-    """Global Exception Handler"""
-    if not issubclass(exc_type, KeyboardInterrupt):
-        logging.error("Uncaught Exc - ", exc_info=(exc_type, exc_value, tcb))
-        print(exc_type, exc_value)
-        
-sys.excepthook = handle_exc
+BASE_PATH = os.getcwd()
+DEV_MODE = False
 
 
 # DB
@@ -62,11 +55,10 @@ ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
 INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
 
 
-### 
+###
 PH = argon2.PasswordHasher(
     time_cost=int(os.getenv("TIME_COST")),
     memory_cost=int(os.getenv("MEMORY_COST")),
     parallelism=int(os.getenv("PARALLELISM")),
 )
-
 DB_LOCK = LockClient(REDIS_CLIENT, ORDER_LOCK_PREFIX, is_manager=False)

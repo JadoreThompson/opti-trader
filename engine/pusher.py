@@ -15,6 +15,7 @@ from utils.db import get_db_session
 from .utils import dump_obj
 
 
+# IN CONSTRUCTION
 class Pusher:
     """
     Consolidates updates to records within the database and publishes them to the pubsub

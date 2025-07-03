@@ -37,10 +37,10 @@ class OrderWrite(CustomBase):
             raise ValueError("TP and SL cannot have the same value")
 
         if tp and sl:
-            if value == Side.SELL:
+            if value == Side.ASK:
                 if tp > sl:
                     raise ValueError("SL must be greater than TP")
-            if value == Side.BUY:
+            if value == Side.BID:
                 if sl > tp:
                     raise ValueError("TP must be greater than SL")
 
@@ -49,16 +49,16 @@ class OrderWrite(CustomBase):
     @field_validator("side")
     def validate_side(cls, value: Side, values: ValidationInfo) -> Side:
         if values.data.get("market_type") == MarketType.SPOT:
-            value = Side.BUY
+            value = Side.BID
         return value
 
 
 class OrderWriteResponse(CustomBase):
-    balance: float # The new balance after deductions
-    
-    @field_serializer('balance')
+    balance: float  # The new balance after deductions
+
+    @field_serializer("balance")
     def balance_formatter(self, value: float) -> str:
-        return f"{round(value, 2):.2f}"        
+        return f"{round(value, 2):.2f}"
 
 
 class OrderRead(CustomBase):

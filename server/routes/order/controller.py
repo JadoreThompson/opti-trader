@@ -53,7 +53,7 @@ def validate_order_details(
         except TypeError:
             raise ValueError("Missing balance")
 
-    if req.side == Side.SELL:
+    if req.side == Side.ASK:
         if req.limit_price is not None:
             if req.limit_price <= price:
                 raise ValueError("Limit price must be greater than market price")
@@ -64,7 +64,7 @@ def validate_order_details(
             if req.stop_loss <= price:
                 raise ValueError("SL must be greater than market price")
 
-    if req.side == Side.BUY:
+    if req.side == Side.BID:
         if req.limit_price is not None:
             if req.limit_price >= price:
                 raise ValueError("Limit price must be less than market price")

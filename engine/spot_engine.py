@@ -11,7 +11,7 @@ from config import SPOT_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
 from .enums import Tag
-from .exceptions import PositionNotFound
+from .exc import PositionNotFound
 from .order import Order
 from .orderbook.orderbook import OrderBook
 from .pusher import Pusher
@@ -30,7 +30,7 @@ class SpotCloseOrderPayload(TypedDict):
     instrument: str
     price: float
 
-
+# IN CONSTRUCTION
 class SpotEngine(BaseEngine):
     def __init__(self, instrument_lock: LockClient, pusher: Pusher) -> None:
         super().__init__(instrument_lock, pusher)
@@ -41,7 +41,7 @@ class SpotEngine(BaseEngine):
         await asyncio.sleep(0)
 
         handlers: dict[EnginePayloadCategory, Callable] = {
-            EnginePayloadCategory.NEW: self._handle_new,
+            EnginePayloadCategory.NEW: self.place_order,
             EnginePayloadCategory.MODIFY: self._handle_modify,
             EnginePayloadCategory.CLOSE: self._handle_close,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
@@ -166,7 +166,7 @@ class SpotEngine(BaseEngine):
         """
         touched: list[Order] = []
         filled: list[tuple[Order, int]] = []
-        book = "asks" if order_side == Side.BUY else "bids"
+        book = "asks" if order_side == Side.BID else "bids"
         target_price = ob.best_price(book, price)
 
         if target_price is None:
@@ -207,7 +207,7 @@ class SpotEngine(BaseEngine):
 
         return MatchResult(1, None)
 
-    async def _handle_new(self, payload: dict) -> None:
+    async def place_order(self, payload: dict) -> None:
         """
         Handles the result of a new order by matching it against the order book.
         Depending on the order type (market or limit), the order is either
@@ -221,7 +221,7 @@ class SpotEngine(BaseEngine):
         """
 
         ob = self._order_books[payload["instrument"]]
-        order = Order(payload, Tag.ENTRY, Side.BUY)
+        order = Order(payload, Tag.ENTRY, Side.BID)
 
         func: dict[OrderType, Callable] = {
             OrderType.MARKET: self._handle_market_order,
@@ -252,7 +252,7 @@ class SpotEngine(BaseEngine):
         self.pusher.append(payload)
 
     def _handle_market_order(self, order: Order, ob: OrderBook) -> MatchResult:
-        return self._match(order.payload, Side.BUY, ob, order.payload["price"])
+        return self._match(order.payload, Side.BID, ob, order.payload["price"])
 
     def _handle_limit_order(self, order: Order, ob: OrderBook) -> None:
         ob.append(order, order.payload["limit_price"])
@@ -273,7 +273,7 @@ class SpotEngine(BaseEngine):
                 Order(
                     order.payload,
                     Tag.TAKE_PROFIT,
-                    Side.SELL,
+                    Side.ASK,
                 ),
                 order.payload["take_profit"],
             )
@@ -283,7 +283,7 @@ class SpotEngine(BaseEngine):
                 Order(
                     order.payload,
                     Tag.STOP_LOSS,
-                    Side.SELL,
+                    Side.ASK,
                 ),
                 order.payload["stop_loss"],
             )
@@ -317,7 +317,7 @@ class SpotEngine(BaseEngine):
             }
 
             result: MatchResult = self._match(
-                dummy_order, Side.SELL, ob, execution_price
+                dummy_order, Side.ASK, ob, execution_price
             )
 
             cleared_quantity: int = (

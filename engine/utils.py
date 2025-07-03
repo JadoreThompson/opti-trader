@@ -37,12 +37,18 @@ class EnginePayload(TypedDict):
 
 def calc_sell_pl(amount: float, open_price: float, close_price: float) -> float:
     """Returns the new value of the amount for sell order"""
-    return round(amount * (1 + (open_price - close_price) / open_price), 2)
+    try:
+        return round(amount * (1 + (open_price - close_price) / open_price), 2)
+    except ZeroDivisionError:
+            return 0.0
 
 
 def calc_buy_pl(amount: float, open_price: float, close_price: float) -> float:
     """Returns the new value of the amount for buy order"""
-    return round((close_price / open_price) * amount, 2)
+    try:
+        return round((close_price / open_price) * amount, 2)
+    except ZeroDivisionError:
+        return 0.0
 
 
 def dump_obj(obj: dict) -> str:
@@ -73,9 +79,15 @@ def calculate_upl(order: Order, new_price: float, ob) -> None:
     if order.payload["filled_price"] is None:
         return
 
+    # print(
+    #     "Filled price:",
+    #     order.payload["filled_price"],
+    #     "Standing qty:",
+    #     order.payload["standing_quantity"],
+    # )
     pos_value = order.payload["filled_price"] * order.payload["standing_quantity"]
 
-    if order.payload["side"] == Side.SELL:
+    if order.payload["side"] == Side.ASK:
         upl = calc_sell_pl(
             pos_value,
             order.payload["filled_price"],

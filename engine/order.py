@@ -1,3 +1,6 @@
+from datetime import datetime
+import json
+from uuid import UUID
 from enums import Side
 from .enums import Tag
 
@@ -34,4 +37,11 @@ class Order:
         return self.__repr__()
 
     def __repr__(self) -> str:
-        return f"Order(id={self._payload['order_id']}, instrument={self._payload['instrument']}, side={self._side}, tag={self._tag})"
+        return f"""Order(
+            id={self._payload['order_id']}, 
+            instrument={self._payload['instrument']}, 
+            side={self._side}, 
+            tag={self._tag}, 
+            payload={json.dumps(
+        {k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in self.payload.items()}, indent=4
+    )}"""
