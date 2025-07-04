@@ -8,8 +8,8 @@ from config import DB_LOCK, REDIS_CLIENT, SPOT_QUEUE_KEY, FUTURES_QUEUE_KEY
 from db_models import Orders, Users
 from enums import MarketType, OrderStatus, OrderType, Side
 from engine.utils import EnginePayloadCategory, dump_obj
-from engine.futures_engine import FuturesCloseOrderPayload
-from engine.spot_engine import SpotCloseOrderPayload
+from engine.matching_engines.futures_engine import CloseOrderPayload
+from engine.matching_engines.spot_engine import SpotCloseOrderPayload
 from utils.db import get_db_session
 from .models import FuturesCloseOrder, OrderWrite, SpotCloseOrder
 
@@ -263,6 +263,6 @@ async def get_spot_close_order_details(
 
 async def enter_close_order(
     market_type: MarketType,
-    details: FuturesCloseOrderPayload | SpotCloseOrderPayload,
+    details: CloseOrderPayload | SpotCloseOrderPayload,
 ) -> None:
     await submit_to_engine(market_type, EnginePayloadCategory.CLOSE, details)

@@ -25,13 +25,13 @@ class Position:
         if order.tag != Tag.ENTRY:
             raise ValueError("Order must be of type ENTRY to create a Position.")
         self._instrument = order.payload["instrument"]
-        self._order = order
-        self.stop_loss = stop_loss
-        self.take_profit = take_profit
+        self._entry_order = order
+        self.stop_loss_order = stop_loss
+        self.take_profit_order = take_profit
 
     @property
-    def order(self) -> Order:
-        return self._order
+    def entry_order(self) -> Order:
+        return self._entry_order
 
     @property
     def instrument(self) -> str:
@@ -41,4 +41,4 @@ class Position:
         return self.__repr__()
 
     def __repr__(self) -> str:
-        return f"Position(order=({self.order}), sl=({self.stop_loss}), tp=({self.take_profit}))"
+        return f"Position(order=({self.entry_order}), sl=({self.stop_loss_order}), tp=({self.take_profit_order}))"

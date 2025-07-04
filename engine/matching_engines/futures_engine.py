@@ -9,29 +9,22 @@ from typing import Callable, TypedDict
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
-from .enums import Tag
-from .order import Order
-from .orderbook import OrderBook
-from .position import Position
-from .position_manager import PositionManager
-from .pusher import Pusher
-from .typing import (
-    EnginePayload, 
-    EnginePayloadCategory,
-    MatchResult,
-    MatchOutcome
-)
-from .utils import (    
-    calc_sell_pl,
-    calc_buy_pl,
+from ..enums import Tag
+from ..order import Order
+from ..orderbook import OrderBook
+from ..position import Position
+from ..position_manager import PositionManager
+from ..pusher import Pusher
+from ..typing import EnginePayload, EnginePayloadCategory, MatchResult, MatchOutcome
+from ..utils import (
+    calc_sell_pnl,
+    calc_buy_pnl,
     calculate_upl,
 )
 
 
-class FuturesCloseOrderPayload(TypedDict):
+class CloseOrderPayload(TypedDict):
     order_id: str
-    instrument: str
-    price: float
 
 
 class FuturesEngine(BaseEngine):
@@ -53,7 +46,7 @@ class FuturesEngine(BaseEngine):
         handlers: dict[EnginePayloadCategory, Callable] = {
             EnginePayloadCategory.NEW: self.place_order,
             EnginePayloadCategory.MODIFY: self._handle_modify,
-            EnginePayloadCategory.CLOSE: self._handle_close,
+            EnginePayloadCategory.CLOSE: self.close_order,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
             EnginePayloadCategory.APPEND: self._handle_append_ob,
         }
@@ -66,8 +59,58 @@ class FuturesEngine(BaseEngine):
 
                 # payload: EnginePayload = json.loads(message["data"])
                 # handlers[payload["category"]](json.loads(payload["content"]))
-                payload = message['data']
+                payload = message["data"]
                 handlers[payload["category"]](payload["content"])
+
+    def _collapse_order(self, order_id: str, ob: OrderBook | None = None) -> None:
+        pos = self._position_manager.get(order_id)
+
+        if ob is None:
+            ob = self._order_books[pos.instrument]
+
+        order = pos.entry_order
+        payload = pos.entry_order.payload
+
+        if payload["status"] in (
+            OrderStatus.PENDING,
+            OrderStatus.PARTIALLY_FILLED,
+        ) and (
+            payload["limit_price"] is not None
+            or payload["filled_price"] is not None
+            or order.tmp_price is not None
+        ):
+            ob.remove(
+                order,
+                order.payload["limit_price"]
+                or payload["filled_price"]
+                or order.tmp_price,
+            )
+
+        if pos.take_profit_order:
+            ob.remove(pos.take_profit_order, order.payload["take_profit"])
+            pos.take_profit_order = None
+
+        if pos.stop_loss_order:
+            ob.remove(pos.stop_loss_order, order.payload["stop_loss"])
+            pos.stop_loss_order = None
+
+        self._position_manager.remove(order_id)
+
+    def _collapse_exit_orders(
+        self, order: Order, ob: OrderBook, pos: Position | None = None
+    ):
+        if order.tag == Tag.ENTRY:
+            raise ValueError("Cannot be called with order that has Tag.ENTRY.")
+
+        if pos is None:
+            pos = self._position_manager.get(order.payload["order_id"])
+
+        if pos.take_profit_order and pos.take_profit_order is not order:
+            ob.remove(pos.take_profit_order, order.payload["take_profit"])
+            pos.take_profit_order = None
+        if pos.stop_loss_order and pos.stop_loss_order is not order:
+            ob.remove(pos.stop_loss_order, order.payload["stop_loss"])
+            pos.stop_loss_order = None
 
     def place_order(self, payload: dict) -> None:
         """
@@ -90,19 +133,61 @@ class FuturesEngine(BaseEngine):
 
         if result.outcome == MatchOutcome.SUCCESS:
             ob.set_price(result.price)
-            
+
             payload["status"] = OrderStatus.FILLED
             payload["standing_quantity"] = payload["quantity"]
-            payload["filled_price"] = result.price            
-            
+            payload["filled_price"] = result.price
+
             self._position_manager.create(order)
             self._place_tp_sl(order, ob)
         else:
             ob.append(order, result.price)
             if payload["standing_quantity"] != payload["quantity"]:
                 payload["status"] = OrderStatus.PARTIALLY_FILLED
+            order.tmp_price = result.price
 
         self.pusher.append(payload)
+
+    def close_order(self, data: CloseOrderPayload) -> None:
+        """
+        DO NOT CALL!!!
+        Handles the result from attempting to match the order
+        in order to close it
+
+        Args:
+            payload (dict)
+        """
+        order_id = data["order_id"]
+        pos = self._position_manager.get(order_id)
+
+        order = pos.entry_order
+        ob = self._order_books[pos.instrument]
+        prev_stpos_value: float = (
+            order.payload["standing_quantity"] * order.payload["filled_price"]
+        )
+        result: MatchResult = self._match(order, ob)
+
+        if result.outcome == MatchOutcome.SUCCESS:
+            ob.set_price(result.price)
+            self._collapse_order(order.payload["order_id"], ob)
+
+            order.payload["status"] = OrderStatus.CLOSED
+            order.payload["closed_at"] = datetime.now()
+            order.payload["closed_price"] = result.price
+
+            calc_pl_fn = calc_buy_pnl if order.side == Side.BID else calc_sell_pnl
+            order.payload["realised_pnl"] += calc_pl_fn(
+                prev_stpos_value,
+                order.payload["filled_price"],
+                result.price,
+            )
+
+            order.payload["standing_quantity"] = 0
+            order.payload["unrealised_pnl"] = 0.0
+
+        else:
+            if order.payload["standing_quantity"] != order.payload["quantity"]:
+                order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
     def _match(self, order: Order, ob: OrderBook) -> MatchResult:
         """
@@ -133,6 +218,9 @@ class FuturesEngine(BaseEngine):
         for resting_order in ob.get_orders(target_price, book_to_match):
             if aggresive_payload["standing_quantity"] == 0:
                 break
+
+            if resting_order == order:
+                continue
 
             og_resting_qty = resting_order.payload["standing_quantity"]
             match_qty = min(og_resting_qty, aggresive_payload["standing_quantity"])
@@ -173,20 +261,20 @@ class FuturesEngine(BaseEngine):
             raise ValueError("Cannot place tp or sl without position.")
 
         if order.payload["take_profit"] is not None:
-            pos.take_profit = Order(
+            pos.take_profit_order = Order(
                 order.payload,
                 Tag.TAKE_PROFIT,
                 Side.ASK if order.side == Side.BID else Side.BID,
             )
-            ob.append(pos.take_profit, order.payload["take_profit"])
+            ob.append(pos.take_profit_order, order.payload["take_profit"])
 
         if order.payload["stop_loss"] is not None:
-            pos.stop_loss = Order(
+            pos.stop_loss_order = Order(
                 order.payload,
                 Tag.STOP_LOSS,
                 Side.ASK if order.side == Side.BID else Side.BID,
             )
-            ob.append(pos.stop_loss, order.payload["stop_loss"])
+            ob.append(pos.stop_loss_order, order.payload["stop_loss"])
 
     def _handle_filled_orders(
         self, orders: Iterable[tuple[Order, int]], price: float, ob: OrderBook
@@ -212,13 +300,9 @@ class FuturesEngine(BaseEngine):
                 self._place_tp_sl(order, ob)
                 calculate_upl(order, price, ob)
             else:
-                pos = self._position_manager.get(order.payload['order_id'])
-                if pos.take_profit and pos.take_profit != order:
-                    ob.remove(pos.take_profit, order.payload['take_profit'])
-                if pos.stop_loss and pos.stop_loss != order:
-                    ob.remove(pos.stop_loss, order.payload['stop_loss'])
-                    
+                self._collapse_exit_orders(order, ob)
                 self._position_manager.remove(order.payload["order_id"])
+
                 order.payload["status"] = OrderStatus.CLOSED
                 order.payload["closed_at"] = datetime.now()
                 order.payload["unrealised_pnl"] = 0.0
@@ -226,13 +310,13 @@ class FuturesEngine(BaseEngine):
                 order.payload["closed_price"] = price
 
                 if order.payload["side"] == Side.BID:
-                    order.payload["realised_pnl"] += calc_buy_pl(
+                    order.payload["realised_pnl"] += calc_buy_pnl(
                         order.payload["filled_price"] * standing_quantity,
                         order.payload["filled_price"],
                         price,
                     )
                 else:
-                    order.payload["realised_pnl"] += calc_sell_pl(
+                    order.payload["realised_pnl"] += calc_sell_pnl(
                         order.payload["filled_price"] * standing_quantity,
                         order.payload["filled_price"],
                         price,
@@ -267,21 +351,13 @@ class FuturesEngine(BaseEngine):
         """
         for order, standing_qty in orders:
             if order.tag == Tag.ENTRY:
-                if order.payload["standing_quantity"] > 0:
-                    order.payload["status"] = OrderStatus.PARTIALLY_FILLED
-                else:
-                    filled_orders.append((order, order.payload["standing_quantity"]))
-                continue
+                order.payload["status"] = OrderStatus.PARTIALLY_FILLED
             else:
                 order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
-            calculate_upl(order, price, ob)
+                if calculate_upl(order, price, ob):
+                    filled_orders.append((order, standing_qty))
 
-            if order.payload["status"] == OrderStatus.FILLED:
-                filled_orders.append((order, standing_qty))
-                continue
-
-            if order.payload["status"] == OrderStatus.CLOSED:
                 self.pusher.append(
                     {
                         "user_id": order.payload["user_id"],
@@ -292,70 +368,5 @@ class FuturesEngine(BaseEngine):
 
             self.pusher.append(order.payload)
 
-    def _handle_close(self, payload: FuturesCloseOrderPayload) -> None:
-        """
-        DO NOT CALL!!!
-        Handles the result from attempting to match the order
-        in order to close it
-
-        Args:
-            payload (dict)
-        """
-        ob = self._order_books[payload["instrument"]]
-        pos = ob.get(payload["order_id"])
-
-        if pos is None:
-            return
-
-        ob.remove_all(pos.order)
-        before_standing_quantity: int = pos.order.payload["standing_quantity"]
-        result: MatchResult = self._match(
-            pos.order.payload,
-            Side.ASK if pos.order.side == Side.BID else Side.ASK,
-            ob,
-            payload["price"],
-        )
-
-        if result.outcome == 2:
-            ob.set_price(result.price)
-            pos.order.payload["status"] = OrderStatus.CLOSED
-            pos.order.payload["closed_at"] = datetime.now()
-            pos_value: float = (
-                before_standing_quantity * pos.order.payload["filled_price"]
-            )
-            calc_pl_fn = calc_buy_pl if pos.order.side == Side.BID else calc_sell_pl
-            pos.order.payload["realised_pnl"] += calc_pl_fn(
-                pos_value,
-                pos.order.payload["filled_price"],
-                result.price,
-            )
-
-            pos.order.payload["standing_quantity"] = pos.order.payload[
-                "unrealised_pnl"
-            ] = 0.0
-            self.pusher.append(pos.order.payload, speed="fast")
-            self.pusher.append(
-                {
-                    "user_id": pos.order.payload["user_id"],
-                    "amount": pos.order.payload["realised_pnl"],
-                }
-            )
-        else:
-            new_pos = ob.append(pos.order, payload["price"])
-
-            if pos.take_profit is not None:
-                ob.append(pos.take_profit, payload["price"])
-            if pos.stop_loss is not None:
-                ob.append(pos.stop_loss, payload["price"])
-
-            if (
-                new_pos.order.payload["standing_quantity"]
-                != new_pos.order.payload["quantity"]
-            ):
-                new_pos.order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
-
-            self.pusher.append(new_pos.order.payload)
-
-    
     def _handle_append_ob(self, data: dict) -> None:
-        self._order_books.setdefault(data['instrument'], OrderBook(data['price']))
+        self._order_books.setdefault(data["instrument"], OrderBook(data["price"]))

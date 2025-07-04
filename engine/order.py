@@ -1,5 +1,5 @@
-from datetime import datetime
 import json
+from datetime import datetime
 from uuid import UUID
 from enums import Side
 from .enums import Tag
@@ -20,6 +20,7 @@ class Order:
         self._payload = payload
         self._tag = tag
         self._side = side
+        self.tmp_price = None
 
     @property
     def tag(self) -> Tag:
@@ -32,6 +33,12 @@ class Order:
     @property
     def payload(self) -> dict:
         return self._payload
+    
+    def __eq__(self, value: "Order") -> bool:
+        if not isinstance(value, self.__class__):
+            raise TypeError(f"Cannot perform __eq__ between type {self.__class__} and {type(value)}")
+
+        return self.payload['order_id'] == value.payload['order_id']
 
     def __str__(self) -> str:
         return self.__repr__()

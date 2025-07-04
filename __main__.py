@@ -16,11 +16,8 @@ from config import (
     DB_URL,
 )
 from db_models import Instruments
-from server.routes.instrument.utils import cache_market_data
-from engine.base_engine import BaseEngine
-from engine.futures_engine import FuturesEngine
 from engine.pusher import Pusher
-from engine.spot_engine import SpotEngine
+from engine import BaseEngine, FuturesEngine, SpotEngine
 from utils.db import get_db_session, remove_sqlalchemy_url, write_sqlalchemy_url
 
 

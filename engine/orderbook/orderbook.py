@@ -33,7 +33,7 @@ class OrderBook:
         _tracker (dict[str, Position]): Tracks positions associated with order IDs.
     """
 
-    def __init__(self, price=100) -> None:
+    def __init__(self, price=100.0) -> None:
         self._bids: dict[float, OrderbookItem] = SortedDict()
         self._asks: dict[float, OrderbookItem] = SortedDict()
         self._bid_levels = self._bids.keys()
@@ -42,7 +42,7 @@ class OrderBook:
         self._best_ask_price = None
         self._starting_price = price
         self._cur_price = price
-        self._tracker: dict[str, Position] = {}
+        self._pos_tracker: dict[str, Position] = {}
 
     def append(self, order: Order, price: float | None = None) -> None:
         """
@@ -52,6 +52,7 @@ class OrderBook:
             order (Order)
             price (float) - Price level to be appended to
         """
+        # print(locals())
         if price is not None:
             price = round(price, 2)
         else:
@@ -131,17 +132,18 @@ class OrderBook:
 
     def get(self, order_id: str) -> Position | None:
         """
+        DO NOT CALL !!!
         Retrieves the position object belonging to the order_id
-
         Args:
             order_id (str)
         Returns:
             Position or None: Returns the position object if it exists, otherwise None.
         """
-        return self._tracker.get(order_id)
+        return self._pos_tracker.get(order_id)
 
     def track(self, order: Order) -> Position:
         """
+        DO NOT CALL !!!
         Appends an order to the tracker. If this is a take profit or stop loss
         order, it's appended to the position.
 
@@ -156,12 +158,12 @@ class OrderBook:
                 "Cannot track an entry order directly. Use append instead."
             )
 
-        pos = self._tracker[order.payload["order_id"]]
+        pos = self._pos_tracker[order.payload["order_id"]]
 
         if order.tag == Tag.STOP_LOSS:
-            pos.stop_loss = order
+            pos.stop_loss_order = order
         else:
-            pos.take_profit = order
+            pos.take_profit_order = order
 
         return pos
 
@@ -235,6 +237,14 @@ class OrderBook:
 
     @property
     def best_ask(self) -> float | None:
+        # print("lll", self.asks[self._best_ask_price])
         if self._best_ask_price is None:
             self._best_ask_price = self._find_best_ask(self._cur_price)
+        elif self._best_ask_price not in self.ask_levels:
+            self._best_ask_price = self._find_best_ask(self._best_ask_price)
+        elif (
+            len(self._ask_levels) > 1 and self._asks[self._best_ask_price].head == None
+        ):
+            self._asks.pop(self._best_ask_price)
+            self._best_ask_price = self._find_best_ask(self._best_ask_price)
         return self._best_ask_price

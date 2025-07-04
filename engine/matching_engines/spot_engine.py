@@ -10,21 +10,16 @@ from typing import Callable, TypedDict, Tuple
 from config import SPOT_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
-from .enums import Tag
-from .exc import PositionNotFound
-from .order import Order
-from .orderbook.orderbook import OrderBook
-from .pusher import Pusher
-from .typing import (
-    EnginePayload, 
-    EnginePayloadCategory,
-    MatchResult,
-    MatchOutcome
-)
-from .utils import (
+from ..enums import Tag
+from ..exc import PositionNotFound
+from ..order import Order
+from ..orderbook.orderbook import OrderBook
+from ..pusher import Pusher
+from ..typing import EnginePayload, EnginePayloadCategory, MatchResult, MatchOutcome
+from ..utils import (
     # EnginePayloadCategory,
     # EnginePayload,
-    calc_buy_pl,
+    calc_buy_pnl,
     calculate_upl,
     # MatchResult,
 )
@@ -35,6 +30,7 @@ class SpotCloseOrderPayload(TypedDict):
     order_ids: Tuple[str]
     instrument: str
     price: float
+
 
 # IN CONSTRUCTION
 class SpotEngine(BaseEngine):
@@ -49,7 +45,7 @@ class SpotEngine(BaseEngine):
         handlers: dict[EnginePayloadCategory, Callable] = {
             EnginePayloadCategory.NEW: self.place_order,
             EnginePayloadCategory.MODIFY: self._handle_modify,
-            EnginePayloadCategory.CLOSE: self._handle_close,
+            EnginePayloadCategory.CLOSE: self.close_order,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
         }
 
@@ -128,7 +124,7 @@ class SpotEngine(BaseEngine):
                 order.payload["unrealised_pnl"] = order.payload["standing_quantity"] = (
                     0.0
                 )
-                order.payload["realised_pnl"] += calc_buy_pl(
+                order.payload["realised_pnl"] += calc_buy_pnl(
                     order.payload["filled_price"] * standing_quantity,
                     order.payload["filled_price"],
                     price,
@@ -294,7 +290,7 @@ class SpotEngine(BaseEngine):
                 order.payload["stop_loss"],
             )
 
-    def _handle_close(self, payload: SpotCloseOrderPayload) -> None:
+    def close_order(self, payload: SpotCloseOrderPayload) -> None:
         """
         Generates and attempts to match a sell order for each orderid
         passed within the payload. If a prtial fill occurs or the requested
@@ -313,12 +309,12 @@ class SpotEngine(BaseEngine):
             except PositionNotFound:
                 continue
 
-            og_standing_quantity: float = pos.order.payload["standing_quantity"]
+            og_standing_quantity: float = pos.entry_order.payload["standing_quantity"]
             taken_standing_quantity: float = min(
                 og_standing_quantity, requested_quantity
             )
             dummy_order = {
-                **pos.order.payload,
+                **pos.entry_order.payload,
                 "standing_quantity": taken_standing_quantity,
             }
 
@@ -331,36 +327,36 @@ class SpotEngine(BaseEngine):
             )
 
             if result.outcome == 2:
-                pos.order.payload["standing_quantity"] -= taken_standing_quantity
+                pos.entry_order.payload["standing_quantity"] -= taken_standing_quantity
                 execution_price = result.price
 
-                if pos.order.payload["standing_quantity"] == 0:
-                    ob.remove_all(pos.order)
-                    pos.order.payload["status"] = OrderStatus.CLOSED
-                    pos.order.payload["close_price"] = result.price
-                    pos.order.payload["closed_at"] = datetime.now()
-                    pos.order.payload["realised_pnl"] += calc_buy_pl(
-                        pos.order.payload["filled_price"] * og_standing_quantity,
-                        pos.order.payload["filled_price"],
+                if pos.entry_order.payload["standing_quantity"] == 0:
+                    ob.remove_all(pos.entry_order)
+                    pos.entry_order.payload["status"] = OrderStatus.CLOSED
+                    pos.entry_order.payload["close_price"] = result.price
+                    pos.entry_order.payload["closed_at"] = datetime.now()
+                    pos.entry_order.payload["realised_pnl"] += calc_buy_pnl(
+                        pos.entry_order.payload["filled_price"] * og_standing_quantity,
+                        pos.entry_order.payload["filled_price"],
                         result.price,
                     )
-                    pos.order.payload["unrealised_pnl"] = 0
+                    pos.entry_order.payload["unrealised_pnl"] = 0
 
-                self.pusher.append(pos.order.payload, speed="fast")
+                self.pusher.append(pos.entry_order.payload, speed="fast")
                 self.pusher.append(
                     {
-                        "user_id": pos.order.payload["user_id"],
-                        "amount": pos.order.payload["realised_pnl"],
+                        "user_id": pos.entry_order.payload["user_id"],
+                        "amount": pos.entry_order.payload["realised_pnl"],
                     },
                     "balance",
                 )
             else:
-                pos.order.payload["standing_quantity"] -= cleared_quantity
+                pos.entry_order.payload["standing_quantity"] -= cleared_quantity
 
                 if result.outcome == 1:
-                    pos.order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
+                    pos.entry_order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
-                self.pusher.append(pos.order.payload)
+                self.pusher.append(pos.entry_order.payload)
                 break
 
             requested_quantity -= cleared_quantity

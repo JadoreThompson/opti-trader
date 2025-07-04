@@ -5,12 +5,12 @@ from typing import Iterable, TypedDict, List, overload
 from r_mutex import LockClient
 
 from enums import OrderStatus, Side
-from .enums import Tag
-from .order import Order
-from .orderbook.orderbook import OrderBook
-from .position import Position
-from .pusher import Pusher
-from .utils import MatchResult
+from ..enums import Tag
+from ..order import Order
+from ..orderbook.orderbook import OrderBook
+from ..position import Position
+from ..pusher import Pusher
+from ..typing import MatchResult
 
 
 class CancelOrderPayload(TypedDict):
@@ -87,25 +87,25 @@ class BaseEngine:
         if pos is None:
             return
 
-        ob = self._order_books[pos.order.payload["instrument"]]
+        ob = self._order_books[pos.entry_order.payload["instrument"]]
 
-        if pos.order.payload["status"] == OrderStatus.PENDING:
+        if pos.entry_order.payload["status"] == OrderStatus.PENDING:
             if payload["limit_price"] is not None:
                 self._modify_limit_order(ob, pos, payload["limit_price"])
 
-        if pos.order.payload["status"] not in (
+        if pos.entry_order.payload["status"] not in (
             OrderStatus.PENDING,
             OrderStatus.PARTIALLY_FILLED,
             OrderStatus.CLOSED,
         ):
             self._modify_tp_sl(ob, pos, payload["take_profit"], payload["stop_loss"])
 
-        self.pusher.append(pos.order.payload)
+        self.pusher.append(pos.entry_order.payload)
 
     def _handle_cancel(self, payload: CancelOrderPayload) -> None:
         """
         DONT USE !!!
-        
+
         Removes the order from tracking and the book and submits a
         balance update, giving the user the position amount
         Args:
@@ -115,23 +115,24 @@ class BaseEngine:
         pos = ob.get(payload["order_id"])
 
         if (
-            pos.order.payload["status"] != OrderStatus.PENDING
-            or pos.order.payload["standing_quantity"] != pos.order.payload["quantity"]
+            pos.entry_order.payload["status"] != OrderStatus.PENDING
+            or pos.entry_order.payload["standing_quantity"]
+            != pos.entry_order.payload["quantity"]
         ):
             return
 
-        ob.remove_all(pos.order)
+        ob.remove_all(pos.entry_order)
         self.pusher.append(
             {
-                "user_id": pos.order.payload["user_id"],
-                "amount": pos.order.payload["amount"],
+                "user_id": pos.entry_order.payload["user_id"],
+                "amount": pos.entry_order.payload["amount"],
             }
         )
-        pos.order.payload["status"] = OrderStatus.CLOSED
-        self.pusher.append(pos.order.payload, speed="fast")
+        pos.entry_order.payload["status"] = OrderStatus.CLOSED
+        self.pusher.append(pos.entry_order.payload, speed="fast")
 
     @overload
-    def _handle_close(self, payload: dict) -> None: ...
+    def close_order(self, payload: dict) -> None: ...
 
     @overload
     def _handle_market_order(self, order: Order, ob: OrderBook) -> MatchResult: ...
@@ -163,9 +164,9 @@ class BaseEngine:
         new_limit_price: float,
     ) -> None:
         """DONT USE !!!"""
-        pos.order.payload["limit_price"] = new_limit_price
-        ob.remove(pos.order)
-        ob.append(pos.order, new_limit_price)
+        pos.entry_order.payload["limit_price"] = new_limit_price
+        ob.remove(pos.entry_order)
+        ob.append(pos.entry_order, new_limit_price)
 
     def _modify_tp_sl(
         self,
@@ -186,31 +187,39 @@ class BaseEngine:
             new_stop_loss (float, optional) Defaults to None.
         """
         if new_take_profit is not None:
-            pos.order.payload["take_profit"] = new_take_profit
+            pos.entry_order.payload["take_profit"] = new_take_profit
 
-            if pos.take_profit is not None:
-                ob.remove(pos.take_profit)
+            if pos.take_profit_order is not None:
+                ob.remove(pos.take_profit_order)
 
-            if pos.take_profit is None:
-                pos.take_profit = Order(
-                    pos.order.payload,
+            if pos.take_profit_order is None:
+                pos.take_profit_order = Order(
+                    pos.entry_order.payload,
                     Tag.TAKE_PROFIT,
-                    (Side.BID if pos.order.payload["side"] == Side.ASK else Side.BID),
+                    (
+                        Side.BID
+                        if pos.entry_order.payload["side"] == Side.ASK
+                        else Side.BID
+                    ),
                 )
 
-            ob.append(pos.take_profit, new_take_profit)
+            ob.append(pos.take_profit_order, new_take_profit)
 
         if new_stop_loss is not None:
-            pos.order.payload["stop_loss"] = new_stop_loss
+            pos.entry_order.payload["stop_loss"] = new_stop_loss
 
-            if pos.stop_loss is not None:
-                ob.remove(pos.stop_loss)
+            if pos.stop_loss_order is not None:
+                ob.remove(pos.stop_loss_order)
 
-            if pos.stop_loss is None:
-                pos.stop_loss = Order(
-                    pos.order.payload,
+            if pos.stop_loss_order is None:
+                pos.stop_loss_order = Order(
+                    pos.entry_order.payload,
                     Tag.STOP_LOSS,
-                    (Side.BID if pos.order.payload["side"] == Side.ASK else Side.BID),
+                    (
+                        Side.BID
+                        if pos.entry_order.payload["side"] == Side.ASK
+                        else Side.BID
+                    ),
                 )
 
-            ob.append(pos.stop_loss, new_stop_loss)
+            ob.append(pos.stop_loss_order, new_stop_loss)
