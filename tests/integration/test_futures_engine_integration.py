@@ -101,9 +101,8 @@ def test_close_order_state_snapshot(populated_engine, n, snapshot):
     final state of the entire system using a snapshot.
     """
     engine, orders_from_engine = populated_engine
-    instrument = "HARNESS_INSTR"
-
     open_positions = list(engine._position_manager._positions.items())
+
     for i, (order_id, pos) in enumerate(open_positions):
         if pos.entry_order.payload["status"] == OrderStatus.CLOSED:
             continue
@@ -116,4 +115,58 @@ def test_close_order_state_snapshot(populated_engine, n, snapshot):
     sanitized_state = sanitize_for_snapshot(final_order_states)
     snapshot.assert_match(
         json.dumps(sanitized_state), "test_close_order_state_snapshot.json"
+    )
+
+
+@pytest.mark.parametrize("populated_engine", TEST_SIZES, indirect=True)
+@pytest.mark.parametrize("n", [3, 5])
+def test_modify_position_state_snapshot(populated_engine, n, snapshot):
+    """
+    Tests the modify_position method on a pre-populated engine. It modifies
+    every Nth order, testing modifications of both pending limit prices
+    and filled positions' TP/SL, then snapshots the final state.
+    """
+    engine, orders_from_engine = populated_engine
+
+    for i, order_payload in enumerate(list(orders_from_engine)):
+        if i % n != 0:
+            continue
+        
+        status = order_payload["status"]
+        order_id = order_payload["order_id"]
+
+        if (
+            status == OrderStatus.PENDING
+            and order_payload["order_type"] == OrderType.LIMIT
+        ):
+            new_limit_price = round(order_payload["limit_price"] + 0.25, 2)
+            modify_payload = {
+                "order_id": order_id,
+                "limit_price": new_limit_price,
+                "take_profit": order_payload["take_profit"],
+                "stop_loss": order_payload["stop_loss"],
+            }
+            engine.modify_position(modify_payload)
+
+        elif status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            filled_price = order_payload["filled_price"]
+            new_tp = round(filled_price + 5.0, 2)
+            new_sl = round(filled_price - 5.0, 2)
+
+            if order_payload["side"] == Side.ASK:
+                new_tp, new_sl = new_sl, new_tp
+
+            modify_payload = {
+                "order_id": order_id,
+                "limit_price": None,
+                "take_profit": new_tp,
+                "stop_loss": new_sl,
+            }
+            engine.modify_position(modify_payload)
+
+    final_order_states = {o["order_id"]: o for o in orders_from_engine}
+    sanitized_state = sanitize_for_snapshot(final_order_states)
+
+    snapshot.assert_match(
+        json.dumps(sanitized_state), "test_modify_position_state_snapshot.json"
     )

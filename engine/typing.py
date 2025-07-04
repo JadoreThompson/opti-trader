@@ -33,3 +33,14 @@ class EnginePayload(TypedDict):
 
     category: EnginePayloadCategory
     content: dict
+
+
+class ClosePayload(TypedDict):
+    order_id: str
+
+
+class ModifyPayload(TypedDict):
+    order_id: str
+    limit_price: float | None = None
+    take_profit: float | None = None
+    stop_loss: float | None = None

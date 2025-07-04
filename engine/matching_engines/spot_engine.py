@@ -44,7 +44,7 @@ class SpotEngine(BaseEngine):
 
         handlers: dict[EnginePayloadCategory, Callable] = {
             EnginePayloadCategory.NEW: self.place_order,
-            EnginePayloadCategory.MODIFY: self._handle_modify,
+            EnginePayloadCategory.MODIFY: self.modify_position,
             EnginePayloadCategory.CLOSE: self.close_order,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
         }

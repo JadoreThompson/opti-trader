@@ -233,18 +233,32 @@ class OrderBook:
     def best_bid(self) -> float | None:
         if self._best_bid_price is None:
             self._best_bid_price = self._find_best_bid(self._cur_price)
+        
+        if self._best_bid_price not in self._bid_levels:
+            self._best_bid_price = self._find_best_bid(self._best_bid_price)
+        
+        if (
+            len(self._bid_levels) > 1
+            and self._bids.get(self._best_bid_price, OrderbookItem()).head is None
+        ):
+            self._bids.pop(self._best_bid_price, None)
+            self._best_bid_price = self._find_best_bid(self._best_bid_price)
+        
         return self._best_bid_price
 
     @property
     def best_ask(self) -> float | None:
-        # print("lll", self.asks[self._best_ask_price])
         if self._best_ask_price is None:
             self._best_ask_price = self._find_best_ask(self._cur_price)
-        elif self._best_ask_price not in self.ask_levels:
+        
+        if self._best_ask_price not in self._ask_levels:
             self._best_ask_price = self._find_best_ask(self._best_ask_price)
-        elif (
-            len(self._ask_levels) > 1 and self._asks[self._best_ask_price].head == None
+        
+        if (
+            len(self._ask_levels) > 1
+            and self._asks.get(self._best_ask_price, OrderbookItem()).head == None
         ):
-            self._asks.pop(self._best_ask_price)
+            self._asks.pop(self._best_ask_price, None)
             self._best_ask_price = self._find_best_ask(self._best_ask_price)
+        
         return self._best_ask_price

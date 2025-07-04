@@ -180,3 +180,62 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
     assert long_pos_order["realised_pnl"] == pytest.approx(expected_pnl)
 
     assert engine._position_manager.get("long_pos") == None
+
+
+def test_modify_pending_limit_order_price(engine: FuturesEngine):
+    """
+    Scenario: Modify the limit price of a PENDING order that has not been filled.
+    The order should be moved to the new price level in the order book.
+    """
+    limit_buy = create_order("buy1", Side.BID, OrderType.LIMIT, limit_price=95.0)
+    engine.place_order(limit_buy)
+
+    ob = engine._order_books[limit_buy["instrument"]]
+    assert ob.best_bid == 95.0
+    assert 98.0 not in ob.bids
+
+    modify_payload = {
+        "order_id": "buy1",
+        "limit_price": 98.0,
+        "take_profit": None,
+        "stop_loss": None,
+    }
+    engine.modify_position(modify_payload)
+
+    # Assert
+    assert limit_buy["status"] == OrderStatus.PENDING
+    assert limit_buy["limit_price"] == 98.0
+
+    # Assert book state
+    assert ob.best_bid == 95.0, ob.bid_levels
+    assert 95.0 not in ob.bids
+    assert 98.0 in ob.bids
+    book_item = ob.bids[98.0]
+    assert book_item.head.order.payload["order_id"] == "buy1"
+
+
+def test_modify_filled_order_limit_price_raises_error(engine: FuturesEngine):
+    """
+    Scenario: Attempting to change the limit price of a FILLED order should
+    raise a ValueError, as this is an invalid operation. This test
+    validates the engine's error handling for invalid modifications.
+    """
+    setup_sell = create_order(
+        "setup_sell", Side.ASK, OrderType.LIMIT, limit_price=100.0
+    )
+    long_pos_order = create_order("long_pos", Side.BID, OrderType.MARKET)
+
+    engine.place_order(setup_sell)
+    engine.place_order(long_pos_order)
+
+    assert long_pos_order["status"] == OrderStatus.FILLED
+
+    modify_payload = {
+        "order_id": "long_pos",
+        "limit_price": 101.0,
+        "take_profit": None,
+        "stop_loss": None,
+    }
+
+    with pytest.raises(ValueError):
+        engine.modify_position(modify_payload)

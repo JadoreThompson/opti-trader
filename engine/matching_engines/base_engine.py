@@ -4,13 +4,14 @@ import warnings
 from typing import Iterable, TypedDict, List, overload
 from r_mutex import LockClient
 
-from enums import OrderStatus, Side
+from enums import OrderStatus, OrderType, Side
 from ..enums import Tag
 from ..order import Order
 from ..orderbook.orderbook import OrderBook
 from ..position import Position
+from ..position_manager import PositionManager
 from ..pusher import Pusher
-from ..typing import MatchResult
+from ..typing import MatchResult, ClosePayload, ModifyPayload
 
 
 class CancelOrderPayload(TypedDict):
@@ -27,6 +28,7 @@ class BaseEngine:
         self.instrument_lock = instrument_lock
         self.pusher = pusher
         self._order_books: dict[str, OrderBook] = {}
+        self._position_manager = PositionManager()
 
     async def run(self, instruments: List[str]) -> None:
         """
@@ -64,6 +66,54 @@ class BaseEngine:
     async def _listen(self) -> None: ...
 
     @overload
+    def place_order(self, payload: dict) -> None: ...
+
+    @overload
+    def close_order(self, payload: dict) -> None: ...
+
+    def modify_position(self, data: ModifyPayload) -> None:
+        """
+        Handles the shuffling and value assignment of an existing
+        position
+
+        Args:
+            data (ModifyPayload): Dictionary containing modification details.
+        """
+        pos = self._position_manager.get(data["order_id"])
+        ob = self._order_books[pos.instrument]
+        order = pos.entry_order
+        payload = order.payload
+        status = payload["status"]
+
+        # Handle limit price field
+        if data["limit_price"] is not None:
+            if (
+                status == OrderStatus.PENDING
+                and payload["order_type"] == OrderType.LIMIT
+            ):
+                ob.remove(order, payload["limit_price"])
+                ob.append(order, data["limit_price"])
+                payload["limit_price"] = data["limit_price"]
+            else:
+                raise ValueError(
+                    f"Cannot change limit price for order with order status {OrderStatus.PENDING} and order type {OrderType.LIMIT}"
+                )
+
+        # Handle TP SL price
+        payload["take_profit"] = data["take_profit"]
+        payload["stop_loss"] = data["stop_loss"]
+
+        if status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
+            if data["take_profit"] != payload["take_profit"] and pos.take_profit_order:
+                ob.remove(pos.take_profit_order)
+            if data["stop_loss"] != payload["stop_loss"] and pos.stop_loss_order:
+                ob.remove(pos.stop_loss_order)
+
+            self._place_tp_sl(order, ob)
+
+        self.pusher.append(payload)
+
+    @overload
     def _match(
         self,
         order: dict,
@@ -71,36 +121,6 @@ class BaseEngine:
         ob: OrderBook,
         price: float,
     ) -> MatchResult: ...
-
-    @overload
-    def place_order(self, payload: dict) -> None: ...
-
-    def _handle_modify(self, payload: dict) -> None:
-        """
-        DONT USE !!!
-        Handles the reassignment of values to an order within the orderbook
-
-        Args:
-            payload (dict)
-        """
-        pos = self._order_books[payload["instrument"]].get(payload["order_id"])
-        if pos is None:
-            return
-
-        ob = self._order_books[pos.entry_order.payload["instrument"]]
-
-        if pos.entry_order.payload["status"] == OrderStatus.PENDING:
-            if payload["limit_price"] is not None:
-                self._modify_limit_order(ob, pos, payload["limit_price"])
-
-        if pos.entry_order.payload["status"] not in (
-            OrderStatus.PENDING,
-            OrderStatus.PARTIALLY_FILLED,
-            OrderStatus.CLOSED,
-        ):
-            self._modify_tp_sl(ob, pos, payload["take_profit"], payload["stop_loss"])
-
-        self.pusher.append(pos.entry_order.payload)
 
     def _handle_cancel(self, payload: CancelOrderPayload) -> None:
         """
@@ -132,15 +152,6 @@ class BaseEngine:
         self.pusher.append(pos.entry_order.payload, speed="fast")
 
     @overload
-    def close_order(self, payload: dict) -> None: ...
-
-    @overload
-    def _handle_market_order(self, order: Order, ob: OrderBook) -> MatchResult: ...
-
-    @overload
-    def _handle_limit_order(self, order: Order, ob: OrderBook) -> None: ...
-
-    @overload
     def _place_tp_sl(self, order: Order, ob: OrderBook) -> None: ...
 
     @overload
@@ -156,70 +167,3 @@ class BaseEngine:
         ob: OrderBook,
         filled_orders: list[tuple[Order, int]],
     ) -> None: ...
-
-    def _modify_limit_order(
-        self,
-        ob: OrderBook,
-        pos: Position,
-        new_limit_price: float,
-    ) -> None:
-        """DONT USE !!!"""
-        pos.entry_order.payload["limit_price"] = new_limit_price
-        ob.remove(pos.entry_order)
-        ob.append(pos.entry_order, new_limit_price)
-
-    def _modify_tp_sl(
-        self,
-        ob: OrderBook,
-        pos: Position,
-        new_take_profit: float = None,
-        new_stop_loss: float = None,
-    ) -> None:
-        """
-        DONT USE !!!
-        Replacing of the position's entry, take profit and stop loss
-        orders within the book to reflect the requested changes
-
-        Args:
-            ob (OrderBook)
-            pos (Position)
-            new_take_profit (float, optional) Defaults to None.
-            new_stop_loss (float, optional) Defaults to None.
-        """
-        if new_take_profit is not None:
-            pos.entry_order.payload["take_profit"] = new_take_profit
-
-            if pos.take_profit_order is not None:
-                ob.remove(pos.take_profit_order)
-
-            if pos.take_profit_order is None:
-                pos.take_profit_order = Order(
-                    pos.entry_order.payload,
-                    Tag.TAKE_PROFIT,
-                    (
-                        Side.BID
-                        if pos.entry_order.payload["side"] == Side.ASK
-                        else Side.BID
-                    ),
-                )
-
-            ob.append(pos.take_profit_order, new_take_profit)
-
-        if new_stop_loss is not None:
-            pos.entry_order.payload["stop_loss"] = new_stop_loss
-
-            if pos.stop_loss_order is not None:
-                ob.remove(pos.stop_loss_order)
-
-            if pos.stop_loss_order is None:
-                pos.stop_loss_order = Order(
-                    pos.entry_order.payload,
-                    Tag.STOP_LOSS,
-                    (
-                        Side.BID
-                        if pos.entry_order.payload["side"] == Side.ASK
-                        else Side.BID
-                    ),
-                )
-
-            ob.append(pos.stop_loss_order, new_stop_loss)

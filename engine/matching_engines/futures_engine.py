@@ -1,10 +1,9 @@
 import asyncio
-import json
 
 from datetime import datetime
 from collections.abc import Iterable
 from r_mutex import LockClient
-from typing import Callable, TypedDict
+from typing import Callable
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
@@ -13,18 +12,18 @@ from ..enums import Tag
 from ..order import Order
 from ..orderbook import OrderBook
 from ..position import Position
-from ..position_manager import PositionManager
 from ..pusher import Pusher
-from ..typing import EnginePayload, EnginePayloadCategory, MatchResult, MatchOutcome
+from ..typing import (
+    EnginePayloadCategory,
+    MatchResult,
+    MatchOutcome,
+    ClosePayload,
+)
 from ..utils import (
     calc_sell_pnl,
     calc_buy_pnl,
     calculate_upl,
 )
-
-
-class CloseOrderPayload(TypedDict):
-    order_id: str
 
 
 class FuturesEngine(BaseEngine):
@@ -34,7 +33,6 @@ class FuturesEngine(BaseEngine):
         pusher: Pusher,
     ) -> None:
         super().__init__(instrument_lock, pusher)
-        self._position_manager = PositionManager()
 
     async def _listen(self) -> None:
         """
@@ -45,7 +43,7 @@ class FuturesEngine(BaseEngine):
 
         handlers: dict[EnginePayloadCategory, Callable] = {
             EnginePayloadCategory.NEW: self.place_order,
-            EnginePayloadCategory.MODIFY: self._handle_modify,
+            EnginePayloadCategory.MODIFY: self.modify_position,
             EnginePayloadCategory.CLOSE: self.close_order,
             EnginePayloadCategory.CANCEL: self._handle_cancel,
             EnginePayloadCategory.APPEND: self._handle_append_ob,
@@ -62,7 +60,9 @@ class FuturesEngine(BaseEngine):
                 payload = message["data"]
                 handlers[payload["category"]](payload["content"])
 
-    def _collapse_order(self, order_id: str, ob: OrderBook | None = None) -> None:
+    def _collapse_order(
+        self, order_id: str, ob: OrderBook | None = None, pos: Position | None = None
+    ) -> None:
         pos = self._position_manager.get(order_id)
 
         if ob is None:
@@ -125,6 +125,7 @@ class FuturesEngine(BaseEngine):
         """
         ob = self._order_books.setdefault(payload["instrument"], OrderBook())
         order = Order(payload, Tag.ENTRY, payload["side"])
+        self._position_manager.create(order)
 
         if payload["order_type"] == OrderType.LIMIT:
             return ob.append(order, payload["limit_price"])
@@ -138,7 +139,6 @@ class FuturesEngine(BaseEngine):
             payload["standing_quantity"] = payload["quantity"]
             payload["filled_price"] = result.price
 
-            self._position_manager.create(order)
             self._place_tp_sl(order, ob)
         else:
             ob.append(order, result.price)
@@ -148,7 +148,7 @@ class FuturesEngine(BaseEngine):
 
         self.pusher.append(payload)
 
-    def close_order(self, data: CloseOrderPayload) -> None:
+    def close_order(self, data: ClosePayload) -> None:
         """
         DO NOT CALL!!!
         Handles the result from attempting to match the order
@@ -159,9 +159,12 @@ class FuturesEngine(BaseEngine):
         """
         order_id = data["order_id"]
         pos = self._position_manager.get(order_id)
-
         order = pos.entry_order
         ob = self._order_books[pos.instrument]
+
+        if order.payload["status"] == OrderStatus.PENDING:
+            return self._collapse_order(order_id, ob, pos)
+
         prev_stpos_value: float = (
             order.payload["standing_quantity"] * order.payload["filled_price"]
         )
@@ -296,7 +299,6 @@ class FuturesEngine(BaseEngine):
                 order.payload["status"] = OrderStatus.FILLED
                 order.payload["standing_quantity"] = order.payload["quantity"]
                 order.payload["filled_price"] = price
-                self._position_manager.create(order)
                 self._place_tp_sl(order, ob)
                 calculate_upl(order, price, ob)
             else:
