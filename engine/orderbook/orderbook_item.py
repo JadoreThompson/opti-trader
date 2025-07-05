@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 from .node import Node
 
 
-@dataclass
 class OrderbookItem:
-    head: Node | None = None
-    tail: Node | None = None
-    tracker: dict[str, Node] = field(default_factory=dict)
+    def __init__(self) -> None:
+        self.head: Node | None = None
+        self.tail: Node | None = None
+        self.tracker: dict[str, Node] = {}

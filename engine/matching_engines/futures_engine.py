@@ -146,7 +146,7 @@ class FuturesEngine(BaseEngine):
                 payload["status"] = OrderStatus.PARTIALLY_FILLED
             order.tmp_price = result.price
 
-        self.pusher.append(payload)
+        # self.pusher.append(payload)
 
     def close_order(self, data: ClosePayload) -> None:
         """
@@ -191,19 +191,21 @@ class FuturesEngine(BaseEngine):
         else:
             if order.payload["standing_quantity"] != order.payload["quantity"]:
                 order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
-                
+
     def cancel_order(self, data: ClosePayload) -> None:
-        pos = self._position_manager.get(data['order_id'])
+        pos = self._position_manager.get(data["order_id"])
         order = pos.entry_order
-        
-        if order.payload['status'] != OrderStatus.PENDING:
-            raise ValueError(f"Cannot cancel order with status {order.payload['status']}. Must have status '{OrderStatus.PENDING}'.")
-        
+
+        if order.payload["status"] != OrderStatus.PENDING:
+            raise ValueError(
+                f"Cannot cancel order with status {order.payload['status']}. Must have status '{OrderStatus.PENDING}'."
+            )
+
         ob = self._order_books[pos.instrument]
-        self._collapse_order(data['order_id'], ob, pos)
+        self._collapse_order(data["order_id"], ob, pos)
         
-        order.payload['status'] = OrderStatus.CANCELLED
-        order.payload['closed_at'] = datetime.now()
+        order.payload["status"] = OrderStatus.CANCELLED
+        order.payload["closed_at"] = datetime.now()
 
     def _match(self, order: Order, ob: OrderBook) -> MatchResult:
         """
