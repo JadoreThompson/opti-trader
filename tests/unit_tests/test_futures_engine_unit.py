@@ -1,10 +1,8 @@
 import pytest
-
-from uuid import uuid4
-from datetime import datetime
 from engine import FuturesEngine
 from enums import OrderStatus, OrderType, Side
 from tests.mocks import MockLock, MockPusher
+from tests.utils import create_order_simple
 
 
 @pytest.fixture
@@ -13,47 +11,16 @@ def engine():
     return FuturesEngine(MockLock(), MockPusher())
 
 
-def create_order(
-    order_id: str,
-    side: Side,
-    order_type: OrderType,
-    instrument: str = "BTC",
-    quantity: int = 10,
-    limit_price: float | None = None,
-    tp_price: float | None = None,
-    sl_price: float | None = None,
-):
-    """A simplified factory for creating test orders."""
-    return {
-        "order_id": order_id,
-        "user_id": str(uuid4()),
-        "instrument": instrument,
-        "side": side,
-        "order_type": order_type,
-        "quantity": quantity,
-        "standing_quantity": quantity,
-        "status": OrderStatus.PENDING,
-        "limit_price": limit_price,
-        "take_profit": tp_price,
-        "stop_loss": sl_price,
-        "filled_price": None,
-        "realised_pnl": 0.0,
-        "unrealised_pnl": 0.0,
-        "closed_at": None,
-        "created_at": datetime.now(),
-    }
-
-
 def test_place_limit_orders_no_match(engine: FuturesEngine):
     """
     Scenario: Two limit orders are placed far from each other and should not match.
     They should both rest on the book.
     """
     instrument = "instr"
-    buy_order = create_order(
+    buy_order = create_order_simple(
         "buy1", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=99.0
     )
-    sell_order = create_order(
+    sell_order = create_order_simple(
         "sell1", Side.ASK, OrderType.LIMIT, instrument=instrument, limit_price=101.0
     )
 
@@ -76,7 +43,7 @@ def test_market_bid_fills_limit_ask(engine: FuturesEngine):
     """
     Scenario: A resting limit sell is fully filled by an incoming market buy.
     """
-    limit_sell = create_order(
+    limit_sell = create_order_simple(
         "sell1",
         Side.ASK,
         OrderType.LIMIT,
@@ -85,7 +52,7 @@ def test_market_bid_fills_limit_ask(engine: FuturesEngine):
         tp_price=90.0,
         sl_price=110.0,
     )
-    market_buy = create_order("buy1", Side.BID, OrderType.MARKET, quantity=10)
+    market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=10)
 
     engine.place_order(limit_sell)
     engine.place_order(market_buy)
@@ -110,12 +77,12 @@ def test_market_bid_partially_fills_limit_ask(engine: FuturesEngine):
     """
     Scenario: A large resting limit sell is only partially filled by a smaller market buy.
     """
-    limit_sell = create_order(
+    limit_sell = create_order_simple(
         "sell1", Side.ASK, OrderType.LIMIT, quantity=50, limit_price=100.0
     )
     engine.place_order(limit_sell)
 
-    market_buy = create_order("buy1", Side.BID, OrderType.MARKET, quantity=20)
+    market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=20)
     engine.place_order(market_buy)
 
     # Assert
@@ -137,7 +104,7 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
     Scenario: Establish a long position, then close it at a higher price for a profit.
     """
     instrument = "btc"
-    setup_sell = create_order(
+    setup_sell = create_order_simple(
         "setup_sell",
         Side.ASK,
         OrderType.LIMIT,
@@ -145,7 +112,7 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
         quantity=10,
         limit_price=100.0,
     )
-    long_pos_order = create_order(
+    long_pos_order = create_order_simple(
         "long_pos", Side.BID, OrderType.MARKET, instrument=instrument, quantity=10
     )
 
@@ -157,7 +124,7 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
     assert engine._position_manager.get("long_pos") is not None
 
     # Raising price level
-    setup_ask = create_order(
+    setup_ask = create_order_simple(
         "setup_ask",
         Side.ASK,
         OrderType.LIMIT,
@@ -187,7 +154,7 @@ def test_modify_pending_limit_order_price(engine: FuturesEngine):
     Scenario: Modify the limit price of a PENDING order that has not been filled.
     The order should be moved to the new price level in the order book.
     """
-    limit_buy = create_order("buy1", Side.BID, OrderType.LIMIT, limit_price=95.0)
+    limit_buy = create_order_simple("buy1", Side.BID, OrderType.LIMIT, limit_price=95.0)
     engine.place_order(limit_buy)
 
     ob = engine._order_books[limit_buy["instrument"]]
@@ -218,10 +185,10 @@ def test_modify_filled_order_limit_price_raises_error(engine: FuturesEngine):
     raise a ValueError, as this is an invalid operation. This test
     validates the engine's error handling for invalid modifications.
     """
-    setup_sell = create_order(
+    setup_sell = create_order_simple(
         "setup_sell", Side.ASK, OrderType.LIMIT, limit_price=100.0
     )
-    long_pos_order = create_order("long_pos", Side.BID, OrderType.MARKET)
+    long_pos_order = create_order_simple("long_pos", Side.BID, OrderType.MARKET)
 
     engine.place_order(setup_sell)
     engine.place_order(long_pos_order)
@@ -246,7 +213,7 @@ def test_cancel_pending_limit_order(engine: FuturesEngine):
     and its status updated to CANCELLED.
     """
     instrument = "BTC"
-    limit_buy = create_order(
+    limit_buy = create_order_simple(
         "buy1", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=95.0
     )
     engine.place_order(limit_buy)
@@ -276,10 +243,10 @@ def test_cancel_filled_order_raises_error(engine: FuturesEngine):
     Scenario: Attempt to cancel an order that has already been FILLED.
     This action is invalid and should raise a ValueError.
     """
-    setup_sell = create_order(
+    setup_sell = create_order_simple(
         "setup_sell", Side.ASK, OrderType.LIMIT, limit_price=100.0
     )
-    market_buy = create_order("market_buy", Side.BID, OrderType.MARKET)
+    market_buy = create_order_simple("market_buy", Side.BID, OrderType.MARKET)
 
     engine.place_order(setup_sell)
     engine.place_order(market_buy)
@@ -298,10 +265,12 @@ def test_cancel_partially_filled_order_raises_error(engine: FuturesEngine):
     Scenario: Attempt to cancel an order that is PARTIALLY_FILLED.
     This is an invalid action and should raise a ValueError.
     """
-    limit_sell = create_order(
+    limit_sell = create_order_simple(
         "limit_sell", Side.ASK, OrderType.LIMIT, quantity=50, limit_price=100.0
     )
-    market_buy = create_order("market_buy", Side.BID, OrderType.MARKET, quantity=20)
+    market_buy = create_order_simple(
+        "market_buy", Side.BID, OrderType.MARKET, quantity=20
+    )
 
     engine.place_order(limit_sell)
     engine.place_order(market_buy)

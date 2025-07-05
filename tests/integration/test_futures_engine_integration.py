@@ -1,53 +1,15 @@
 import json
-from typing import Generator, Tuple
 import pytest
 import copy
 
-from uuid import uuid4
-from datetime import datetime
-from engine import FuturesEngine
 from enums import OrderStatus, OrderType, Side
-from tests.mocks import MockLock, MockPusher
+from tests.utils import (
+    # Fixture Imports
+    populated_engine,
+)
 
 
 TEST_SIZES = [int(2**i) for i in range(2, 9)] + [512, 1000]
-
-
-def create_order(i: int) -> dict:
-    is_limit_order = i % 3 == 0
-    order_type = OrderType.LIMIT if is_limit_order else OrderType.MARKET
-    is_buy = i % 2 == 0
-    side = Side.BID if is_buy else Side.ASK
-    base_price, price_step, quantity = 100.0, 0.5, 10
-
-    order = {
-        "order_id": str(i),
-        "user_id": str(uuid4()),
-        "instrument": "HARNESS_INSTR",
-        "side": side,
-        "order_type": order_type,
-        "quantity": quantity,
-        "standing_quantity": quantity,
-        "status": OrderStatus.PENDING,
-        "realised_pnl": 0.0,
-        "unrealised_pnl": 0.0,
-        "filled_price": None,
-        "limit_price": None,
-        "price": None,
-        "closed_at": None,
-        "closed_price": None,
-        "created_at": datetime.now(),
-        "amount": 100,
-        "take_profit": base_price + 20 if is_buy and is_limit_order else None,
-        "stop_loss": base_price - 10 if is_buy and is_limit_order else None,
-    }
-
-    if order_type == OrderType.LIMIT:
-        price_offset = (i // 2 * price_step) + 1
-        order["limit_price"] = round(
-            base_price - price_offset if is_buy else base_price + price_offset, 2
-        )
-    return order
 
 
 def sanitize_for_snapshot(data: dict) -> dict:
@@ -60,24 +22,6 @@ def sanitize_for_snapshot(data: dict) -> dict:
         s_state.pop("closed_at", None)
         sanitized_data[order_id] = s_state
     return sanitized_data
-
-
-@pytest.fixture
-def populated_engine(
-    request,
-) -> Generator[Tuple[FuturesEngine, tuple[dict, ...]], None, None]:
-    """
-    Creates and populates a FuturesEngine with a given number of orders.
-    This replaces the fixture that used the mock engine.
-    """
-    num_orders = request.param
-    engine = FuturesEngine(MockLock(), MockPusher())
-    orders = tuple(create_order(i) for i in range(num_orders))
-
-    for order in orders:
-        engine.place_order(order)
-
-    yield engine, orders
 
 
 @pytest.mark.parametrize("populated_engine", TEST_SIZES, indirect=True)
