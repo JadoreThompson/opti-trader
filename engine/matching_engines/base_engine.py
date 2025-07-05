@@ -1,8 +1,10 @@
 import asyncio
+from multiprocessing import Value
 import warnings
 
 from typing import Iterable, TypedDict, List, overload
 from r_mutex import LockClient
+from websockets import Close
 
 from enums import OrderStatus, OrderType, Side
 from ..enums import Tag
@@ -69,7 +71,7 @@ class BaseEngine:
     def place_order(self, payload: dict) -> None: ...
 
     @overload
-    def close_order(self, payload: dict) -> None: ...
+    def close_order(self, payload: ClosePayload) -> None: ...
 
     def modify_position(self, data: ModifyPayload) -> None:
         """
@@ -122,7 +124,7 @@ class BaseEngine:
         price: float,
     ) -> MatchResult: ...
 
-    def _handle_cancel(self, payload: CancelOrderPayload) -> None:
+    def _handle_cancel(self, payload: ClosePayload) -> None:
         """
         DONT USE !!!
 
@@ -131,8 +133,13 @@ class BaseEngine:
         Args:
             payload (CancelOrderPayload): _description_
         """
-        ob = self._order_books[payload["instrument"]]
-        pos = ob.get(payload["order_id"])
+        pos = self._position_manager.get(payload['order_id'])
+        order = pos.entry_order
+        
+        if order.payload['status'] != OrderStatus.PENDING:
+            raise ValueError("Cannot cancel order with status {order.payload['status']}. Must have status '{OrderStatus.PENDING}'.")
+        
+        ob = self._order_books[pos.instrument]
 
         if (
             pos.entry_order.payload["status"] != OrderStatus.PENDING

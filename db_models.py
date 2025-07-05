@@ -12,6 +12,7 @@ from sqlalchemy.orm import (
 )
 
 from config import PH
+from enums import OrderStatus
 
 
 class Base(DeclarativeBase):
@@ -69,7 +70,7 @@ class Orders(Base):
     closed_price: Mapped[float] = mapped_column(Float, nullable=True)
     realised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0)
     unrealised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(String, nullable=False, default=OrderStatus.PENDING.value)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)

@@ -24,3 +24,4 @@ class OrderStatus(str, Enum):
     PARTIALLY_FILLED = "partially_filled"
     CLOSED = "closed"
     PARTIALLY_CLOSED = "partially_closed"
+    CANCELLED = 'cancelled'

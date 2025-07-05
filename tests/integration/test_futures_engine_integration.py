@@ -1,4 +1,5 @@
 import json
+from typing import Generator, Tuple
 import pytest
 import copy
 
@@ -62,7 +63,9 @@ def sanitize_for_snapshot(data: dict) -> dict:
 
 
 @pytest.fixture
-def populated_engine(request):
+def populated_engine(
+    request,
+) -> Generator[Tuple[FuturesEngine, tuple[dict, ...]], None, None]:
     """
     Creates and populates a FuturesEngine with a given number of orders.
     This replaces the fixture that used the mock engine.
@@ -131,7 +134,7 @@ def test_modify_position_state_snapshot(populated_engine, n, snapshot):
     for i, order_payload in enumerate(list(orders_from_engine)):
         if i % n != 0:
             continue
-        
+
         status = order_payload["status"]
         order_id = order_payload["order_id"]
 
@@ -169,4 +172,28 @@ def test_modify_position_state_snapshot(populated_engine, n, snapshot):
 
     snapshot.assert_match(
         json.dumps(sanitized_state), "test_modify_position_state_snapshot.json"
+    )
+
+
+@pytest.mark.parametrize("populated_engine", TEST_SIZES, indirect=True)
+@pytest.mark.parametrize("n", [2, 4])
+def test_cancel_order_state_snapshot(populated_engine, n, snapshot):
+    """
+    Tests the cancel_order method on a pre-populated engine. It iterates
+    through orders and cancels every Nth PENDING order, then snapshots
+    the final state of all orders to validate the outcome.
+    """
+    engine, orders_from_engine = populated_engine
+
+    for i, order_payload in enumerate(list(orders_from_engine)):
+        if order_payload["status"] == OrderStatus.PENDING:
+            if i % n == 0:
+                cancel_payload = {"order_id": order_payload["order_id"]}
+                engine.cancel_order(cancel_payload)
+
+    final_order_states = {o["order_id"]: o for o in orders_from_engine}
+    sanitized_state = sanitize_for_snapshot(final_order_states)
+
+    snapshot.assert_match(
+        json.dumps(sanitized_state), "test_cancel_order_state_snapshot.json"
     )

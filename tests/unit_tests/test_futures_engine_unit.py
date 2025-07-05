@@ -202,11 +202,9 @@ def test_modify_pending_limit_order_price(engine: FuturesEngine):
     }
     engine.modify_position(modify_payload)
 
-    # Assert
     assert limit_buy["status"] == OrderStatus.PENDING
     assert limit_buy["limit_price"] == 98.0
 
-    # Assert book state
     assert ob.best_bid == 95.0, ob.bid_levels
     assert 95.0 not in ob.bids
     assert 98.0 in ob.bids
@@ -239,3 +237,80 @@ def test_modify_filled_order_limit_price_raises_error(engine: FuturesEngine):
 
     with pytest.raises(ValueError):
         engine.modify_position(modify_payload)
+
+
+def test_cancel_pending_limit_order(engine: FuturesEngine):
+    """
+    Scenario: Cancel a PENDING limit order that has not been matched.
+    The order should be removed from the order book, the position removed,
+    and its status updated to CANCELLED.
+    """
+    instrument = "BTC"
+    limit_buy = create_order(
+        "buy1", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=95.0
+    )
+    engine.place_order(limit_buy)
+
+    ob = engine._order_books[instrument]
+    assert ob.best_bid == 95.0, "Order should be on the book before cancellation."
+    assert (
+        engine._position_manager.get("buy1") is not None
+    ), "Position should exist for the pending order."
+
+    engine.cancel_order({"order_id": "buy1"})
+
+    assert limit_buy["status"] == OrderStatus.CANCELLED
+    assert limit_buy["closed_at"] is not None
+
+    assert len(ob.bids) == 1
+    assert len(ob.asks) == 0
+    book_item = ob.bids[95.0]
+    assert book_item.head is None and book_item.tail is None and not book_item.tracker
+    assert ob.best_bid == 95.0
+
+    assert engine._position_manager.get("buy1") is None
+
+
+def test_cancel_filled_order_raises_error(engine: FuturesEngine):
+    """
+    Scenario: Attempt to cancel an order that has already been FILLED.
+    This action is invalid and should raise a ValueError.
+    """
+    setup_sell = create_order(
+        "setup_sell", Side.ASK, OrderType.LIMIT, limit_price=100.0
+    )
+    market_buy = create_order("market_buy", Side.BID, OrderType.MARKET)
+
+    engine.place_order(setup_sell)
+    engine.place_order(market_buy)
+
+    assert market_buy["status"] == OrderStatus.FILLED
+
+    with pytest.raises(ValueError):
+        engine.cancel_order({"order_id": "market_buy"})
+
+    with pytest.raises(ValueError):
+        engine.cancel_order({"order_id": "setup_sell"})
+
+
+def test_cancel_partially_filled_order_raises_error(engine: FuturesEngine):
+    """
+    Scenario: Attempt to cancel an order that is PARTIALLY_FILLED.
+    This is an invalid action and should raise a ValueError.
+    """
+    limit_sell = create_order(
+        "limit_sell", Side.ASK, OrderType.LIMIT, quantity=50, limit_price=100.0
+    )
+    market_buy = create_order("market_buy", Side.BID, OrderType.MARKET, quantity=20)
+
+    engine.place_order(limit_sell)
+    engine.place_order(market_buy)
+
+    assert limit_sell["status"] == OrderStatus.PARTIALLY_FILLED
+    assert market_buy["status"] == OrderStatus.FILLED
+
+    with pytest.raises(ValueError):
+        engine.cancel_order({"order_id": "limit_sell"})
+
+    with pytest.raises(ValueError):
+        engine.cancel_order({"order_id": "market_buy"})
