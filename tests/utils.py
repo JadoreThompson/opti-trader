@@ -39,12 +39,15 @@ def create_order_simple(
     }
 
 
-def create_order_conditional(i: int) -> dict:
+def create_order_conditional(i: int, quantity = None) -> dict:
     is_limit_order = i % 3 == 0
     order_type = OrderType.LIMIT if is_limit_order else OrderType.MARKET
     is_buy = i % 2 == 0
     side = Side.BID if is_buy else Side.ASK
-    base_price, price_step, quantity = 100.0, 0.5, 10
+    base_price, price_step = 100.0, 0.5
+    
+    if quantity is None:
+        quantity = 10
 
     order = {
         "order_id": str(i),
