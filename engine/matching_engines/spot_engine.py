@@ -10,17 +10,17 @@ from typing import Callable, TypedDict, Tuple
 from config import SPOT_QUEUE_KEY, REDIS_CLIENT
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
-from ..enums import Tag
+from ..enums import Tag, MatchOutcome
 from ..exc import PositionNotFound
 from ..order import Order
 from ..orderbook.orderbook import OrderBook
 from ..pusher import Pusher
-from ..typing import EnginePayload, EnginePayloadCategory, MatchResult, MatchOutcome
+from ..typing import EnginePayload, EnginePayloadCategory, MatchResult
 from ..utils import (
     # EnginePayloadCategory,
     # EnginePayload,
     calc_buy_pnl,
-    calculate_upl,
+    update_upl,
     # MatchResult,
 )
 
@@ -80,7 +80,7 @@ class SpotEngine(BaseEngine):
             else:
                 order.payload["status"] = OrderStatus.PARTIALLY_CLOSED
 
-            calculate_upl(order, price, ob)
+            update_upl(order, price, ob)
 
             if order.payload["status"] == OrderStatus.FILLED:
                 filled_orders.append(order)
@@ -131,7 +131,7 @@ class SpotEngine(BaseEngine):
                 )
 
             if order.payload["status"] == OrderStatus.FILLED:
-                calculate_upl(order, price, ob)
+                update_upl(order, price, ob)
             else:
                 self.pusher.append(
                     {
@@ -143,121 +143,145 @@ class SpotEngine(BaseEngine):
 
             self.pusher.append(order.payload)
 
-    def _match(
-        self,
-        order: dict,
-        order_side: Side,
-        ob: OrderBook,
-        price: float,
-    ) -> MatchResult:
-        """
-        Matches order against opposing book
+    # def _match(
+    #     self,
+    #     order: dict,
+    #     order_side: Side,
+    #     ob: OrderBook,
+    #     price: float,
+    # ) -> MatchResult:
+    #     """
+    #     Matches order against opposing book
 
-        Args:
-            order (dict)
-            ob (Orderbook): orderbook
-            price (float): price to target
-            max_attempts (int, optional): Defaults to 5.
-            attempt (int, optional): Defaults to 0.
+    #     Args:
+    #         order (dict)
+    #         ob (Orderbook): orderbook
+    #         price (float): price to target
+    #         max_attempts (int, optional): Defaults to 5.
+    #         attempt (int, optional): Defaults to 0.
 
-        Returns:
-            MatchResult:
-                Filled: (2, price)
-                Partially filled: (1, None)
-                Not filled: (0, None)
-        """
-        touched: list[Order] = []
-        filled: list[tuple[Order, int]] = []
-        book = "asks" if order_side == Side.BID else "bids"
-        target_price = ob.best_price(book, price)
+    #     Returns:
+    #         MatchResult:
+    #             Filled: (2, price)
+    #             Partially filled: (1, None)
+    #             Not filled: (0, None)
+    #     """
+    #     touched: list[Order] = []
+    #     filled: list[tuple[Order, int]] = []
+    #     book = "asks" if order_side == Side.BID else "bids"
+    #     target_price = ob.best_price(book, price)
 
-        if target_price is None:
-            return MatchResult(0, None)
+    #     if target_price is None:
+    #         return MatchResult(0, None)
 
-        for existing_order in ob[book][target_price]:
-            leftover_quant = (
-                existing_order.payload["standing_quantity"] - order["standing_quantity"]
-            )
+    #     for existing_order in ob[book][target_price]:
+    #         leftover_quant = (
+    #             existing_order.payload["standing_quantity"] - order["standing_quantity"]
+    #         )
 
-            if leftover_quant >= 0:
-                touched.append(existing_order)
-                existing_order.payload["standing_quantity"] -= order[
-                    "standing_quantity"
-                ]
-                order["standing_quantity"] = 0
+    #         if leftover_quant >= 0:
+    #             touched.append(existing_order)
+    #             existing_order.payload["standing_quantity"] -= order[
+    #                 "standing_quantity"
+    #             ]
+    #             order["standing_quantity"] = 0
 
-            else:
-                filled.append(
-                    (existing_order, existing_order.payload["standing_quantity"])
-                )
-                order["standing_quantity"] -= existing_order.payload[
-                    "standing_quantity"
-                ]
-                existing_order.payload["standing_quantity"] = 0
+    #         else:
+    #             filled.append(
+    #                 (existing_order, existing_order.payload["standing_quantity"])
+    #             )
+    #             order["standing_quantity"] -= existing_order.payload[
+    #                 "standing_quantity"
+    #             ]
+    #             existing_order.payload["standing_quantity"] = 0
 
-            if order["standing_quantity"] == 0:
-                break
+    #         if order["standing_quantity"] == 0:
+    #             break
 
-        if touched or filled:
-            ob.set_price(price)
+    #     if touched or filled:
+    #         ob.set_price(price)
 
-        self._handle_touched_orders(touched, target_price, ob, filled)
-        self._handle_filled_orders(filled, ob, target_price)
+    #     self._handle_touched_orders(touched, target_price, ob, filled)
+    #     self._handle_filled_orders(filled, ob, target_price)
 
-        if order["standing_quantity"] == 0:
-            return MatchResult(2, target_price)
+    #     if order["standing_quantity"] == 0:
+    #         return MatchResult(2, target_price)
 
-        return MatchResult(1, None)
+    #     return MatchResult(1, None)
 
-    async def place_order(self, payload: dict) -> None:
-        """
-        Handles the result of a new order by matching it against the order book.
-        Depending on the order type (market or limit), the order is either
-        matched immediately or added to the order book for future matching.
-        If the order is filled, take profit and stop loss orders are placed
-        if applicable.
+    # async def place_order(self, payload: dict) -> None:
+    #     """
+    #     Handles the result of a new order by matching it against the order book.
+    #     Depending on the order type (market or limit), the order is either
+    #     matched immediately or added to the order book for future matching.
+    #     If the order is filled, take profit and stop loss orders are placed
+    #     if applicable.
 
-        Args:
-            payload (dict): The order data, including order type, side, price,
-                and quantity.
-        """
+    #     Args:
+    #         payload (dict): The order data, including order type, side, price,
+    #             and quantity.
+    #     """
 
+    #     ob = self._order_books[payload["instrument"]]
+    #     order = Order(payload, Tag.ENTRY, Side.BID)
+
+    #     func: dict[OrderType, Callable] = {
+    #         OrderType.MARKET: self._handle_market_order,
+    #         OrderType.LIMIT: self._handle_limit_order,
+    #     }[payload["order_type"]]
+
+    #     # Only here for testing
+    #     self.count += 1
+    #     if self.count % 2 == 0 and payload["order_type"] == OrderType.MARKET:
+    #         result = MatchResult(2, round(random() * 100, 2))
+    #     else:
+    #         result: MatchResult = func(order, ob)
+
+    #     if payload["order_type"] == OrderType.LIMIT:
+    #         return
+
+    #     if result.outcome == 2:
+    #         ob.set_price(result.price)
+    #         payload["status"] = OrderStatus.FILLED
+    #         payload["standing_quantity"] = payload["quantity"]
+    #         payload["filled_price"] = result.price
+    #         self._place_tp_sl(order, ob)
+    #     else:
+    #         ob.append(order, payload["price"])
+    #         if payload["standing_quantity"] != payload["quantity"]:
+    #             payload["status"] = OrderStatus.PARTIALLY_FILLED
+
+    #     self.pusher.append(payload)
+
+    def place_order(self, payload: dict) -> None:
         ob = self._order_books[payload["instrument"]]
         order = Order(payload, Tag.ENTRY, Side.BID)
 
-        func: dict[OrderType, Callable] = {
-            OrderType.MARKET: self._handle_market_order,
-            OrderType.LIMIT: self._handle_limit_order,
-        }[payload["order_type"]]
-
-        # Only here for testing
-        self.count += 1
-        if self.count % 2 == 0 and payload["order_type"] == OrderType.MARKET:
-            result = MatchResult(2, round(random() * 100, 2))
-        else:
-            result: MatchResult = func(order, ob)
-
         if payload["order_type"] == OrderType.LIMIT:
-            return
+            return ob.append(order, payload["limit_price"])
 
-        if result.outcome == 2:
+        result: MatchResult = super()._match(order, ob)
+
+        if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
             ob.set_price(result.price)
+
+        if result.outcome == MatchOutcome.SUCCESS:
             payload["status"] = OrderStatus.FILLED
             payload["standing_quantity"] = payload["quantity"]
             payload["filled_price"] = result.price
+
             self._place_tp_sl(order, ob)
         else:
-            ob.append(order, payload["price"])
+            ob.append(order, result.price)
             if payload["standing_quantity"] != payload["quantity"]:
                 payload["status"] = OrderStatus.PARTIALLY_FILLED
+            order.current_price_level = result.price
 
-        self.pusher.append(payload)
+    # def _handle_market_order(self, order: Order, ob: OrderBook) -> MatchResult:
+    #     return self._match(order.payload, Side.BID, ob, order.payload["price"])
 
-    def _handle_market_order(self, order: Order, ob: OrderBook) -> MatchResult:
-        return self._match(order.payload, Side.BID, ob, order.payload["price"])
-
-    def _handle_limit_order(self, order: Order, ob: OrderBook) -> None:
-        ob.append(order, order.payload["limit_price"])
+    # def _handle_limit_order(self, order: Order, ob: OrderBook) -> None:
+    #     ob.append(order, order.payload["limit_price"])
 
     def _place_tp_sl(self, order: Order, ob: OrderBook) -> None:
         """

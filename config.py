@@ -1,10 +1,5 @@
-import trace
-import traceback
-import os
-import logging
-import sys
-
 import argon2
+import os
 import redis
 import redis.asyncio
 import redis.asyncio.connection
@@ -17,14 +12,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 load_dotenv()
 
-logging.basicConfig(
-    filename="app.log",
-    level=logging.INFO,
-    format="[%(levelname)s][%(asctime)s] %(name)s - %(funcName)s - %(message)s",
-)
-
 BASE_PATH = os.getcwd()
-DEV_MODE = False
+PRODUCTION = False
 
 
 # DB
@@ -56,7 +45,6 @@ ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
 INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
 
 
-###
 PH = argon2.PasswordHasher(
     time_cost=int(os.getenv("TIME_COST")),
     memory_cost=int(os.getenv("MEMORY_COST")),

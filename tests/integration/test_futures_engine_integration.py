@@ -51,11 +51,15 @@ def test_close_order_state_snapshot(populated_engine, n, snapshot):
     open_positions = list(engine._position_manager._positions.items())
 
     for i, (order_id, pos) in enumerate(open_positions):
-        if pos.entry_order.payload["status"] == OrderStatus.CLOSED:
+        if pos.entry_order.payload["status"] in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED, OrderStatus.CLOSED):
             continue
 
         if i % n == 0:
-            close_payload = {"order_id": order_id}
+            options = [
+                "ALL",
+                *range(1, pos.entry_order.payload["standing_quantity"] + 1),
+            ]
+            close_payload = {"order_id": order_id, "quantity": options[i % len(options)]}
             engine.close_order(close_payload)
 
     final_order_states = {o["order_id"]: o for o in orders_from_engine}

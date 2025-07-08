@@ -12,7 +12,7 @@ from config import (
     ORDER_LOCK_PREFIX,
     REDIS_CLIENT,
     DB_LOCK,
-    DEV_MODE,
+    PRODUCTION,
     DB_URL,
 )
 from db_models import Instruments
@@ -99,7 +99,7 @@ async def run_migrate() -> None:
     os.system("alembic upgrade head")
 
     async with get_db_session() as sess:
-        if DEV_MODE:
+        if PRODUCTION:
             await sess.execute(text("DELETE FROM orders;"))
             await sess.execute(text("DELETE FROM users WHERE username != 'admin';"))
 

@@ -1,16 +1,13 @@
 import asyncio
-from multiprocessing import Value
 import warnings
 
 from typing import Iterable, TypedDict, List, overload
 from r_mutex import LockClient
-from websockets import Close
 
 from enums import OrderStatus, OrderType, Side
-from ..enums import Tag
+from ..enums import MatchOutcome
 from ..order import Order
 from ..orderbook.orderbook import OrderBook
-from ..position import Position
 from ..position_manager import PositionManager
 from ..pusher import Pusher
 from ..typing import MatchResult, ClosePayload, ModifyPayload
@@ -34,6 +31,7 @@ class BaseEngine:
 
     async def run(self, instruments: List[str]) -> None:
         """
+        DO NOT CALL !!!
         Initializes the engine and starts the pusher.
 
         This method sets up the connection to the pusher and waits for it to start.
@@ -70,9 +68,6 @@ class BaseEngine:
     @overload
     def place_order(self, payload: dict) -> None: ...
 
-    @overload
-    def close_order(self, payload: ClosePayload) -> None: ...
-
     def modify_position(self, data: ModifyPayload) -> None:
         """
         Handles the shuffling and value assignment of an existing
@@ -96,33 +91,84 @@ class BaseEngine:
                 ob.remove(order, payload["limit_price"])
                 ob.append(order, data["limit_price"])
                 payload["limit_price"] = data["limit_price"]
+                order.current_price_level = data["limit_price"]
             else:
                 raise ValueError(
-                    f"Cannot change limit price for order with order status {OrderStatus.PENDING} and order type {OrderType.LIMIT}"
+                    f"Cannot change limit price. Order status must be {OrderStatus.PENDING} and order type {OrderType.LIMIT}"
                 )
 
-        # Handle TP SL price
-        payload["take_profit"] = data["take_profit"]
-        payload["stop_loss"] = data["stop_loss"]
-
+        # Handle TP & SL price
         if status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
             if data["take_profit"] != payload["take_profit"] and pos.take_profit_order:
-                ob.remove(pos.take_profit_order)
+                ob.remove(pos.take_profit_order, payload["take_profit"])
+                payload["take_profit"] = data["take_profit"]
             if data["stop_loss"] != payload["stop_loss"] and pos.stop_loss_order:
-                ob.remove(pos.stop_loss_order)
+                ob.remove(pos.stop_loss_order, payload["stop_loss"])
+                payload["stop_loss"] = data["stop_loss"]
 
             self._place_tp_sl(order, ob)
 
         self.pusher.append(payload)
 
     @overload
-    def _match(
-        self,
-        order: dict,
-        order_side: Side,
-        ob: OrderBook,
-        price: float,
-    ) -> MatchResult: ...
+    def close_order(self, payload: ClosePayload) -> None: ...
+
+    def _match(self, order: Order, ob: OrderBook) -> MatchResult:
+        """
+        Matches order against opposing book
+
+        Args:
+            order (dict)
+            order_side (Side)
+            ob (Orderbook): orderbook
+            price (float): price to target
+
+        Returns:
+            MatchResult:
+                Filled: (2, price)
+                Partially filled: (1, None)
+                Not filled: (0, None)
+        """
+        book_to_match = "asks" if order.side == Side.BID else "bids"
+        aggresive_payload = order.payload
+        starting_quantity = aggresive_payload["standing_quantity"]
+
+        target_price = ob.best_ask if order.side == Side.BID else ob.best_bid
+        if target_price is None:
+            return MatchResult(MatchOutcome.FAILURE, None)
+
+        touched_orders: list[Order] = []
+        filled_orders: list[tuple[Order, int]] = []
+
+        for resting_order in ob.get_orders(target_price, book_to_match):
+            if aggresive_payload["standing_quantity"] == 0:
+                break
+
+            if resting_order == order:  # Self match prevention.
+                continue
+
+            og_resting_qty = resting_order.payload["standing_quantity"]
+            match_qty = min(og_resting_qty, aggresive_payload["standing_quantity"])
+
+            resting_order.payload["standing_quantity"] -= match_qty
+            aggresive_payload["standing_quantity"] -= match_qty
+
+            if resting_order.payload["standing_quantity"] == 0:
+                filled_orders.append((resting_order, og_resting_qty))
+            else:
+                touched_orders.append((resting_order, og_resting_qty))
+
+        self._handle_touched_orders(touched_orders, filled_orders, target_price)
+        self._handle_filled_orders(filled_orders, target_price, ob)
+
+        if aggresive_payload["standing_quantity"] == 0:
+            return MatchResult(MatchOutcome.SUCCESS, target_price)
+        if aggresive_payload["standing_quantity"] == starting_quantity:
+            return MatchResult(MatchOutcome.FAILURE, None)
+        return MatchResult(MatchOutcome.PARTIAL, target_price)
+
+    @overload
+    def _place_tp_sl(self, order: Order, ob: OrderBook) -> None: ...
 
     def _handle_cancel(self, payload: ClosePayload) -> None:
         """
@@ -133,12 +179,14 @@ class BaseEngine:
         Args:
             payload (CancelOrderPayload): _description_
         """
-        pos = self._position_manager.get(payload['order_id'])
+        pos = self._position_manager.get(payload["order_id"])
         order = pos.entry_order
-        
-        if order.payload['status'] != OrderStatus.PENDING:
-            raise ValueError("Cannot cancel order with status {order.payload['status']}. Must have status '{OrderStatus.PENDING}'.")
-        
+
+        if order.payload["status"] != OrderStatus.PENDING:
+            raise ValueError(
+                "Cannot cancel order with status {order.payload['status']}. Must have status '{OrderStatus.PENDING}'."
+            )
+
         ob = self._order_books[pos.instrument]
 
         if (
@@ -157,9 +205,6 @@ class BaseEngine:
         )
         pos.entry_order.payload["status"] = OrderStatus.CLOSED
         self.pusher.append(pos.entry_order.payload, speed="fast")
-
-    @overload
-    def _place_tp_sl(self, order: Order, ob: OrderBook) -> None: ...
 
     @overload
     def _handle_filled_orders(

@@ -2,7 +2,7 @@ from sortedcontainers.sorteddict import SortedDict
 from typing import Iterable, KeysView, Literal
 
 from enums import Side
-from .orderbook_item import OrderbookItem
+from .orderbook_item import PriceLevel
 from .node import Node
 from ..enums import Tag
 from ..order import Order
@@ -34,8 +34,8 @@ class OrderBook:
     """
 
     def __init__(self, price=100.0) -> None:
-        self._bids: dict[float, OrderbookItem] = SortedDict()
-        self._asks: dict[float, OrderbookItem] = SortedDict()
+        self._bids: dict[float, PriceLevel] = SortedDict()
+        self._asks: dict[float, PriceLevel] = SortedDict()
         self._bid_levels = self._bids.keys()
         self._ask_levels = self._asks.keys()
         self._best_bid_price = None
@@ -44,7 +44,7 @@ class OrderBook:
         self._cur_price = round(price, 2)
         self._pos_tracker: dict[str, Position] = {}
 
-    def append(self, order: Order, price: float | None = None) -> None:
+    def append(self, order: Order, price: float) -> None:
         """
         Appends order to tracking and to the book
 
@@ -52,15 +52,12 @@ class OrderBook:
             order (Order)
             price (float) - Price level to be appended to
         """
-        if price is not None:
-            price = round(price, 2)
-        else:
-            price = self._cur_price
+        price = round(price, 2)
 
         if order.side == Side.BID:
-            ob_item = self._bids.setdefault(price, OrderbookItem())
+            ob_item = self._bids.setdefault(price, PriceLevel())
         elif order.side == Side.ASK:
-            ob_item = self._asks.setdefault(price, OrderbookItem())
+            ob_item = self._asks.setdefault(price, PriceLevel())
         else:
             raise ValueError(f"Invalid order side: {order.side}")
 
@@ -117,7 +114,7 @@ class OrderBook:
         # Cleanup
         orders_node.prev = None
         orders_node.next = None
-        ob_item.tracker.pop(order.payload["order_id"], None)
+        ob_item.tracker.pop(order.payload["order_id"])
 
         if ob_item.head is None and len(book) > 1:
             book.pop(price, None)
@@ -174,6 +171,9 @@ class OrderBook:
 
     def _find_best_bid(self, price: float) -> float | None:
         """Find highest bid price <= current price that has orders"""
+        if len(self._bids) == 1:
+            return self.bid_levels[0]
+
         idx = self._bids.bisect_right(price)
 
         for i in range(idx - 1, -1, -1):
@@ -186,6 +186,9 @@ class OrderBook:
 
     def _find_best_ask(self, price: float) -> float | None:
         """Find lowest ask price >= current price that has orders"""
+        if len(self._asks) == 1:
+            return self._ask_levels[0]
+
         idx = self._asks.bisect_right(price)
 
         for i in range(idx, len(self._asks)):
@@ -213,11 +216,16 @@ class OrderBook:
             cur = cur.next
 
     @property
-    def bids(self) -> dict[float, OrderbookItem]:
+    def price(self) -> float:
+        """Returns the current price."""
+        return self._cur_price
+
+    @property
+    def bids(self) -> dict[float, PriceLevel]:
         return self._bids
 
     @property
-    def asks(self) -> dict[float, OrderbookItem]:
+    def asks(self) -> dict[float, PriceLevel]:
         return self._asks
 
     @property
@@ -238,7 +246,7 @@ class OrderBook:
 
         if (
             len(self._bid_levels) > 1
-            and self._bids.get(self._best_bid_price, OrderbookItem()).head is None
+            and self._bids.get(self._best_bid_price, PriceLevel()).head is None
         ):
             self._bids.pop(self._best_bid_price, None)
             self._best_bid_price = self._find_best_bid(self._best_bid_price)
@@ -255,7 +263,7 @@ class OrderBook:
 
         if (
             len(self._ask_levels) > 1
-            and self._asks.get(self._best_ask_price, OrderbookItem()).head == None
+            and self._asks.get(self._best_ask_price, PriceLevel()).head == None
         ):
             self._asks.pop(self._best_ask_price, None)
             self._best_ask_price = self._find_best_ask(self._best_ask_price)

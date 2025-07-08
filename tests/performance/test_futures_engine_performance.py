@@ -11,7 +11,7 @@ PERFORMANCE_TEST_SIZES = [100, 500, 1000, 2000, 10_000, 100_000]
 
 
 @pytest.mark.parametrize("n_new", PERFORMANCE_TEST_SIZES)
-def test_place_order_performance(n_new, benchmark):
+def test_futures_engine_place_order_performance(n_new, benchmark):
     """
     Measures the performance of placing a batch of 100 new orders into an
     engine that is already populated with a varying number of orders.
