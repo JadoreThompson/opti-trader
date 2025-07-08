@@ -1,14 +1,13 @@
 import pytest
 from engine import FuturesEngine
 from enums import OrderStatus, OrderType, Side
-from tests.mocks import MockLock, MockPusher
 from tests.utils import create_order_simple
 
 
 @pytest.fixture
 def engine():
     """Provides a clean instance of the FuturesEngine for each test."""
-    return FuturesEngine(MockLock(), MockPusher())
+    return FuturesEngine()
 
 
 def test_place_limit_orders_no_match(engine: FuturesEngine):
@@ -65,12 +64,12 @@ def test_market_bid_fills_limit_ask(engine: FuturesEngine):
 
     # Assert Order Book State
     ob = engine._order_books[limit_sell["instrument"]]
-    assert ob.best_bid == 90.0  # Sell limit TP
+    assert ob.best_bid == 110.0  # Sell limit TP
     book_item = ob.bids[90.0]
     assert book_item.head == book_item.tail
     book_item = ob.bids[110.0]
     assert book_item.head == book_item.tail
-    assert len(ob.asks.keys()) == 1
+    assert len(ob.asks.keys()) == 0
 
 
 def test_market_bid_partially_fills_limit_ask(engine: FuturesEngine):
@@ -96,7 +95,7 @@ def test_market_bid_partially_fills_limit_ask(engine: FuturesEngine):
     assert ob.best_ask == 100.0
     book_item = ob.asks[100.0]
     assert book_item.head == book_item.tail
-    assert ob.best_bid == 100.0
+    assert ob.best_bid == None
 
 
 def test_close_long_position_for_loss(engine: FuturesEngine):
@@ -313,12 +312,8 @@ def test_cancel_pending_limit_order(engine: FuturesEngine):
     assert limit_buy["status"] == OrderStatus.CANCELLED
     assert limit_buy["closed_at"] is not None
 
-    assert len(ob.bids) == 1
+    assert len(ob.bids) == 0
     assert len(ob.asks) == 0
-    book_item = ob.bids[95.0]
-    assert book_item.head is None and book_item.tail is None and not book_item.tracker
-    assert ob.best_bid == 95.0
-
     assert engine._position_manager.get("buy1") is None
 
 

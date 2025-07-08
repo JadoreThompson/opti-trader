@@ -4,7 +4,6 @@ from uuid import uuid4
 from datetime import datetime
 from engine import FuturesEngine
 from enums import OrderStatus, OrderType, Side
-from tests.mocks import MockLock, MockPusher
 from typing import Generator, Tuple
 
 
@@ -88,7 +87,7 @@ def populated_engine(
     This replaces the fixture that used the mock engine.
     """
     num_orders = request.param
-    engine = FuturesEngine(MockLock(), MockPusher())
+    engine = FuturesEngine()
     orders = tuple(create_order_conditional(i) for i in range(num_orders))
 
     for order in orders:

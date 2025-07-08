@@ -2,7 +2,6 @@ import asyncio
 
 from datetime import datetime
 from collections.abc import Iterable
-from r_mutex import LockClient
 from typing import Callable
 
 from config import FUTURES_QUEUE_KEY, PRODUCTION, REDIS_CLIENT
@@ -12,12 +11,12 @@ from ..enums import Tag, MatchOutcome
 from ..order import Order
 from ..orderbook import OrderBook
 from ..position import Position
-from ..pusher import Pusher
 from ..typing import (
     ClosePayloadQuantity,
     EnginePayloadCategory,
     MatchResult,
     ClosePayload,
+    ModifyPayload,
 )
 from ..utils import (
     calc_sell_pnl,
@@ -29,10 +28,8 @@ from ..utils import (
 class FuturesEngine(BaseEngine):
     def __init__(
         self,
-        instrument_lock: LockClient,
-        pusher: Pusher,
     ) -> None:
-        super().__init__(instrument_lock, pusher)
+        super().__init__()
 
     async def _listen(self) -> None:
         """
@@ -53,7 +50,7 @@ class FuturesEngine(BaseEngine):
             EnginePayloadCategory.NEW: self.place_order,
             EnginePayloadCategory.MODIFY: self.modify_position,
             EnginePayloadCategory.CLOSE: self.close_order,
-            EnginePayloadCategory.CANCEL: self._handle_cancel,
+            EnginePayloadCategory.CANCEL: self.cancel_order,
             EnginePayloadCategory.APPEND: self._handle_append_ob,
         }
 
@@ -204,6 +201,46 @@ class FuturesEngine(BaseEngine):
                 result.price,
             )
 
+    def modify_position(self, data: ModifyPayload) -> None:
+        """
+        Handles the shuffling and value assignment of an existing
+        position
+
+        Args:
+            data (ModifyPayload): Dictionary containing modification details.
+        """
+        pos = self._position_manager.get(data["order_id"])
+        ob = self._order_books[pos.instrument]
+        order = pos.entry_order
+        payload = order.payload
+        status = payload["status"]
+
+        # Handle limit price field
+        if data["limit_price"] is not None:
+            if (
+                status == OrderStatus.PENDING
+                and payload["order_type"] == OrderType.LIMIT
+            ):
+                ob.remove(order, payload["limit_price"])
+                ob.append(order, data["limit_price"])
+                payload["limit_price"] = data["limit_price"]
+                order.current_price_level = data["limit_price"]
+            else:
+                raise ValueError(
+                    f"Cannot change limit price. Order status must be {OrderStatus.PENDING} and order type {OrderType.LIMIT}"
+                )
+
+        # Handle TP & SL price
+        if status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
+            if data["take_profit"] != payload["take_profit"] and pos.take_profit_order:
+                ob.remove(pos.take_profit_order, payload["take_profit"])
+                payload["take_profit"] = data["take_profit"]
+            if data["stop_loss"] != payload["stop_loss"] and pos.stop_loss_order:
+                ob.remove(pos.stop_loss_order, payload["stop_loss"])
+                payload["stop_loss"] = data["stop_loss"]
+
+            self._place_tp_sl(order, ob)        
+
     def cancel_order(self, data: ClosePayload) -> None:
         """
         Cancels a pending or partially filled order. Removes it from the orderbook
@@ -333,16 +370,6 @@ class FuturesEngine(BaseEngine):
                         price,
                     )
 
-            self.pusher.append(
-                {
-                    "user_id": order.payload["user_id"],
-                    "amount": order.payload["realised_pnl"],
-                },
-                "balance",
-            )
-
-            self.pusher.append(order.payload)
-
     def _handle_touched_orders(
         self,
         orders: Iterable[tuple[Order, int]],
@@ -370,16 +397,6 @@ class FuturesEngine(BaseEngine):
                 update_upl(order, price)
                 if order.payload["status"] == OrderStatus.CLOSED:
                     filled_orders.append((order, standing_qty))
-
-                self.pusher.append(
-                    {
-                        "user_id": order.payload["user_id"],
-                        "amount": order.payload["realised_pnl"],
-                    },
-                    "balance",
-                )
-
-            self.pusher.append(order.payload)
 
     def _handle_partially_filled_order_cancel(
         self, pos: Position, ob: OrderBook, requested_qty: int

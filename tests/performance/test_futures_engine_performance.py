@@ -1,7 +1,6 @@
-from random import shuffle
 import pytest
+from random import shuffle
 from engine import FuturesEngine
-from tests.mocks import MockPusher, MockLock
 from tests.utils import (
     create_order_conditional,
 )
@@ -30,7 +29,7 @@ def test_futures_engine_place_order_performance(n_new, benchmark):
         create_order_conditional(i, quantities[i % len(quantities)])
         for i in range(n_new)
     )
-    engine_instance = FuturesEngine(MockLock(), MockPusher())
+    engine_instance = FuturesEngine()
 
     def place_order_batch():
         order = next(new_orders_to_place)
