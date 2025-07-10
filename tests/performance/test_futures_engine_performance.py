@@ -22,7 +22,7 @@ def test_futures_engine_place_order_performance(n_new, benchmark):
     pytest -k test_place_order_performance --benchmark-only
     """
     # Warming
-    quantities = [*range(1, 100, 5)] + ([*range(10)] * 2)
+    quantities = [*range(1, 100, 5)] + ([*range(1, 10)] * 2)
     shuffle(quantities)
 
     new_orders_to_place = (
@@ -33,7 +33,6 @@ def test_futures_engine_place_order_performance(n_new, benchmark):
 
     def place_order_batch():
         order = next(new_orders_to_place)
-        # print(order["quantity"])
         engine_instance.place_order(order)
 
     benchmark.pedantic(

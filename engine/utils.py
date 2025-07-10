@@ -49,49 +49,6 @@ def dump_obj(obj: dict) -> str:
     )
 
 
-# DANGER !!!
-# def calculate_upl(order: Order, new_price: float, ob) -> None:
-#     """
-#     Calculates the Unrealised PnL for a given order.
-#     If the calcualted pnl equals to the negative value for the
-#     value of the position, it's assigned order status CLOSED,
-#     standing quantity and unrealised pnl of 0, realised pnl
-#     is then calculated.
-
-#     Args:
-#         order (Order)
-#         new_price (float)
-#         ob (OrderBook)
-#     """
-#     if order.payload["filled_price"] is None:
-#         return False
-
-#     pos_value = order.payload["filled_price"] * order.payload["standing_quantity"]
-
-#     if order.payload["side"] == Side.ASK:
-#         upl = calc_sell_pnl(pos_value, order.payload["filled_price"], new_price)
-#     else:
-#         upl = calc_buy_pnl(pos_value, order.payload["filled_price"], new_price)
-
-#     new_upl = round(-(pos_value - upl), 2)
-
-#     if new_upl:
-#         if new_upl <= -pos_value:
-#             # ob.remove_all(order)
-#             order.payload["status"] = OrderStatus.CLOSED
-#             order.payload["closed_at"] = datetime.now()
-#             order.payload["closed_price"] = new_price
-#             order.payload["standing_quantity"] = order.payload["unrealised_pnl"] = 0
-#             order.payload["realised_pnl"] += new_upl
-#             return True
-#         else:
-#             order.payload["unrealised_pnl"] = new_upl
-
-#     return False
-from datetime import datetime
-from decimal import Decimal  # if you're working with money
-
-
 def update_upl(order: Order, new_price: float) -> None:
     """
     Updates the order's unrealised pnl field. If the unrealised

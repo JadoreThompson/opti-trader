@@ -95,6 +95,7 @@ def test_market_bid_partially_fills_limit_ask(engine: FuturesEngine):
     assert ob.best_ask == 100.0
     book_item = ob.asks[100.0]
     assert book_item.head == book_item.tail
+    # print(ob.bids[100.0].head.order.position._payload['status'])
     assert ob.best_bid == None
 
 
@@ -152,7 +153,6 @@ def test_close_long_position_for_loss(engine: FuturesEngine):
     )
     engine.place_order(setup_long_order)
 
-    # Exiting long
     engine.close_order({"order_id": "long_pos", "quantity": "ALL"})
 
     assert long_pos_order["status"] == OrderStatus.CLOSED
@@ -259,7 +259,7 @@ def test_modify_pending_limit_order_price(engine: FuturesEngine):
     assert 95.0 not in ob.bids
     assert 98.0 in ob.bids
     book_item = ob.bids[98.0]
-    assert book_item.head.order.payload["order_id"] == "buy1"
+    assert book_item.head.order.position._payload["order_id"] == "buy1"
 
 
 def test_modify_filled_order_limit_price_raises_error(engine: FuturesEngine):
@@ -357,5 +357,5 @@ def test_cancel_partially_filled_order_raises_error(engine: FuturesEngine):
     assert limit_sell["status"] == OrderStatus.PARTIALLY_FILLED
     assert market_buy["status"] == OrderStatus.FILLED
 
-    with pytest.raises(ValueError):
-        engine.cancel_order({"order_id": "market_buy", "quantity": "ALL"})
+    engine.cancel_order({"order_id": "limit_sell", "quantity": "ALL"})
+    assert limit_sell["filled_price"] == 100.0

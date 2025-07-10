@@ -9,7 +9,7 @@ class PriceLevel:
         self._tracker: dict[str, PriceLevelNode] = {}
 
     def append(self, order: Order) -> None:
-        if order.payload["order_id"] in self._tracker:
+        if order.position.id in self._tracker:
             raise ValueError(
                 f"Order with id {order.payload['order_id']} already on level."
             )
@@ -24,10 +24,10 @@ class PriceLevel:
             new_node.prev = self._tail
             self._tail = new_node
 
-        self._tracker[order.payload["order_id"]] = new_node
+        self._tracker[order.position.id] = new_node
 
     def remove(self, order: Order) -> None:
-        orders_node = self._tracker[order.payload["order_id"]]
+        orders_node = self._tracker[order.position.id]
 
         if orders_node.prev is not None:
             orders_node.prev.next = orders_node.next
@@ -44,7 +44,7 @@ class PriceLevel:
         # Cleanup
         orders_node.prev = None
         orders_node.next = None
-        self._tracker.pop(order.payload["order_id"])
+        self._tracker.pop(order.position.id)
 
     def __bool__(self):
         return self._head is not None

@@ -1,3 +1,4 @@
+from tracemalloc import start
 from typing import Iterable, TypedDict, List, overload
 
 from enums import Side
@@ -27,10 +28,10 @@ class BaseEngine:
 
     @overload
     def place_order(self, payload: dict) -> None: ...
-    
+
     @overload
     def close_order(self, payload: ClosePayload) -> None: ...
-    
+
     @overload
     async def _listen(self) -> None: ...
 
@@ -51,8 +52,10 @@ class BaseEngine:
                 Not filled: (0, None)
         """
         book_to_match = "asks" if order.side == Side.BID else "bids"
-        aggresive_payload = order.payload
-        starting_quantity = aggresive_payload["standing_quantity"]
+        # aggresive_payload = order.payload
+        # starting_quantity = aggresive_payload["standing_quantity"]
+        starting_quantity: int = order.position.standing_quantity
+        cur_quantity = starting_quantity
 
         target_price = ob.best_ask if order.side == Side.BID else ob.best_bid
         if target_price is None:
@@ -62,35 +65,54 @@ class BaseEngine:
         filled_orders: list[tuple[Order, int]] = []
 
         for resting_order in ob.get_orders(target_price, book_to_match):
-            if aggresive_payload["standing_quantity"] == 0:
+            # if aggresive_payload["standing_quantity"] == 0:
+            #     break
+            if cur_quantity == 0:
                 break
 
-            if resting_order == order:  # Self match prevention.
+            if resting_order == order:
                 continue
 
-            og_resting_qty = resting_order.payload["standing_quantity"]
-            match_qty = min(og_resting_qty, aggresive_payload["standing_quantity"])
+            # print(resting_order)
 
-            resting_order.payload["standing_quantity"] -= match_qty
-            aggresive_payload["standing_quantity"] -= match_qty
+            # og_resting_qty = resting_order.payload["standing_quantity"]
+            # match_qty = min(og_resting_qty, aggresive_payload["standing_quantity"])
+            og_resting_qty = resting_order.position.standing_quantity
+            match_qty = min(og_resting_qty, cur_quantity)
 
-            if resting_order.payload["standing_quantity"] == 0:
+            # resting_order.payload["standing_quantity"] -= match_qty
+            # aggresive_payload["standing_quantity"] -= match_qty
+            resting_order.position.reduce_standing_quantity(target_price, match_qty)
+            # print(resting_order.position._payload)
+            cur_quantity -= match_qty
+
+            # if resting_order.payload["standing_quantity"] == 0:
+            if resting_order.position.standing_quantity == 0:
                 filled_orders.append((resting_order, og_resting_qty))
             else:
-                touched_orders.append((resting_order, og_resting_qty))
+                touched_orders.append(resting_order)
 
-        self._handle_touched_orders(touched_orders, filled_orders, target_price)
+        # self._handle_touched_orders(touched_orders, filled_orders, target_price)
+        # self._handle_filled_orders(filled_orders, target_price, ob)
+        self._handle_touched_orders(touched_orders, target_price)
         self._handle_filled_orders(filled_orders, target_price, ob)
 
-        if aggresive_payload["standing_quantity"] == 0:
+        # if aggresive_payload["standing_quantity"] == 0:
+        #     return MatchResult(MatchOutcome.SUCCESS, target_price)
+        # if aggresive_payload["standing_quantity"] == starting_quantity:
+        #     return MatchResult(MatchOutcome.FAILURE, None)
+        order.position.reduce_standing_quantity(
+            target_price, starting_quantity - cur_quantity
+        )
+        if cur_quantity == 0:
             return MatchResult(MatchOutcome.SUCCESS, target_price)
-        if aggresive_payload["standing_quantity"] == starting_quantity:
+        if cur_quantity == starting_quantity:
             return MatchResult(MatchOutcome.FAILURE, None)
         return MatchResult(MatchOutcome.PARTIAL, target_price)
 
     @overload
     def _place_tp_sl(self, order: Order, ob: OrderBook) -> None: ...
-    
+
     @overload
     def _handle_filled_orders(
         self, orders: Iterable[tuple[Order, int]], ob: OrderBook, price: float
