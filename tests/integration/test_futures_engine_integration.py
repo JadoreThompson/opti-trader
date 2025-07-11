@@ -2,6 +2,7 @@ import json
 import pytest
 import copy
 
+from engine.typing import CloseRequest, ModifyRequest
 from enums import OrderStatus, OrderType, Side
 from tests.utils import (
     # Fixture Imports
@@ -51,15 +52,21 @@ def test_close_order_state_snapshot(populated_engine, n, snapshot):
     open_positions = list(engine._position_manager._positions.items())
 
     for i, (order_id, pos) in enumerate(open_positions):
-        if pos.entry_order.payload["status"] in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED, OrderStatus.CLOSED):
+        if pos.payload["status"] in (
+            OrderStatus.PENDING,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.CLOSED,
+        ):
             continue
 
         if i % n == 0:
             options = [
                 "ALL",
-                *range(1, pos.entry_order.payload["standing_quantity"] + 1),
+                *range(1, pos.payload["standing_quantity"] + 1),
             ]
-            close_payload = {"order_id": order_id, "quantity": options[i % len(options)]}
+            close_payload = CloseRequest(
+                **{"order_id": order_id, "quantity": options[i % len(options)]}
+            )
             engine.close_order(close_payload)
 
     final_order_states = {o["order_id"]: o for o in orders_from_engine}
@@ -97,7 +104,7 @@ def test_modify_position_state_snapshot(populated_engine, n, snapshot):
                 "take_profit": order_payload["take_profit"],
                 "stop_loss": order_payload["stop_loss"],
             }
-            engine.modify_position(modify_payload)
+            engine.modify_order(ModifyRequest(**modify_payload))
 
         elif status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             filled_price = order_payload["filled_price"]
@@ -113,13 +120,13 @@ def test_modify_position_state_snapshot(populated_engine, n, snapshot):
                 "take_profit": new_tp,
                 "stop_loss": new_sl,
             }
-            engine.modify_position(modify_payload)
+            engine.modify_order(ModifyRequest(**modify_payload))
 
     final_order_states = {o["order_id"]: o for o in orders_from_engine}
     sanitized_state = sanitize_for_snapshot(final_order_states)
 
     snapshot.assert_match(
-        json.dumps(sanitized_state), "test_modify_position_state_snapshot.json"
+        json.dumps(sanitized_state), "test_modify_order_state_snapshot.json"
     )
 
 
@@ -137,7 +144,7 @@ def test_cancel_order_state_snapshot(populated_engine, n, snapshot):
         if order_payload["status"] == OrderStatus.PENDING:
             if i % n == 0:
                 cancel_payload = {"order_id": order_payload["order_id"]}
-                engine.cancel_order(cancel_payload)
+                engine.cancel_order(CloseRequest(**cancel_payload))
 
     final_order_states = {o["order_id"]: o for o in orders_from_engine}
     sanitized_state = sanitize_for_snapshot(final_order_states)

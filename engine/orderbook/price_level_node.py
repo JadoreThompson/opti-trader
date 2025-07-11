@@ -3,6 +3,11 @@ from ..order import Order
 
 
 class PriceLevelNode:
+    """
+    Doubly linked list to house an order within
+    a PriceLevel.
+    """
+
     def __init__(
         self,
         order: Order,

@@ -35,6 +35,34 @@ class OrderBook:
         self._starting_price = price
         self._cur_price = round(price, 2)
 
+    @property
+    def price(self) -> float:
+        return self._cur_price
+
+    @property
+    def bids(self) -> dict[float, PriceLevel]:
+        return self._bids
+
+    @property
+    def asks(self) -> dict[float, PriceLevel]:
+        return self._asks
+
+    @property
+    def bid_levels(self) -> KeysView[float]:
+        return self._bid_levels
+
+    @property
+    def ask_levels(self) -> KeysView[float]:
+        return self._ask_levels
+
+    @property
+    def best_bid(self) -> float | None:
+        return self._best_bid_price
+
+    @property
+    def best_ask(self) -> float | None:
+        return self._best_ask_price
+
     def append(self, order: Order, price: float) -> None:
         """
         Adds an order to the order book at the specified price level.
@@ -131,31 +159,3 @@ class OrderBook:
         while cur:
             yield cur.order
             cur = cur.next
-
-    @property
-    def price(self) -> float:
-        return self._cur_price
-
-    @property
-    def bids(self) -> dict[float, PriceLevel]:
-        return self._bids
-
-    @property
-    def asks(self) -> dict[float, PriceLevel]:
-        return self._asks
-
-    @property
-    def bid_levels(self) -> KeysView[float]:
-        return self._bid_levels
-
-    @property
-    def ask_levels(self) -> KeysView[float]:
-        return self._ask_levels
-
-    @property
-    def best_bid(self) -> float | None:
-        return self._best_bid_price
-
-    @property
-    def best_ask(self) -> float | None:
-        return self._best_ask_price

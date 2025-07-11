@@ -1,33 +1,31 @@
 from collections import namedtuple
-from typing import Literal, TypedDict, Union
-from .enums import EnginePayloadCategory
+from dataclasses import dataclass
+from typing import Literal, Union
 
+MODIFY_DEFAULT = float("inf")
 
 MatchResult = namedtuple(
     "MatchResult",
-    (
-        "outcome",
-        "price",
-    ),
+    ("outcome", "price", "quantity"),
 )
 
-ClosePayloadQuantity = Union[Literal["ALL"], int]
+CloseRequestQuantity = Union[Literal["ALL"], int]
 
 
-class EnginePayload(TypedDict):
-    """Payload Schema for submitting requests to the engine"""
-
-    category: EnginePayloadCategory
-    content: dict
-
-
-class ClosePayload(TypedDict):
+@dataclass
+class CloseRequest:
     order_id: str
-    quantity: ClosePayloadQuantity
+    quantity: CloseRequestQuantity
 
-
-class ModifyPayload(TypedDict):
+@dataclass
+class CancelRequest:
     order_id: str
-    limit_price: float | None = None
-    take_profit: float | None = None
-    stop_loss: float | None = None
+    quantity: CloseRequestQuantity
+
+
+@dataclass
+class ModifyRequest:
+    order_id: str
+    limit_price: float | None = MODIFY_DEFAULT
+    take_profit: float | None = MODIFY_DEFAULT
+    stop_loss: float | None = MODIFY_DEFAULT
