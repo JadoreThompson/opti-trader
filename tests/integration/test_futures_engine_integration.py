@@ -1,6 +1,6 @@
+import copy
 import json
 import pytest
-import copy
 
 from engine.typing import CloseRequest, ModifyRequest
 from enums import OrderStatus, OrderType, Side

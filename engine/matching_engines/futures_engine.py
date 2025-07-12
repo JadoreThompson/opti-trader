@@ -19,6 +19,17 @@ class FuturesEngine(BaseEngine):
         super().__init__()
 
     def place_order(self, payload: dict) -> None:
+        """
+        Places a new order in the futures engine.
+
+        Creates an entry order and attempts to match it against the order book.
+        If not immediately filled, the order is added to the book. Handles
+        take-profit and stop-loss setup.
+
+        Args:
+            payload (dict): Order details including instrument, side, quantity, 
+                type, and limit price.
+        """
         if payload["instrument"] not in self._orderbooks:
             if PRODUCTION:
                 return
@@ -50,6 +61,7 @@ class FuturesEngine(BaseEngine):
             ob.set_price(result.price)
             self._place_tp_sl(pos, ob)
             pos.apply_entry_fill(result.quantity, result.price)
+            order.filled_quantity = result.quantity
 
             if result.outcome == MatchOutcome.SUCCESS:
                 return
@@ -59,7 +71,17 @@ class FuturesEngine(BaseEngine):
         ob.append(order, price)
         pos.entry_order = order
 
-    def close_order(self, request: CloseRequest):
+    def close_order(self, request: CloseRequest) -> None:
+        """
+        Closes an existing position based on the provided request.
+
+        Attempts to match the opposing side of the order to close it, updating
+        the position and cleaning up TP/SL orders if fully closed.
+
+        Args:
+            request (CloseRequest): Request specifying the order ID and quantity
+                to close.
+        """
         pos = self._position_manager.get(request.order_id)
 
         if pos.status == OrderStatus.PENDING:
@@ -91,7 +113,16 @@ class FuturesEngine(BaseEngine):
 
             self._mutate_tp_sl_quantity(pos)
 
-    def cancel_order(self, request: CloseRequest):
+    def cancel_order(self, request: CloseRequest) -> None:
+        """
+        Cancels a pending or partially filled order.
+
+        Cancels the requested quantity, updates position and order book, and
+        removes the order if fully cancelled or filled.
+
+        Args:
+            request (CloseRequest): Request with order ID and quantity to cancel.
+        """
         pos = self._position_manager.get(request.order_id)
         ob = self._orderbooks[pos.instrument]
         requested_quantity = self._validate_close_req_quantity(
@@ -106,7 +137,17 @@ class FuturesEngine(BaseEngine):
             if pos.entry_order is not None:
                 ob.remove(pos.entry_order, pos.entry_order.price)
 
-    def modify_order(self, request: ModifyRequest):
+    def modify_order(self, request: ModifyRequest) -> None:
+        """
+        Modifies an existing order's limit price, take-profit, or stop-loss.
+
+        Updates order parameters and the order book accordingly, only applying
+        changes allowed by the current order status.
+
+        Args:
+            request (ModifyRequest): Contains modifications like new limit price,
+                TP, or SL.
+        """
         pos = self._position_manager.get(request.order_id)
         ob = self._orderbooks[pos.instrument]
         payload = pos.payload
@@ -172,7 +213,16 @@ class FuturesEngine(BaseEngine):
 
     def _handle_filled_orders(
         self, orders: list[tuple[Order, int]], price: float, ob: OrderBook
-    ):
+    ) -> None:
+        """
+        Applies fill effects to positions, removes orders from the book, and
+        finalizes positions if closed.
+
+        Args:
+            orders (list[tuple[Order, int]]): Filled orders and their matched quantities.
+            price (float): Fill price.
+            ob (OrderBook): Order book where orders were matched.
+        """
         for order, filled_quantity in orders:
             pos = self._position_manager.get(order.id)
 
@@ -194,12 +244,17 @@ class FuturesEngine(BaseEngine):
 
     def _handle_touched_orders(
         self, orders: list[tuple[Order, int]], price: float, ob: OrderBook
-    ):
+    ) -> None:
+        """
+        Updates positions with touched quantities and adjusts TP/SL accordingly.
+
+        Args:
+            orders (list[tuple[Order, int]]): Touched orders and quantities.
+            price (float): Execution price.
+            ob (OrderBook): Relevant order book.
+        """
         for order, touched_quantity in orders:
-            print(order.payload)
             pos = self._position_manager.get(order.id)
-            if pos.status == OrderStatus.CLOSED:
-                raise RuntimeError("touched")
 
             if order.tag == Tag.ENTRY:
                 pos.apply_entry_fill(touched_quantity, price)
@@ -212,7 +267,14 @@ class FuturesEngine(BaseEngine):
                 pos.apply_close(touched_quantity, price)
                 self._mutate_tp_sl_quantity(pos)
 
-    def _place_tp_sl(self, pos: Position, ob: OrderBook):
+    def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
+        """
+        Places take-profit and stop-loss orders for a position if specified.
+
+        Args:
+            pos (Position): The position to attach exit orders to.
+            ob (OrderBook): Order book for the position's instrument.
+        """
         payload = pos.payload
         exit_side = Side.BID if payload["side"] == Side.ASK else Side.ASK
 
@@ -238,7 +300,13 @@ class FuturesEngine(BaseEngine):
             pos.stop_loss_order = new_order
             ob.append(new_order, new_order.price)
 
-    def _mutate_tp_sl_quantity(self, pos: Position):
+    def _mutate_tp_sl_quantity(self, pos: Position) -> None:
+        """
+        Adjusts TP/SL order quantities to match current open position quantity.
+
+        Args:
+            pos (Position): Position whose TP/SL orders should be updated.
+        """
         if pos.take_profit_order is not None:
             pos.take_profit_order.quantity = pos.open_quantity
             pos.take_profit_order.filled_quantity = 0
@@ -246,7 +314,14 @@ class FuturesEngine(BaseEngine):
             pos.stop_loss_order.quantity = pos.open_quantity
             pos.stop_loss_order.filled_quantity = 0
 
-    def _remove_tp_sl(self, pos: Position, ob: OrderBook):
+    def _remove_tp_sl(self, pos: Position, ob: OrderBook) -> None:
+        """
+        Removes take-profit and stop-loss orders associated with a position.
+
+        Args:
+            pos (Position): The position whose TP/SL orders should be removed.
+            ob (OrderBook): Order book from which to remove the orders.
+        """
         if pos.take_profit_order is not None:
             ob.remove(pos.take_profit_order, pos.take_profit_order.price)
             pos.take_profit_order = None
@@ -256,7 +331,24 @@ class FuturesEngine(BaseEngine):
 
     def _validate_close_req_quantity(
         self, request_quantity: CloseRequestQuantity, base_quantity: int
-    ):
+    ) -> int:
+        """
+        Validates and resolves the close request quantity.
+
+        Converts symbolic or explicit quantities to valid integers and
+        raises an error if the input is invalid.
+
+        Args:
+            request_quantity (CloseRequestQuantity): Requested close amount
+                ("ALL" or int).
+            base_quantity (int): The maximum allowed quantity (open or standing).
+
+        Returns:
+            int: Validated quantity to close.
+
+        Raises:
+            ValueError: If the quantity is invalid or exceeds available quantity.
+        """
         if request_quantity == "ALL":
             return base_quantity
 

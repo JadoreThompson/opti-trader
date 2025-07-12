@@ -1,5 +1,6 @@
 from typing import overload
 from enums import Side
+
 from ..enums import MatchOutcome
 from ..order import Order
 from ..orderbook.orderbook import OrderBook
@@ -86,7 +87,7 @@ class BaseEngine:
         """
 
         book_to_match = "asks" if order.side == Side.BID else "bids"
-        starting_quantity = order.quantity
+        starting_quantity = order.quantity - order.filled_quantity
         cur_quantity = starting_quantity
 
         target_price = ob.best_ask if order.side == Side.BID else ob.best_bid
@@ -104,13 +105,18 @@ class BaseEngine:
                 continue
 
             resting_quantity = resting_order.quantity - resting_order.filled_quantity
+            if resting_quantity < 0:
+                raise RuntimeError()
+
             match_quantity = min(resting_quantity, cur_quantity)
+            if match_quantity < 0:
+                raise RuntimeError()
 
             resting_order.filled_quantity += match_quantity
             cur_quantity -= match_quantity
 
             if resting_order.filled_quantity == resting_order.quantity:
-                filled_orders.append((resting_order, resting_quantity))
+                filled_orders.append((resting_order, match_quantity))
             else:
                 touched_orders.append((resting_order, match_quantity))
 

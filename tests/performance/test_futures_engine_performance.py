@@ -5,7 +5,6 @@ from tests.utils import (
     create_order_conditional,
 )
 
-
 PERFORMANCE_TEST_SIZES = [100, 500, 1000, 2000, 10_000, 100_000]
 
 

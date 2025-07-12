@@ -147,7 +147,6 @@ class Position:
             OrderStatus.PARTIALLY_FILLED,
         ):
             return
-
         self._payload["standing_quantity"] -= quantity
 
         if self._payload["standing_quantity"] == 0:
