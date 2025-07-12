@@ -11,14 +11,14 @@ PERFORMANCE_TEST_SIZES = [100, 500, 1000, 2000, 10_000, 100_000]
 @pytest.mark.parametrize("n_new", PERFORMANCE_TEST_SIZES)
 def test_futures_engine_place_order_performance(n_new, benchmark):
     """
-    Measures the performance of placing a batch of 100 new orders into an
+    Measures the performance of placing a batch of orders into an
     engine that is already populated with a varying number of orders.
 
     This test helps to identify performance degradation as the order book grows.
     It uses `pytest-benchmark` to run the test multiple times for statistical accuracy.
 
     To run only this test:
-    pytest -k test_place_order_performance --benchmark-only
+    pytest --benchmark-only --benchmark-sort=mean
     """
     # Warming
     quantities = [*range(1, 100, 5)] + ([*range(1, 10)] * 2)
