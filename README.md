@@ -29,9 +29,18 @@ Opti-Trader is built with a focus on performance, scalability, and modern develo
 | engine/orderbook | A container (no dunder support) that manages bid/ask levels. |
 | engine/position | A state machine that represents a single trading position, handling all state transitions from PENDING to CLOSED or CANCELLED. |
 
-## Getting Started
+## Benchmark Results
 
-Follow these instructions to set up the project for local development.
+| Test Name | Min (µs) | Max (µs) | Mean (µs) | StdDev (µs) | Median (µs) | IQR (µs) | Outliers | OPS (Kops/s) | Rounds | Iterations |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| test_futures_engine_place_order_performance[1000] | 12.1 | 476.4 | 23.47 | 16.77 | 20.70 | 14.95 | 20;6 | 42.61 | 1000 | 1 |
+| test_futures_engine_place_order_performance[10000] | 12.2 | 23,704.3 | 28.32 | 237.51 | 22.80 | 12.00 | 5;217 | 35.31 | 10000 | 1 |
+| test_futures_engine_place_order_performance[500] | 12.6 | 166.8 | 22.11 | 9.93 | 20.15 | 14.05 | 37;4 | 45.23 | 500 | 1 |
+| test_futures_engine_place_order_performance[100000] | 12.7 | 90,619.1 | 26.74 | 407.25 | 21.50 | 13.20 | 45;1083 | 37.39 | 100000 | 1 |
+| test_futures_engine_place_order_performance[2000] | 13.1 | 615.9 | 24.30 | 17.83 | 21.20 | 14.30 | 54;26 | 41.16 | 2000 | 1 |
+| test_futures_engine_place_order_performance[100] | 13.3 | 91.7 | 27.02 | 13.20 | 24.85 | 14.45 | 12;4 | 37.00 | 100 | 1 |
+
+## Getting Started
 
 ### Prerequisites
 
