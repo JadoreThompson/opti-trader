@@ -1,125 +1,52 @@
-# **Overview**
-This is a FIFO Matching Engine built in Python, offering a websocket for live price and order updates along with HTTP endpoints built with FastAPI. This application leverages a Redis based lock system built by myself to combat the polling and synchronous nature of the built-in multiprocessing Queue https://github.com/JadoreThompson/r-mutex.
+# Opti-Trader
 
-# **Pre-requisites**
-If you're interested on working on this codebase you'll need prior knowledge of asynchronous programming, FastAPI and database management.
+Opti-Trader is a high-performance, trading engine suited with a robust core for order matching, position management, and real-time data propagation, built entirely with modern Python asynchronous capabilities.
 
-# **Requirements**
-Version numbers can be found in https://github.com/JadoreThompson/opti-trader/blob/main/requirements.txt
-- Python 3.12
-- Postgres
-- Redis
+### ⚠️ Project Status: In Development ⚠️
 
-# **Installation**
-Here's the structure for your .env file
-```
-# Argon
-TIME_COST=1
-MEMORY_COST=1_024_000
-PARALLELISM=1
+This project is currently under active development. The architecture is solidifying, but APIs may change, features are still being added, and comprehensive testing is ongoing. Thus the documentation reflects what is currently complete which is the **FuturesEngine**.
 
-# Cookie
-COOKIE_ALIAS=my-cookie-key
-COOKIE_ALGO=HS256
-COOKIE_SECRET=secret
+## Core Features
 
-# DB
-DB_NAME=<db_name>
-DB_HOST=<db_host>
-DB_PORT=<db_port>
-DB_USER=<db_user>
-DB_PASSWORD=<db_password>
+- **Futures Matching Engine:** A dedicated engine for matching futures orders, handling various order types, and managing the entire order lifecycle.
+- **High-Performance Order Book:** Implements a sophisticated order book using sorted dictionaries for price levels and doubly-linked lists for FIFO order priority, enabling O(1) access for order operations.
+- **Comprehensive Position Management:** Tracks the complete lifecycle of a trading position, including entry, partial fills, cancellations, PnL calculation (realised and unrealised), and status changes.
 
-# Redis
-ORDER_UPDATE_CHANNEL=order.updates
-BALANCE_UPDATE_CHANNEL=balance.updates
-ORDER_LOCK_PREFIX=orderlock
+## Architecture & Technology Stack
 
-# Tests
-TEST_BASE_URL=http://localhost:8000/api
-```
+Opti-Trader is built with a focus on performance, scalability, and modern development practices.
 
-An alembic.ini boilerplate can be found here - https://alembic.sqlalchemy.org/en/latest/tutorial.html.
+- **Backend:** Python 3.10+
+- **Database:** PostgreSQL
+- **Data Validation:** Pydantic
 
-Now it's time to install
+## System Components
 
-```
-## If you don't have Redis installed, download Docker and run this command
-docker run --name <container_name e.g. myredis> -d -p 6379:6379 redis
+| Component | Description |
+| --- | --- |
+| **engine/** | The core trading logic, containing all modules related to matching, orders, and positions. |
+| engine/matching_engines | Implements the primary logic for matching incoming orders against the order book. Currently features a FuturesEngine. |
+| engine/orderbook | A container (no dunder support) that manages bid/ask levels. |
+| engine/position | A state machine that represents a single trading position, handling all state transitions from PENDING to CLOSED or CANCELLED. |
 
+## Getting Started
+
+Follow these instructions to set up the project for local development.
+
+### Prerequisites
+
+- Python 3.10 or higher
+
+### Installation & Setup
+
+```bash
 git clone https://github.com/JadoreThompson/opti-trader.git
+
+cd opti-trader
 
 python -m venv venv
 
+.\venv\Scripts\activate
+
 pip install -r requirements.txt
-
-### Create you alembic.ini file
-
-### Setup your .env file
-
-### Perform migrations
-alembic upgrade head
-
-### Run the application
-python __main__.py
 ```
-
-
-# **Documentation**
-### **Engine Payloads**
-There are 3 payload types that can be sent to the engine which are declared as EnginePayloadCategory:
-```
-NEW = 0
-MODIFY = 1
-CLOSE = 2
-```
-
-- **NEW**: A new order to be match and placed into the orderbook
-- **MODIFY**: A request to modify the limit price, take profit and stop loss price of an order of which all are optional
-
-#### **Sending a payload**
-To send a payload you must follow this schema. The value of content is always a dictionary containing the data for the request. For example a new order request is a dictionary representation of a record in the orders table.
-```json
-{
-	"category": EnginePayloadCategory,
-	"content": dict
-}
-```
-
-### **System Flow**
-The big 3 classes are the Futures Engine, Pusher and Orderbook.
-
-The Futures Engine initialises the pusher then commences with initialise orderbook objects, passing the pusher into each one upon verifying that the pusher is running. Each Order Book object is responsible for maintaining the bids and asks levels along with a tracker and methods for interacting with the structures. The tracker is dictionary where the key is a string representation of the UUID it holds in the DB and the value is a Position object. The Position object, much like the tracker, serves the purpose of allowing quick lookup and locating of orders with 3 attributes being the order, take profit and stop loss which all of them are of type Order which is a simple container class that holds the dictionary representation of the db record such that any changes to it are reflected globally through each leg of the Position
-
-### **System Flow**
-
-The three core components of the system are:
-
-1. **Futures Engine**
-2. **Pusher**
-3. **Order Book**
-
-The Futures Engine is responsible for initializing the Pusher and ensuring it is running before creating Order Book instances. Each Order Book manages bid and ask levels while also maintaining a tracker for efficient order lookup and interaction.
-
-The tracker is a dictionary where:
-
-- The key is a string representation of the order’s UUID, as stored in the database.
-- The value is a Position object.
-
-The Position object acts as a reference point for orders, allowing quick lookups. It consists of three attributes:
-
-1. **Order**
-2. **Take Profit**
-3. **Stop Loss**
-
-Each of these attributes is of type Order, a lightweight container class that holds the dictionary representation of the corresponding database record and tag which is used to identify the type of order it is; whether it's the entry, take profit or stop loss representation of the order. Any modifications made to an order are automatically reflected across all references in the system.
-
-When it comes to the naming of the Redis keys, for the pub-sub it's `<instrument>.live` and for retrieving the current price it's `<instrument>.price`.
-
-The Pusher serves as a global throttle and consolidator for database updates, reducing complexity in lock control and managing the pub-sub channel. It ensures that updates are efficiently relayed to users subscribed to the WebSocket.
-
-It has three distinct methods: `_push_fast`, `_push_slow`, and `_push_balance`. Each method operates with a specific delay, which can be adjusted to control the speed of updates. Updates are stored in a queue, and on each cycle, a batch of updates (determined by the batch size set during initialization) is extracted and processed.
-
-Both the OrderBook and Pusher classes use Redis' pub-sub system to send updates to the manager class within the `/instrument` and `/order` WebSocket endpoints. The corresponding `ClientManager` classes subscribe to these updates.
-
-The OrderBook and FuturesEngine both rely on a single client-facing method, `append`, to add data to the queue.
