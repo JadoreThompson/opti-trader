@@ -21,7 +21,6 @@ class Order:
         self.quantity = quantity
         self._price = price
         self.filled_quantity = 0
-        self.payload = None
 
     @property
     def id(self):
@@ -55,4 +54,4 @@ class Order:
         raise TypeError(f"Cannot compare {type(value)} and {self.__class__}")
 
     def __repr__(self) -> str:
-        return f"Order(id={self._id})"
+        return f"Order(id={self._id}, tag={self._tag}, side={self._side})"

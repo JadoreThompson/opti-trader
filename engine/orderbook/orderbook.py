@@ -1,6 +1,7 @@
 from sortedcontainers.sorteddict import SortedDict
 from typing import Iterable, KeysView, Literal
 
+from engine.orderbook.price_level_node import PriceLevelNode
 from enums import Side
 from .price_level import PriceLevel
 from ..order import Order
@@ -76,6 +77,9 @@ class OrderBook:
         Raises:
             ValueError: If the order side is invalid.
         """
+        print("Appending with price:", price)
+        if price < 0:
+            raise RuntimeError()
         price = round(price, 2)
 
         if order.side == Side.BID:
@@ -114,11 +118,13 @@ class OrderBook:
 
         if not level:
             if order.side == Side.BID:
+                # print("Bid) Price:", self._best_bid_price, "PeekItem:", self._bids.peekitem(-1)[0])
                 if price == self._bids.peekitem(-1)[0]:
                     self._best_bid_price = (
                         self._bids.peekitem(-2)[0] if len(self._bids) >= 2 else None
                     )
             else:
+                # print("Asks) Price:", self._best_bid_price, "PeekItem:", self._asks.peekitem(0)[0])
                 if price == self._asks.peekitem(0)[0]:
                     self._best_ask_price = (
                         self._asks.peekitem(1)[0] if len(self._asks) >= 2 else None
@@ -127,8 +133,7 @@ class OrderBook:
             book.pop(price)
 
     def set_price(self, price: float) -> None:
-        price = round(price, 2)
-        self._cur_price = price
+        self._cur_price = round(price, 2)
 
     def get_orders(self, price: float, book: Book) -> Iterable[Order] | None:
         """

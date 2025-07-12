@@ -22,7 +22,6 @@ class Position:
         take_profit_order: Order | None = None,
     ) -> None:
         self._payload = payload
-        payload["open_quantity"] = 0
         self._id: int = payload["order_id"]
         self.entry_order = entry_order
         self.stop_loss_order = stop_loss_order
@@ -39,7 +38,7 @@ class Position:
 
     @property
     def status(self):
-        return self.payload["status"]
+        return self._payload["status"]
 
     @property
     def payload(self) -> dict:

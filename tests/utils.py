@@ -35,6 +35,7 @@ def create_order_simple(
         "unrealised_pnl": 0.0,
         "closed_at": None,
         "created_at": datetime.now(),
+        "open_quantity": 0,
     }
 
 
@@ -68,6 +69,7 @@ def create_order_conditional(i: int, quantity = None) -> dict:
         "amount": 100,
         "take_profit": base_price + 20 if is_buy and is_limit_order else None,
         "stop_loss": base_price - 10 if is_buy and is_limit_order else None,
+        "open_quantity": 0,
     }
 
     if order_type == OrderType.LIMIT:

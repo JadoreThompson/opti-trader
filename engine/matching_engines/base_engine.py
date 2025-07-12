@@ -52,17 +52,17 @@ class BaseEngine:
             request (CloseRequest): Data specifying the order ID and quantity to close.
         """
 
-    @overload
-    def modify_order(self, request: ModifyRequest) -> None:
-        """
-        Modifies parameters of an existing order.
+    # @overload
+    # def modify_order(self, request: ModifyRequest) -> None:
+    #     """
+    #     Modifies parameters of an existing order.
 
-        Allows updates such as changing the limit price, take profit, or stop loss
-        for an open order. Handles updating the order book and position accordingly.
+    #     Allows updates such as changing the limit price, take profit, or stop loss
+    #     for an open order. Handles updating the order book and position accordingly.
 
-        Args:
-            request (ModifyRequest): Data containing modifications to apply.
-        """
+    #     Args:
+    #         request (ModifyRequest): Data containing modifications to apply.
+    #     """
 
     def _match(self, order: Order, ob: OrderBook) -> MatchResult:
         """
@@ -94,8 +94,8 @@ class BaseEngine:
         if target_price is None:
             return MatchResult(MatchOutcome.FAILURE, None, 0)
 
-        touched_orders: list[Order] = []
-        filled_orders: list[tuple[Order, int]] = []
+        # touched_orders: list[Order] = []
+        # filled_orders: list[tuple[Order, int]] = []
 
         for resting_order in ob.get_orders(target_price, book_to_match):
             if cur_quantity == 0:
@@ -116,12 +116,14 @@ class BaseEngine:
             cur_quantity -= match_quantity
 
             if resting_order.filled_quantity == resting_order.quantity:
-                filled_orders.append((resting_order, match_quantity))
+                # filled_orders.append((resting_order, match_quantity))
+                self._handle_filled_order((resting_order, match_quantity), target_price, ob)
             else:
-                touched_orders.append((resting_order, match_quantity))
+                # touched_orders.append((resting_order, match_quantity))
+                self._handle_touched_order((resting_order, match_quantity), target_price, ob)
 
-        self._handle_touched_orders(touched_orders, target_price, ob)
-        self._handle_filled_orders(filled_orders, target_price, ob)
+        # self._handle_touched_orders(touched_orders, target_price, ob)
+        # self._handle_filled_orders(filled_orders, target_price, ob)
 
         if cur_quantity == 0:
             return MatchResult(MatchOutcome.SUCCESS, target_price, starting_quantity)
