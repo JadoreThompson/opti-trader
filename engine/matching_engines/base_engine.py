@@ -1,7 +1,7 @@
 from typing import overload
-from enums import Side
+from enums import OrderStatus, Side
 
-from ..enums import MatchOutcome
+from ..enums import MatchOutcome, Tag
 from ..order import Order
 from ..orderbook.orderbook import OrderBook
 from ..position_manager import PositionManager
@@ -129,20 +129,83 @@ class BaseEngine:
             MatchOutcome.PARTIAL, target_price, starting_quantity - cur_quantity
         )
 
-    @overload
+    # @overload
+    # def _handle_filled_order(
+    #     self,
+    #     order: Order,
+    #     filled_quantity: int,
+    #     price: float,
+    #     ob: OrderBook,
+    # ) -> None: ...
+
+    # @overload
+    # def _handle_touched_order(
+    #     self,
+    #     order: Order,
+    #     filled_quantity: int,
+    #     price: float,
+    #     ob: OrderBook,
+    # ) -> None: ...
+
     def _handle_filled_order(
         self,
         order: Order,
         filled_quantity: int,
         price: float,
         ob: OrderBook,
-    ) -> None: ...
+    ) -> None:
+        """
+        Applies fill effects to positions, removes orders from the book, and
+        finalizes positions if closed.
 
-    @overload
+        Args:
+            order (Order): Touched order.
+            touched_quantity (int): Touched quantity.
+            price (float): Execution price.
+            ob (OrderBook): Relevant order book.
+        """
+        pos = self._position_manager.get(order.id)
+
+        if order.tag == Tag.ENTRY:
+            pos.apply_entry_fill(filled_quantity, price)
+            ob.remove(order, order.price)
+
+            if pos.take_profit_order is not None or pos.stop_loss_order is not None:
+                self._mutate_tp_sl_quantity(pos)
+            else:
+                self._place_tp_sl(pos, ob)
+        else:
+            pos.apply_close(filled_quantity, price)
+            self._remove_tp_sl(pos, ob)
+
+            if pos.status == OrderStatus.CLOSED:
+                self._position_manager.remove(pos.id)
+
     def _handle_touched_order(
         self,
         order: Order,
-        filled_quantity: int,
+        touched_quantity: int,
         price: float,
         ob: OrderBook,
-    ) -> None: ...
+    ) -> None:
+        """
+        Updates positions with touched quantities and adjusts TP/SL accordingly.
+
+        Args:
+            order (Order): Touched order.
+            touched_quantity (int): Touched quantity.
+            price (float): Execution price.
+            ob (OrderBook): Relevant order book.
+        """
+        pos = self._position_manager.get(order.id)
+
+        if order.tag == Tag.ENTRY:
+            pos.apply_entry_fill(touched_quantity, price)
+
+            if pos.take_profit_order is not None or pos.stop_loss_order is not None:
+                self._mutate_tp_sl_quantity(pos)
+            else:
+                self._place_tp_sl(pos, ob)
+        else:
+            pos.apply_close(touched_quantity, price)
+            self._mutate_tp_sl_quantity(pos)
