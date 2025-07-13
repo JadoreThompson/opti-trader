@@ -39,13 +39,26 @@ def create_order_simple(
     }
 
 
-def create_order_conditional(i: int, quantity = None) -> dict:
-    is_limit_order = i % 3 == 0
-    order_type = OrderType.LIMIT if is_limit_order else OrderType.MARKET
+def create_order_conditional(i: int, quantity=None) -> dict:
+    order_type = OrderType.LIMIT if i % 50 == 0 else OrderType.MARKET
     is_buy = i % 2 == 0
     side = Side.BID if is_buy else Side.ASK
-    base_price, price_step = 100.0, 0.5
-    
+    base_price = 100.0
+    limit_price = None
+
+    if order_type == OrderType.LIMIT:
+        x = i % 50 + 1
+        limit_price = base_price - x if is_buy else base_price + x
+        tp_sl_details = {
+            "take_profit": limit_price + 20 if is_buy else limit_price - 20,
+            "stop_loss": limit_price - 20 if is_buy else limit_price + 20,
+        }
+    else:
+        tp_sl_details = {
+            "take_profit": base_price + 20 if is_buy else base_price - 20,
+            "stop_loss": base_price - 20 if is_buy else base_price + 20,
+        }
+
     if quantity is None:
         quantity = 10
 
@@ -61,22 +74,15 @@ def create_order_conditional(i: int, quantity = None) -> dict:
         "realised_pnl": 0.0,
         "unrealised_pnl": 0.0,
         "filled_price": None,
-        "limit_price": None,
+        "limit_price": limit_price,
         "price": None,
         "closed_at": None,
         "closed_price": None,
         "created_at": datetime.now(),
         "amount": 100,
-        "take_profit": base_price + 20 if is_buy and is_limit_order else None,
-        "stop_loss": base_price - 10 if is_buy and is_limit_order else None,
         "open_quantity": 0,
+        **tp_sl_details,
     }
-
-    if order_type == OrderType.LIMIT:
-        price_offset = (i // 2 * price_step) + 1
-        order["limit_price"] = round(
-            base_price - price_offset if is_buy else base_price + price_offset, 2
-        )
     return order
 
 

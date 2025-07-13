@@ -1,7 +1,3 @@
-from datetime import datetime
-import gc
-from pprint import pprint
-from sys import getrefcount
 from config import PRODUCTION
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
@@ -21,7 +17,6 @@ from ..typing import (
 class FuturesEngine(BaseEngine):
     def __init__(self) -> None:
         super().__init__()
-        self._tmp_position_manager: dict[str, Position] = {}
 
     def place_order(self, payload: dict) -> None:
         """
@@ -41,12 +36,7 @@ class FuturesEngine(BaseEngine):
             self._orderbooks[payload["instrument"]] = OrderBook()
 
         ob = self._orderbooks[payload["instrument"]]
-        # pos = self._position_manager.create(payload)
-
-        self._tmp_position_manager[payload["order_id"]] = Position(payload)
-        pos = self._tmp_position_manager[payload["order_id"]]
-        # pos = self._tmp_position_manager.setdefault(payload['order_id'], Position(payload))
-
+        pos = self._position_manager.create(payload)
         order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
 
         if payload["order_type"] == OrderType.LIMIT:
@@ -69,17 +59,7 @@ class FuturesEngine(BaseEngine):
         if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
             ob.set_price(result.price)
             self._place_tp_sl(pos, ob)
-            # pos.apply_entry_fill(result.quantity, result.price)
-
-            ################################################
-            payload["standing_quantity"] -= result.quantity
-            payload["open_quantity"] += result.quantity
-            if payload["standing_quantity"] > 0:
-                payload["status"] = OrderStatus.PARTIALLY_FILLED
-            else:
-                payload["status"] = OrderStatus.FILLED
-            ################################################
-
+            pos.apply_entry_fill(result.quantity, result.price)
             order.filled_quantity = result.quantity
 
             if result.outcome == MatchOutcome.SUCCESS:
@@ -230,217 +210,67 @@ class FuturesEngine(BaseEngine):
                 else:
                     pos.stop_loss_order = None
 
-    def _handle_filled_orders(
-        self, orders: list[tuple[Order, int]], price: float, ob: OrderBook
-    ) -> None:
-        """
-        Applies fill effects to positions, removes orders from the book, and
-        finalizes positions if closed.
-
-        Args:
-            orders (list[tuple[Order, int]]): Filled orders and their matched quantities.
-            price (float): Fill price.
-            ob (OrderBook): Order book where orders were matched.
-        """
-        for order, filled_quantity in orders:
-            # pos = self._position_manager.get(order.id)
-            pos = self._tmp_position_manager.get(order.id)
-
-            if order.tag == Tag.ENTRY:
-                # pos.apply_entry_fill(filled_quantity, price)
-                ob.remove(order, order.price)
-
-                ##############################################
-                pos._payload["standing_quantity"] -= filled_quantity
-                pos._payload["open_quantity"] += filled_quantity
-
-                if pos.standing_quantity > 0:
-                    pos._payload["status"] = OrderStatus.PARTIALLY_FILLED
-                else:
-                    pos._payload["status"] = OrderStatus.FILLED
-                    pos.entry_order = None  # The entry order is now fully filled
-
-                if pos.take_profit_order is not None or pos.stop_loss_order is not None:
-                    self._mutate_tp_sl_quantity(pos)
-                else:
-                    self._place_tp_sl(pos, ob)
-
-                ##############################################
-            else:
-                # pos.apply_close(filled_quantity, price)
-
-                ##############################################
-                pos._payload["open_quantity"] -= filled_quantity
-
-                if pos._payload["status"] != OrderStatus.PARTIALLY_FILLED:
-                    if pos._payload["open_quantity"] == 0:
-                        pos._payload["status"] = OrderStatus.CLOSED
-                        # pos._payload["closed_at"] = datetime.now()
-                        # pos._payload["closed_price"] = price
-                    else:
-                        pos._payload["status"] = OrderStatus.PARTIALLY_CLOSED
-                ##############################################
-
-                self._remove_tp_sl(pos, ob)
-
-                # if pos.status == OrderStatus.CLOSED:
-                if pos._payload["status"] == OrderStatus.CLOSED:
-                    # self._position_manager.remove(pos.id)
-                    self._tmp_position_manager.pop(pos.id)
-                    
     def _handle_filled_order(
-        self, details: tuple[Order, int], price: float, ob: OrderBook
+        self,
+        order: Order,
+        filled_quantity: int,
+        price: float,
+        ob: OrderBook,
     ) -> None:
         """
         Applies fill effects to positions, removes orders from the book, and
         finalizes positions if closed.
 
         Args:
-            orders (list[tuple[Order, int]]): Filled orders and their matched quantities.
-            price (float): Fill price.
-            ob (OrderBook): Order book where orders were matched.
+            order (Order): Touched order.
+            touched_quantity (int): Touched quantity.
+            price (float): Execution price.
+            ob (OrderBook): Relevant order book.
         """
-        order, filled_quantity = details
-        # pos = self._position_manager.get(order.id)
-        pos = self._tmp_position_manager.get(order.id)
+        pos = self._position_manager.get(order.id)
 
         if order.tag == Tag.ENTRY:
-            # pos.apply_entry_fill(filled_quantity, price)
+            pos.apply_entry_fill(filled_quantity, price)
             ob.remove(order, order.price)
 
-            ##############################################
-            pos._payload["standing_quantity"] -= filled_quantity
-            pos._payload["open_quantity"] += filled_quantity
-
-            if pos.standing_quantity > 0:
-                pos._payload["status"] = OrderStatus.PARTIALLY_FILLED
-            else:
-                pos._payload["status"] = OrderStatus.FILLED
-                pos.entry_order = None  # The entry order is now fully filled
-
             if pos.take_profit_order is not None or pos.stop_loss_order is not None:
                 self._mutate_tp_sl_quantity(pos)
             else:
                 self._place_tp_sl(pos, ob)
-
-            ##############################################
         else:
-            # pos.apply_close(filled_quantity, price)
-
-            ##############################################
-            pos._payload["open_quantity"] -= filled_quantity
-
-            if pos._payload["status"] != OrderStatus.PARTIALLY_FILLED:
-                if pos._payload["open_quantity"] == 0:
-                    pos._payload["status"] = OrderStatus.CLOSED
-                    # pos._payload["closed_at"] = datetime.now()
-                    # pos._payload["closed_price"] = price
-                else:
-                    pos._payload["status"] = OrderStatus.PARTIALLY_CLOSED
-            ##############################################
-
+            pos.apply_close(filled_quantity, price)
             self._remove_tp_sl(pos, ob)
 
-            # if pos.status == OrderStatus.CLOSED:
-            if pos._payload["status"] == OrderStatus.CLOSED:
-                # self._position_manager.remove(pos.id)
-                self._tmp_position_manager.pop(pos.id)
-
-    def _handle_touched_orders(
-        self, orders: list[tuple[Order, int]], price: float, ob: OrderBook
-    ) -> None:
-        """
-        Updates positions with touched quantities and adjusts TP/SL accordingly.
-
-        Args:
-            orders (list[tuple[Order, int]]): Touched orders and quantities.
-            price (float): Execution price.
-            ob (OrderBook): Relevant order book.
-        """
-        for order, touched_quantity in orders:
-            # pos = self._position_manager.get(order.id)
-            pos = self._tmp_position_manager.get(order.id)
-
-            if order.tag == Tag.ENTRY:
-                # pos.apply_entry_fill(touched_quantity, price)
-
-                ##############################################
-                pos._payload["standing_quantity"] -= touched_quantity
-                pos._payload["open_quantity"] += touched_quantity
-                pos._payload["status"] = OrderStatus.PARTIALLY_FILLED
-
-                if pos._payload["standing_quantity"] == 0:
-                    raise RuntimeError()
-
-                if pos.take_profit_order is not None or pos.stop_loss_order is not None:
-                    self._mutate_tp_sl_quantity(pos)
-                else:
-                    self._place_tp_sl(pos, ob)
-
-                ##############################################
-
-                if pos.take_profit_order is not None or pos.stop_loss_order is not None:
-                    self._mutate_tp_sl_quantity(pos)
-                else:
-                    self._place_tp_sl(pos, ob)
-            else:
-                # pos.apply_close(touched_quantity, price)
-
-                ##############################################
-                pos._payload["open_quantity"] -= touched_quantity
-
-                if pos._payload["status"] != OrderStatus.PARTIALLY_FILLED:
-                    pos._payload["status"] = OrderStatus.PARTIALLY_CLOSED
-                ##############################################
-
-                self._mutate_tp_sl_quantity(pos)
+            if pos.status == OrderStatus.CLOSED:
+                self._position_manager.remove(pos.id)
 
     def _handle_touched_order(
-        self, details: tuple[Order, int], price: float, ob: OrderBook
+        self,
+        order: Order,
+        touched_quantity: int,
+        price: float,
+        ob: OrderBook,
     ) -> None:
         """
         Updates positions with touched quantities and adjusts TP/SL accordingly.
 
         Args:
-            orders (list[tuple[Order, int]]): Touched orders and quantities.
+            order (Order): Touched order.
+            touched_quantity (int): Touched quantity.
             price (float): Execution price.
             ob (OrderBook): Relevant order book.
         """
-        order, touched_quantity = details
-        pos = self._tmp_position_manager.get(order.id)
+        pos = self._position_manager.get(order.id)
 
         if order.tag == Tag.ENTRY:
-            # pos.apply_entry_fill(touched_quantity, price)
-
-            ##############################################
-            pos._payload["standing_quantity"] -= touched_quantity
-            pos._payload["open_quantity"] += touched_quantity
-            pos._payload["status"] = OrderStatus.PARTIALLY_FILLED
-
-            if pos._payload["standing_quantity"] == 0:
-                raise RuntimeError()
-
-            if pos.take_profit_order is not None or pos.stop_loss_order is not None:
-                self._mutate_tp_sl_quantity(pos)
-            else:
-                self._place_tp_sl(pos, ob)
-
-            ##############################################
+            pos.apply_entry_fill(touched_quantity, price)
 
             if pos.take_profit_order is not None or pos.stop_loss_order is not None:
                 self._mutate_tp_sl_quantity(pos)
             else:
                 self._place_tp_sl(pos, ob)
         else:
-            # pos.apply_close(touched_quantity, price)
-
-            ##############################################
-            pos._payload["open_quantity"] -= touched_quantity
-
-            if pos._payload["status"] != OrderStatus.PARTIALLY_FILLED:
-                pos._payload["status"] = OrderStatus.PARTIALLY_CLOSED
-            ##############################################
-
+            pos.apply_close(touched_quantity, price)
             self._mutate_tp_sl_quantity(pos)
 
     def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:

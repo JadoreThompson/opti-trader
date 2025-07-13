@@ -1,8 +1,9 @@
 import copy
 import json
+import random
 import pytest
-
-from engine.typing import CloseRequest, ModifyRequest
+from pprint import pprint
+from engine.typing import CloseRequest, CloseRequestQuantity, ModifyRequest
 from enums import OrderStatus, OrderType, Side
 from tests.utils import (
     # Fixture Imports
@@ -141,9 +142,18 @@ def test_cancel_order_state_snapshot(populated_engine, n, snapshot):
     engine, orders_from_engine = populated_engine
 
     for i, order_payload in enumerate(list(orders_from_engine)):
-        if order_payload["status"] == OrderStatus.PENDING:
+        if order_payload["status"] in (
+            OrderStatus.PENDING,
+            OrderStatus.PARTIALLY_FILLED,
+        ):
             if i % n == 0:
-                cancel_payload = {"order_id": order_payload["order_id"]}
+                # quantities: list[CloseRequestQuantity] = ['ALL', order_payload['standing_quantity']]
+                cancel_payload = {
+                    "order_id": order_payload["order_id"],
+                    "quantity": random.choice(
+                        ["ALL", order_payload["standing_quantity"]]
+                    ),
+                }
                 engine.cancel_order(CloseRequest(**cancel_payload))
 
     final_order_states = {o["order_id"]: o for o in orders_from_engine}

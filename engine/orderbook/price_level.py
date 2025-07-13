@@ -22,6 +22,7 @@ class PriceLevel:
     def append(self, order: Order) -> None:
         """Adds a new order to the end of the level. Raises ValueError if duplicate."""
         if order.id in self._tracker:
+            print(self.tracker)
             raise ValueError(
                 f"Order with id {order.id} already on level."
             )

@@ -52,17 +52,17 @@ class BaseEngine:
             request (CloseRequest): Data specifying the order ID and quantity to close.
         """
 
-    # @overload
-    # def modify_order(self, request: ModifyRequest) -> None:
-    #     """
-    #     Modifies parameters of an existing order.
+    @overload
+    def modify_order(self, request: ModifyRequest) -> None:
+        """
+        Modifies parameters of an existing order.
 
-    #     Allows updates such as changing the limit price, take profit, or stop loss
-    #     for an open order. Handles updating the order book and position accordingly.
+        Allows updates such as changing the limit price, take profit, or stop loss
+        for an open order. Handles updating the order book and position accordingly.
 
-    #     Args:
-    #         request (ModifyRequest): Data containing modifications to apply.
-    #     """
+        Args:
+            request (ModifyRequest): Data containing modifications to apply.
+        """
 
     def _match(self, order: Order, ob: OrderBook) -> MatchResult:
         """
@@ -94,9 +94,6 @@ class BaseEngine:
         if target_price is None:
             return MatchResult(MatchOutcome.FAILURE, None, 0)
 
-        # touched_orders: list[Order] = []
-        # filled_orders: list[tuple[Order, int]] = []
-
         for resting_order in ob.get_orders(target_price, book_to_match):
             if cur_quantity == 0:
                 break
@@ -116,14 +113,13 @@ class BaseEngine:
             cur_quantity -= match_quantity
 
             if resting_order.filled_quantity == resting_order.quantity:
-                # filled_orders.append((resting_order, match_quantity))
-                self._handle_filled_order((resting_order, match_quantity), target_price, ob)
+                self._handle_filled_order(
+                    resting_order, match_quantity, target_price, ob
+                )
             else:
-                # touched_orders.append((resting_order, match_quantity))
-                self._handle_touched_order((resting_order, match_quantity), target_price, ob)
-
-        # self._handle_touched_orders(touched_orders, target_price, ob)
-        # self._handle_filled_orders(filled_orders, target_price, ob)
+                self._handle_touched_order(
+                    resting_order, match_quantity, target_price, ob
+                )
 
         if cur_quantity == 0:
             return MatchResult(MatchOutcome.SUCCESS, target_price, starting_quantity)
@@ -134,35 +130,19 @@ class BaseEngine:
         )
 
     @overload
-    def _handle_filled_orders(
-        self, orders: list[tuple[Order, int]], price: float, ob: OrderBook
-    ) -> None:
-        """
-        Processes orders that have been fully filled during matching.
-
-        This method updates position states to reflect the completed fills,
-        removes filled orders from the order book, and handles any related
-        take-profit or stop-loss orders accordingly.
-
-        Args:
-            orders (list[tuple[Order, int]]): List of tuples containing fully filled orders and their filled quantities.
-            price (float): The price at which the orders were filled.
-            ob (OrderBook): The order book where the orders reside.
-        """
+    def _handle_filled_order(
+        self,
+        order: Order,
+        filled_quantity: int,
+        price: float,
+        ob: OrderBook,
+    ) -> None: ...
 
     @overload
-    def _handle_touched_orders(
-        self, orders: list[tuple[Order, int]], price: float, ob: OrderBook
-    ) -> None:
-        """
-        Processes orders that have been partially filled (touched) during matching.
-
-        This method updates the position state to reflect partial fills,
-        updates associated take-profit or stop-loss orders if necessary,
-        and ensures the order book is consistent with the partial fills.
-
-        Args:
-            orders (list[tuple[Order, int]]): List of tuples containing partially filled orders and quantities filled in this match.
-            price (float): The price at which the partial fills occurred.
-            ob (OrderBook): The order book where the orders reside.
-        """
+    def _handle_touched_order(
+        self,
+        order: Order,
+        filled_quantity: int,
+        price: float,
+        ob: OrderBook,
+    ) -> None: ...

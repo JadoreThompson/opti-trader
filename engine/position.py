@@ -27,6 +27,8 @@ class Position:
         self.stop_loss_order = stop_loss_order
         self.take_profit_order = take_profit_order
         self._filled_prices: dict[float, int] = defaultdict(int)
+        self._filled_price: float = 0
+        self._filled_quantity: int = 0
 
     @property
     def id(self) -> int:
@@ -80,7 +82,8 @@ class Position:
         self._payload["standing_quantity"] -= quantity
         self._payload["open_quantity"] += quantity
 
-        self._filled_prices[price] += quantity
+        self._filled_price += price * quantity
+        self._filled_quantity += quantity
         self._payload["filled_price"] = self._calculate_filled_price()
         self.update_upnl(price)
 
@@ -189,8 +192,7 @@ class Position:
         """
         Helper to calculate the volume-weighted average price.
         """
-        if not self._filled_prices:
+        if not self._filled_price:
             return 0.0
 
-        total_value = sum(price * qty for price, qty in self._filled_prices.items())
-        return round(total_value / sum(self._filled_prices.values()), 2)
+        return round(self._filled_price / self._filled_quantity, 2)

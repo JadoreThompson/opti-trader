@@ -14,10 +14,11 @@ def test_orderbook_append_performance(n_new: int, benchmark):
     orderbook = OrderBook()
     sides = [Side.ASK, Side.BID]
     prices = [*range(50, 100, 2)]
-    orders = (
+    orders = [
         Order(i, Tag.ENTRY, sides[i % 2], 1, prices[i % len(prices)])
         for i in range(n_new)
-    )
+    ]
+    orders = (order for order in orders)
 
     def target_func():
         order = next(orders)
