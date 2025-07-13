@@ -31,14 +31,29 @@ Opti-Trader is built with a focus on performance, scalability, and modern develo
 
 ## Benchmark Results
 
+## Benchmark Results
+
+**GC Disabled**
+
 | Test Name | Min (µs) | Max (µs) | Mean (µs) | StdDev (µs) | Median (µs) | IQR (µs) | Outliers | OPS (Kops/s) | Rounds | Iterations |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| test_futures_engine_place_order_performance[1000] | 12.1 | 476.4 | 23.47 | 16.77 | 20.70 | 14.95 | 20;6 | 42.61 | 1000 | 1 |
-| test_futures_engine_place_order_performance[10000] | 12.2 | 23,704.3 | 28.32 | 237.51 | 22.80 | 12.00 | 5;217 | 35.31 | 10000 | 1 |
-| test_futures_engine_place_order_performance[500] | 12.6 | 166.8 | 22.11 | 9.93 | 20.15 | 14.05 | 37;4 | 45.23 | 500 | 1 |
-| test_futures_engine_place_order_performance[100000] | 12.7 | 90,619.1 | 26.74 | 407.25 | 21.50 | 13.20 | 45;1083 | 37.39 | 100000 | 1 |
-| test_futures_engine_place_order_performance[2000] | 13.1 | 615.9 | 24.30 | 17.83 | 21.20 | 14.30 | 54;26 | 41.16 | 2000 | 1 |
-| test_futures_engine_place_order_performance[100] | 13.3 | 91.7 | 27.02 | 13.20 | 24.85 | 14.45 | 12;4 | 37.00 | 100 | 1 |
+| `test_futures_engine_place_order_performance[1000]` | 3.1 | 56.1 | 10.06 | 5.51 | 8.7 | 9.1 | 397;4 | 99.45 | 1000 | 1 |
+| `test_futures_engine_place_order_performance[2000]` | 3.1 | 50.3 | 10.69 | 5.97 | 9.3 | 11.05 | 890;4 | 93.50 | 2000 | 1 |
+| `test_futures_engine_place_order_performance[10000]` | 3.0 | 152.9 | 10.76 | 6.45 | 9.4 | 11.1 | 3858;49 | 92.92 | 10000 | 1 |
+| `test_futures_engine_place_order_performance[100000]` | 3.0 | 7,047.3 | 11.69 | 34.56 | 10.0 | 8.9 | 623;1638 | 85.57 | 100000 | 1 |
+| `test_futures_engine_place_order_performance[100]` | 3.1 | 66.1 | 12.20 | 10.41 | 9.05 | 10.0 | 9;3 | 81.96 | 100 | 1 |
+| `test_futures_engine_place_order_performance[500]` | 3.2 | 329.1 | 13.98 | 21.40 | 10.9 | 9.45 | 16;18 | 71.53 | 500 | 1 |
+
+**GC Enabled**
+
+| Test Name | Min (µs) | Max (µs) | Mean (µs) | StdDev (µs) | Median (µs) | IQR (µs) | Outliers | OPS (Kops/s) | Rounds | Iterations |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `test_futures_engine_place_order_performance[10000]` | 3.1 | 1,230.6 | 11.24 | 19.15 | 9.6 | 9.25 | 124;150 | 88.97 | 10000 | 1 |
+| `test_futures_engine_place_order_performance[1000]` | 3.2 | 79.0 | 11.78 | 8.21 | 10.8 | 11.45 | 185;15 | 84.88 | 1000 | 1 |
+| `test_futures_engine_place_order_performance[2000]` | 3.2 | 100.3 | 12.13 | 8.40 | 10.6 | 11.40 | 408;28 | 82.43 | 2000 | 1 |
+| `test_futures_engine_place_order_performance[100000]` | 3.0 | 71,279.2 | 13.03 | 280.19 | 10.6 | 11.70 | 23;694 | 76.77 | 100000 | 1 |
+| `test_futures_engine_place_order_performance[500]` | 3.2 | 527.7 | 14.69 | 25.84 | 11.8 | 11.90 | 12;15 | 68.07 | 500 | 1 |
+| `test_futures_engine_place_order_performance[100]` | 3.6 | 98.9 | 16.90 | 16.12 | 13.15 | 13.10 | 9;7 | 59.17 | 100 | 1 |
 
 ## Getting Started
 
