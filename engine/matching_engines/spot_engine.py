@@ -70,6 +70,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
                 return
 
         price = payload["limit_price"] or result.price or ob.price
+        print(payload["limit_price"], result.price, ob.price)
         order.set_price(price)
         ob.append(order, order.price)
 
@@ -84,7 +85,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
 
     def _handle_filled_order(
         self,
-        order: Order,
+        order: SpotOrder,
         filled_quantity: int,
         price: float,
         ob: OrderBook,
@@ -103,7 +104,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
             pos = self._position_manager.get(order.id)
 
         if order.tag == Tag.ENTRY:
-            pos.apply_fill(filled_quantity)
+            order.apply_fill(filled_quantity)
             ob.remove(order, order.price)
 
             if order.has_position:
@@ -112,8 +113,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
                 else:
                     self._place_tp_sl(pos, ob)
         else:
-            pos.apply_close(filled_quantity)
-
+            order.apply_close(filled_quantity)
             if order.has_position:
                 self._remove_tp_sl(pos, ob)
                 if pos.status == OrderStatus.CLOSED:
@@ -121,7 +121,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
 
     def _handle_touched_order(
         self,
-        order: Order,
+        order: SpotOrder,
         touched_quantity: int,
         price: float,
         ob: OrderBook,
@@ -139,7 +139,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
             pos = self._position_manager.get(order.id)
 
         if order.tag == Tag.ENTRY:
-            pos.apply_fill(touched_quantity)
+            order.apply_fill(touched_quantity)
 
             if order.has_position:
                 if pos.take_profit_order is not None or pos.stop_loss_order is not None:
@@ -147,7 +147,7 @@ class SpotEngine(BaseEngine[SpotPosition]):
                 else:
                     self._place_tp_sl(pos, ob)
         else:
-            pos.apply_close(touched_quantity)
+            order.apply_close(touched_quantity)
             if order.has_position:
                 self._mutate_tp_sl_quantity(pos)
 
