@@ -4,13 +4,13 @@ from ..order import Order
 
 class PriceLevel:
     """
-    Houses doubly linked list to manage orders at a single 
+    Houses doubly linked list to manage orders at a single
     price level in an order book.
 
-    Maintains insertion order for matching priority (FIFO) 
-    and provides efficient append and removal operations. 
-    
-    Each order is wrapped in a PriceLevelNode and tracked via 
+    Maintains insertion order for matching priority (FIFO)
+    and provides efficient append and removal operations.
+
+    Each order is wrapped in a PriceLevelNode and tracked via
     a lookup dictionary for O(1) access.
     """
 
@@ -23,9 +23,7 @@ class PriceLevel:
         """Adds a new order to the end of the level. Raises ValueError if duplicate."""
         if order.id in self._tracker:
             print(self.tracker)
-            raise ValueError(
-                f"Order with id {order.id} already on level."
-            )
+            raise ValueError(f"Order with id {order.id} already on level.")
 
         new_node = PriceLevelNode(order)
 

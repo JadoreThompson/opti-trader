@@ -1,10 +1,11 @@
 from collections import defaultdict
 from datetime import datetime
-from engine.order import Order
 from enums import OrderStatus, Side
+from .order import Order
+from .base_position import BasePosition
 
 
-class Position:
+class FuturesPosition(BasePosition):
     """
     Manages the complete lifecycle and state of a trading position,
     from pending to closed or cancelled.
@@ -21,39 +22,10 @@ class Position:
         stop_loss_order: Order | None = None,
         take_profit_order: Order | None = None,
     ) -> None:
-        self._payload = payload
-        self._id: int = payload["order_id"]
-        self.entry_order = entry_order
-        self.stop_loss_order = stop_loss_order
-        self.take_profit_order = take_profit_order
+        super().__init__(payload, entry_order, stop_loss_order, take_profit_order)
         self._filled_prices: dict[float, int] = defaultdict(int)
         self._filled_price: float = 0
         self._filled_quantity: int = 0
-
-    @property
-    def id(self) -> int:
-        return self._id
-
-    @property
-    def instrument(self) -> str:
-        return self._payload["instrument"]
-
-    @property
-    def status(self):
-        return self._payload["status"]
-
-    @property
-    def payload(self) -> dict:
-        """Returns the current state payload."""
-        return self._payload
-
-    @property
-    def open_quantity(self) -> int:
-        return self._payload["open_quantity"]
-
-    @property
-    def standing_quantity(self) -> int:
-        return self._payload["standing_quantity"]
 
     def apply_entry_fill(self, quantity: int, price: float) -> None:
         """

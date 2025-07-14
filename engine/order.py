@@ -21,6 +21,7 @@ class Order:
         self.quantity = quantity
         self._price = price
         self.filled_quantity = 0
+        self.has_position = False
 
     @property
     def id(self):
@@ -49,7 +50,7 @@ class Order:
             self._price = price
 
     def __eq__(self, value: object) -> bool:
-        if isinstance(value, self.__class__):
+        if issubclass(type(value), Order):
             return self._id == value.id
         raise TypeError(f"Cannot compare {type(value)} and {self.__class__}")
 
