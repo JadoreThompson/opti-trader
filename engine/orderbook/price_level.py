@@ -1,5 +1,5 @@
 from .price_level_node import PriceLevelNode
-from ..order import Order
+from ..orders.order import Order
 
 
 class PriceLevel:

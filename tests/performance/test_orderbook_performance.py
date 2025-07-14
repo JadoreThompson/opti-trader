@@ -1,7 +1,7 @@
 import pytest
 import gc
 from engine.enums import Tag
-from engine.order import Order
+from engine.orders.order import Order
 from engine.orderbook import OrderBook
 from enums import Side
 

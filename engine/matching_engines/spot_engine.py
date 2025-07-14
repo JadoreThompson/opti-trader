@@ -1,11 +1,11 @@
 from config import PRODUCTION
-from engine.spot_order import SpotOrder
+from engine.orders.spot_order import SpotOrder
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
 from ..enums import MatchOutcome, Tag
-from ..order import Order
+from ..orders.order import Order
 from ..orderbook import OrderBook
-from ..spot_position import SpotPosition
+from ..positions.spot_position import SpotPosition
 from ..typing import MatchResult, CloseRequest, ModifyRequest
 
 
@@ -70,7 +70,6 @@ class SpotEngine(BaseEngine[SpotPosition]):
                 return
 
         price = payload["limit_price"] or result.price or ob.price
-        print(payload["limit_price"], result.price, ob.price)
         order.set_price(price)
         ob.append(order, order.price)
 

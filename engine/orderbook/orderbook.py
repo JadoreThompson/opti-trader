@@ -3,7 +3,7 @@ from typing import Iterable, KeysView, Literal
 
 from enums import Side
 from .price_level import PriceLevel
-from ..order import Order
+from ..orders.order import Order
 
 Book = Literal["bids", "asks"]
 

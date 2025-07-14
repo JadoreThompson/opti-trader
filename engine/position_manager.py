@@ -1,5 +1,5 @@
 from typing import Generic, Type, TypeVar
-from engine.base_position import BasePosition
+from engine.positions.base_position import BasePosition
 from enums import OrderStatus
 
 T = TypeVar("T", bound=BasePosition)

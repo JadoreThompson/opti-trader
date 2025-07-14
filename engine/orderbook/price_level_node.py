@@ -1,5 +1,5 @@
 from __future__ import annotations
-from ..order import Order
+from ..orders.order import Order
 
 
 class PriceLevelNode:

@@ -2,9 +2,9 @@ from typing import Generic, Type, overload, TypeVar
 
 from enums import Side
 from ..enums import MatchOutcome
-from ..order import Order
+from ..orders.order import Order
 from ..orderbook.orderbook import OrderBook
-from ..base_position import BasePosition
+from ..positions.base_position import BasePosition
 from ..position_manager import PositionManager
 from ..typing import MatchResult, CloseRequest, ModifyRequest
 
