@@ -1,8 +1,10 @@
+from typing import Generic, TypeVar
 from .price_level_node import PriceLevelNode
-from ..orders.order import Order
+from ..orders import Order
 
+T = TypeVar("T", bound=Order)
 
-class PriceLevel:
+class PriceLevel(Generic[T]):
     """
     Houses doubly linked list to manage orders at a single
     price level in an order book.
@@ -15,17 +17,16 @@ class PriceLevel:
     """
 
     def __init__(self) -> None:
-        self._head: PriceLevelNode | None = None
-        self._tail: PriceLevelNode | None = None
-        self._tracker: dict[str, PriceLevelNode] = {}
+        self._head: PriceLevelNode[T] | None = None
+        self._tail: PriceLevelNode[T] | None = None
+        self._tracker: dict[str, PriceLevelNode[T]] = {}
 
-    def append(self, order: Order) -> None:
+    def append(self, order: T) -> None:
         """Adds a new order to the end of the level. Raises ValueError if duplicate."""
         if order.id in self._tracker:
-            print(self.tracker)
             raise ValueError(f"Order with id {order.id} already on level.")
 
-        new_node = PriceLevelNode(order)
+        new_node = PriceLevelNode[T](order)
 
         if self._head is None:
             self._head = new_node
@@ -37,7 +38,7 @@ class PriceLevel:
 
         self._tracker[order.id] = new_node
 
-    def remove(self, order: Order) -> None:
+    def remove(self, order: T) -> None:
         """Removes the specified order from the level. Safe against head/tail removals."""
         orders_node = self._tracker[order.id]
 
@@ -61,13 +62,13 @@ class PriceLevel:
         return self._head is not None
 
     @property
-    def head(self) -> PriceLevelNode | None:
+    def head(self) -> PriceLevelNode[T] | None:
         return self._head
 
     @property
-    def tail(self) -> PriceLevelNode | None:
+    def tail(self) -> PriceLevelNode[T] | None:
         return self._tail
 
     @property
-    def tracker(self) -> dict[str, PriceLevelNode]:
+    def tracker(self) -> dict[str, PriceLevelNode[T]]:
         return self._tracker

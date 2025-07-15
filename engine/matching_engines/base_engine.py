@@ -1,20 +1,17 @@
-from typing import Generic, Type, overload, TypeVar
+from typing import Generic, overload, TypeVar
 
 from enums import Side
 from ..enums import MatchOutcome
-from ..orders.order import Order
-from ..orderbook.orderbook import OrderBook
-from ..positions.base_position import BasePosition
-from ..position_manager import PositionManager
+from ..orderbook import OrderBook
+from ..orders import Order
 from ..typing import MatchResult, CloseRequest, ModifyRequest
 
-T = TypeVar("T", bound=BasePosition)
+O = TypeVar("O", bound=Order)
 
 
-class BaseEngine(Generic[T]):
-    def __init__(self, position_cls: Type[T]) -> None:
-        self._orderbooks: dict[str, OrderBook] = {}
-        self._position_manager = PositionManager(position_cls)
+class BaseEngine(Generic[O]):
+    def __init__(self) -> None:
+        self._orderbooks: dict[str, OrderBook[O]] = {}
 
     @overload
     def place_order(self, payload: dict) -> None:
@@ -65,7 +62,7 @@ class BaseEngine(Generic[T]):
             request (ModifyRequest): Data containing modifications to apply.
         """
 
-    def _match(self, order: Order, ob: OrderBook) -> MatchResult:
+    def _match(self, order: O, ob: OrderBook[O]) -> MatchResult:
         """
         Attempts to match the given order against the opposing side
         of the order book at the best available price.
@@ -124,50 +121,21 @@ class BaseEngine(Generic[T]):
         return MatchResult(
             MatchOutcome.PARTIAL, target_price, starting_quantity - cur_quantity
         )
-        
-    def _mutate_tp_sl_quantity(self, pos: T) -> None:
-        """
-        Adjusts TP/SL order quantities to match current open position quantity.
-
-        Args:
-            pos (Position): Position whose TP/SL orders should be updated.
-        """
-        if pos.take_profit_order is not None:
-            pos.take_profit_order.quantity = pos.open_quantity
-            pos.take_profit_order.filled_quantity = 0
-        if pos.stop_loss_order is not None:
-            pos.stop_loss_order.quantity = pos.open_quantity
-            pos.stop_loss_order.filled_quantity = 0
-    
-    def _remove_tp_sl(self, pos: T, ob: OrderBook) -> None:
-        """
-        Removes take-profit and stop-loss orders associated with a position.
-
-        Args:
-            pos (Position): The position whose TP/SL orders should be removed.
-            ob (OrderBook): Order book from which to remove the orders.
-        """
-        if pos.take_profit_order is not None:
-            ob.remove(pos.take_profit_order, pos.take_profit_order.price)
-            pos.take_profit_order = None
-        if pos.stop_loss_order is not None:
-            ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
-            pos.stop_loss_order = None
 
     @overload
     def _handle_filled_order(
         self,
-        order: Order,
+        order: O,
         filled_quantity: int,
         price: float,
-        ob: OrderBook,
+        ob: OrderBook[O],
     ) -> None: ...
 
     @overload
     def _handle_touched_order(
         self,
-        order: Order,
+        order: O,
         filled_quantity: int,
         price: float,
-        ob: OrderBook,
+        ob: OrderBook[O],
     ) -> None: ...

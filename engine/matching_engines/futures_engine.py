@@ -2,9 +2,10 @@ from config import PRODUCTION
 from enums import OrderStatus, OrderType, Side
 from .base_engine import BaseEngine
 from ..enums import MatchOutcome, Tag
-from ..orders.order import Order
-from ..orderbook.orderbook import OrderBook
-from ..positions.future_position import FuturesPosition
+from ..orderbook import OrderBook
+from ..orders import Order
+from ..position import Position
+from ..position_manager import PositionManager
 from ..typing import (
     MODIFY_DEFAULT,
     CloseRequest,
@@ -14,9 +15,10 @@ from ..typing import (
 )
 
 
-class FuturesEngine(BaseEngine[FuturesPosition]):
+class FuturesEngine(BaseEngine[Order]):
     def __init__(self) -> None:
-        super().__init__(FuturesPosition)
+        super().__init__()
+        self._position_manager = PositionManager()
 
     def place_order(self, payload: dict) -> None:
         """
@@ -38,7 +40,6 @@ class FuturesEngine(BaseEngine[FuturesPosition]):
         ob = self._orderbooks[payload["instrument"]]
         pos = self._position_manager.create(payload)
         order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
-        order.has_position = True
 
         if payload["order_type"] == OrderType.LIMIT:
             if not (  # Checking if not crossable
@@ -274,7 +275,7 @@ class FuturesEngine(BaseEngine[FuturesPosition]):
             pos.apply_close(touched_quantity, price)
             self._mutate_tp_sl_quantity(pos)
 
-    def _place_tp_sl(self, pos: FuturesPosition, ob: OrderBook) -> None:
+    def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
         """
         Places take-profit and stop-loss orders for a position if specified.
 
@@ -293,7 +294,6 @@ class FuturesEngine(BaseEngine[FuturesPosition]):
                 pos.open_quantity,
                 payload["take_profit"],
             )
-            new_order.has_position = True
             pos.take_profit_order = new_order
             ob.append(new_order, new_order.price)
 
@@ -305,9 +305,37 @@ class FuturesEngine(BaseEngine[FuturesPosition]):
                 pos.open_quantity,
                 payload["stop_loss"],
             )
-            new_order.has_position = True
             pos.stop_loss_order = new_order
             ob.append(new_order, new_order.price)
+
+    def _mutate_tp_sl_quantity(self, pos: Position) -> None:
+        """
+        Adjusts TP/SL order quantities to match current open position quantity.
+
+        Args:
+            pos (Position): Position whose TP/SL orders should be updated.
+        """
+        if pos.take_profit_order is not None:
+            pos.take_profit_order.quantity = pos.open_quantity
+            pos.take_profit_order.filled_quantity = 0
+        if pos.stop_loss_order is not None:
+            pos.stop_loss_order.quantity = pos.open_quantity
+            pos.stop_loss_order.filled_quantity = 0
+
+    def _remove_tp_sl(self, pos: Position, ob: OrderBook[Order]) -> None:
+        """
+        Removes take-profit and stop-loss orders associated with a position.
+
+        Args:
+            pos (Position): The position whose TP/SL orders should be removed.
+            ob (OrderBook): Order book from which to remove the orders.
+        """
+        if pos.take_profit_order is not None:
+            ob.remove(pos.take_profit_order, pos.take_profit_order.price)
+            pos.take_profit_order = None
+        if pos.stop_loss_order is not None:
+            ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
+            pos.stop_loss_order = None
 
     def _validate_close_req_quantity(
         self, request_quantity: CloseRequestQuantity, base_quantity: int

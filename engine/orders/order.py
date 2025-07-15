@@ -1,4 +1,4 @@
-from pydantic import Tag
+from ..enums import Tag
 from enums import Side
 
 
@@ -21,7 +21,6 @@ class Order:
         self.quantity = quantity
         self._price = price
         self.filled_quantity = 0
-        self.has_position = False
 
     @property
     def id(self):

@@ -8,14 +8,16 @@ MatchResult = namedtuple(
     "MatchResult",
     ("outcome", "price", "quantity"),
 )
-
+Book = Literal["bids", "asks"]
 CloseRequestQuantity = Union[Literal["ALL"], int]
+BalanceUpdate = namedtuple("BalanceUpdate", ("open_quantity", "standing_quantity"))
 
 
 @dataclass
 class CloseRequest:
     order_id: str
     quantity: CloseRequestQuantity
+
 
 @dataclass
 class CancelRequest:

@@ -1,10 +1,7 @@
-import pytest
-
 from uuid import uuid4
 from datetime import datetime
-from engine import FuturesEngine
+from engine import SpotEngine
 from enums import OrderStatus, OrderType, Side
-from typing import Generator, Tuple
 
 
 def create_order_simple(
@@ -13,6 +10,8 @@ def create_order_simple(
     order_type: OrderType,
     instrument: str = "BTC",
     quantity: int = 10,
+    open_quantity: int = 0,
+    standing_quantity: int = None,
     limit_price: float | None = None,
     tp_price: float | None = None,
     sl_price: float | None = None,
@@ -25,7 +24,9 @@ def create_order_simple(
         "side": side,
         "order_type": order_type,
         "quantity": quantity,
-        "standing_quantity": quantity,
+        "standing_quantity": (
+            standing_quantity if standing_quantity is not None else quantity
+        ),
         "status": OrderStatus.PENDING,
         "limit_price": limit_price,
         "take_profit": tp_price,
@@ -35,7 +36,7 @@ def create_order_simple(
         "unrealised_pnl": 0.0,
         "closed_at": None,
         "created_at": datetime.now(),
-        "open_quantity": 0,
+        "open_quantity": open_quantity,
     }
 
 
@@ -84,21 +85,3 @@ def create_order_conditional(i: int, quantity=None) -> dict:
         **tp_sl_details,
     }
     return order
-
-
-@pytest.fixture
-def populated_engine(
-    request,
-) -> Generator[Tuple[FuturesEngine, tuple[dict, ...]], None, None]:
-    """
-    Creates and populates a FuturesEngine with a given number of orders.
-    This replaces the fixture that used the mock engine.
-    """
-    num_orders = request.param
-    engine = FuturesEngine()
-    orders = tuple(create_order_conditional(i) for i in range(num_orders))
-
-    for order in orders:
-        engine.place_order(order)
-
-    yield engine, orders
