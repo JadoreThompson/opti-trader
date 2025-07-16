@@ -336,36 +336,3 @@ class FuturesEngine(BaseEngine[Order]):
         if pos.stop_loss_order is not None:
             ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
             pos.stop_loss_order = None
-
-    def _validate_close_req_quantity(
-        self, request_quantity: CloseRequestQuantity, base_quantity: int
-    ) -> int:
-        """
-        Validates and resolves the close request quantity.
-
-        Converts symbolic or explicit quantities to valid integers and
-        raises an error if the input is invalid.
-
-        Args:
-            request_quantity (CloseRequestQuantity): Requested close amount
-                ("ALL" or int).
-            base_quantity (int): The maximum allowed quantity (open or standing).
-
-        Returns:
-            int: Validated quantity to close.
-
-        Raises:
-            ValueError: If the quantity is invalid or exceeds available quantity.
-        """
-        if request_quantity == "ALL":
-            return base_quantity
-
-        try:
-            quantity = int(request_quantity)
-
-            if quantity <= base_quantity:
-                return quantity
-        except TypeError:
-            pass
-
-        raise ValueError(f"Invalid request quantity {request_quantity}")

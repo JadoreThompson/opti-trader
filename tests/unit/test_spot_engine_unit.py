@@ -112,8 +112,8 @@ def test_market_bid_and_limit_ask_neutralise(engine: SpotEngine):
         OrderType.LIMIT,
         quantity=10,
         limit_price=100.0,
-        open_quantity=10,
-        standing_quantity=0,
+        open_quantity=0,
+        standing_quantity=10,
     )
     market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=10)
 
@@ -123,7 +123,7 @@ def test_market_bid_and_limit_ask_neutralise(engine: SpotEngine):
     assert market_buy["standing_quantity"] == 0
     assert market_buy["open_quantity"] == 10
     assert limit_sell["standing_quantity"] == 0
-    assert limit_sell["open_quantity"] == 0
+    assert limit_sell["open_quantity"] == 10
 
 
 def test_full_position_close():
@@ -153,8 +153,8 @@ def test_full_position_close():
         Side.ASK,
         OrderType.MARKET,
         quantity=10,
-        open_quantity=10,
-        standing_quantity=0,
+        open_quantity=0,
+        standing_quantity=10,
         instrument=instrument,
     )
 
@@ -167,7 +167,7 @@ def test_full_position_close():
     assert limit_bid["open_quantity"] == 10
 
     assert market_sell["standing_quantity"] == 0
-    assert market_sell["open_quantity"] == 0
+    assert market_sell["open_quantity"] == 10
     assert balance_manager.get(market_sell["order_id"]) is None
 
     assert ob.best_ask == 50.0
@@ -185,10 +185,80 @@ def test_full_position_close():
 
     engine.place_order(market_bid)
 
-    assert market_bid['standing_quantity'] == 0
-    assert market_bid['open_quantity'] == 10
+    assert market_bid["standing_quantity"] == 0
+    assert market_bid["open_quantity"] == 10
     assert limit_bid["standing_quantity"] == 0
     assert limit_bid["open_quantity"] == 0
-    
+
     assert balance_manager.get(limit_bid["order_id"]) is None
     assert mock_oco_manager.get(limit_bid["oco_id"]) is None
+
+
+def test_cancel_order(engine: SpotEngine):
+    """
+    Scenario: A limit bid is placed with no quantity consumed.
+    Client submits two cancel request to reduce the quantity of the position
+    with the first being a partial closure of 2 and the second being 'ALL'.
+    """
+    limit_bid = create_order_simple(
+        "buy1", Side.BID, OrderType.LIMIT, quantity=10, limit_price=100.0
+    )
+
+    engine.place_order(limit_bid)
+
+    cancel_request = CloseRequest("buy1", 2)
+    engine.cancel_order(cancel_request)
+
+    assert limit_bid["standing_quantity"] == 8
+    assert limit_bid["open_quantity"] == 0
+
+    cancel_request = CloseRequest("buy1", "ALL")
+    engine.cancel_order(cancel_request)
+
+    assert limit_bid["standing_quantity"] == 0
+    assert limit_bid["open_quantity"] == 0
+    assert engine._order_manager.get("buy") is None
+    assert engine._balance_manager.get("buy") is None
+
+
+def test_cancel_partially_filled_order(engine: SpotEngine):
+    """
+    Scenario: A limit bid is placed for quantity `qb` and a market
+        ask is placed for quantity `qa`. The market ask partially fills
+        the limit bid. The client then sends a series of cancel requests
+        eroding the quantity until it's eventually removed from the engine
+        due to the standing_quantity reaching 0 and having no OCO order to take
+        care of.
+    """
+    limit_bid = create_order_simple(
+        "buy1", Side.BID, OrderType.LIMIT, quantity=10, limit_price=100.0
+    )
+    market_sell = create_order_simple("sell1", Side.ASK, OrderType.MARKET, quantity=5)
+
+    engine.place_order(limit_bid)
+    engine.place_order(market_sell)
+
+    assert limit_bid["standing_quantity"] == 5
+    assert limit_bid["open_quantity"] == 5
+    assert market_sell["standing_quantity"] == 0
+    assert market_sell["open_quantity"] == 5
+
+    cancel_request = CloseRequest("buy1", 3)
+    engine.cancel_order(cancel_request)
+
+    assert limit_bid["standing_quantity"] == 2
+    assert limit_bid["open_quantity"] == 5
+
+    market_sell = create_order_simple("sell1", Side.ASK, OrderType.MARKET, quantity=1)
+    engine.place_order(market_sell)
+
+    assert limit_bid["standing_quantity"] == 1
+    assert limit_bid["open_quantity"] == 6
+
+    cancel_request = CloseRequest("buy1", 1)
+    engine.cancel_order(cancel_request)
+
+    assert limit_bid["standing_quantity"] == 0
+    assert limit_bid["open_quantity"] == 6
+    assert engine._balance_manager.get("buy1") is None
+    assert engine._order_manager.get("buy1") is None

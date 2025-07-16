@@ -1,7 +1,7 @@
 from .typing import BalanceUpdate
 
 
-class BalanceManger:
+class BalanceManager:
     """
     Manages the open and standing quantities of
     and order. Acts as a centralised state machine.
@@ -43,7 +43,8 @@ class BalanceManger:
     def increase_balance(self, order_id: str, quantity: int) -> BalanceUpdate:
         """
         Increases the open quantity and decreases the standing quantity
-        for the order and returns the new open and standing quantities.
+        for the order's payload and assigns the appropriate status value.
+        Returns the new open and standing quantities.
 
         Args:
             order_id (str): Order ID of the order
@@ -61,7 +62,7 @@ class BalanceManger:
         payload = self._payloads[order_id]
         payload["standing_quantity"] -= quantity
         payload["open_quantity"] += quantity
-
+        
         return BalanceUpdate(payload["open_quantity"], payload["standing_quantity"])
 
     def decrease_balance(self, order_id: str, quantity: int) -> BalanceUpdate:

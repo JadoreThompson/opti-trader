@@ -4,7 +4,7 @@ from enums import Side
 from ..enums import MatchOutcome
 from ..orderbook import OrderBook
 from ..orders import Order
-from ..typing import MatchResult, CloseRequest, ModifyRequest
+from ..typing import CloseRequestQuantity, MatchResult, CloseRequest, ModifyRequest
 
 O = TypeVar("O", bound=Order)
 
@@ -36,18 +36,6 @@ class BaseEngine(Generic[O]):
 
         Args:
             request (CloseRequest): Data specifying the order ID and quantity to cancel.
-        """
-
-    @overload
-    def close_order(self, request: CloseRequest) -> None:
-        """
-        Closes (partially or fully) an open position.
-
-        Processes a close request by matching it against the opposing side of the
-        order book, updating position status, and cleaning up related orders.
-
-        Args:
-            request (CloseRequest): Data specifying the order ID and quantity to close.
         """
 
     @overload
@@ -139,3 +127,37 @@ class BaseEngine(Generic[O]):
         price: float,
         ob: OrderBook[O],
     ) -> None: ...
+
+    @staticmethod
+    def _validate_close_req_quantity(
+        request_quantity: CloseRequestQuantity, base_quantity: int
+    ) -> int:
+        """
+        Validates and resolves the close request quantity.
+
+        Converts symbolic or explicit quantities to valid integers and
+        raises an error if the input is invalid.
+
+        Args:
+            request_quantity (CloseRequestQuantity): Requested close amount
+                ("ALL" or int).
+            base_quantity (int): The maximum allowed quantity (open or standing).
+
+        Returns:
+            int: Validated quantity to close.
+
+        Raises:
+            ValueError: If the quantity is invalid or exceeds available quantity.
+        """
+        if request_quantity == "ALL":
+            return base_quantity
+
+        try:
+            quantity = int(request_quantity)
+
+            if quantity <= base_quantity:
+                return quantity
+        except TypeError:
+            pass
+
+        raise ValueError(f"Invalid request quantity {request_quantity}")
