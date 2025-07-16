@@ -113,7 +113,6 @@ def test_market_bid_and_limit_ask_neutralise(engine: SpotEngine):
         quantity=10,
         limit_price=100.0,
         open_quantity=0,
-        standing_quantity=10,
     )
     market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=10)
 
@@ -154,7 +153,6 @@ def test_full_position_close():
         OrderType.MARKET,
         quantity=10,
         open_quantity=0,
-        standing_quantity=10,
         instrument=instrument,
     )
 
@@ -179,7 +177,6 @@ def test_full_position_close():
         OrderType.MARKET,
         quantity=10,
         open_quantity=0,
-        standing_quantity=10,
         instrument=instrument,
     )
 
@@ -262,3 +259,147 @@ def test_cancel_partially_filled_order(engine: SpotEngine):
     assert limit_bid["open_quantity"] == 6
     assert engine._balance_manager.get("buy1") is None
     assert engine._order_manager.get("buy1") is None
+
+
+def test_modify_order(engine: SpotEngine):
+    """
+    Scenario: A simple limit bid is submitted and the client
+    sends 3 modify requests for limit, take profit and stop loss
+    price.
+    """
+    limit_bid = create_order_simple(
+        "buy1", Side.BID, OrderType.LIMIT, quantity=10, limit_price=100.0
+    )
+    engine.place_order(limit_bid)
+
+    modify_request = ModifyRequest(order_id="buy1", limit_price=120.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["limit_price"] == 120.0
+
+    modify_request = ModifyRequest(order_id="buy1", take_profit=200.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["take_profit"] == None
+
+    modify_request = ModifyRequest(order_id="buy1", stop_loss=100.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["stop_loss"] == None
+
+
+def test_modify_order_oco_order(engine: SpotEngine):
+    """
+    Scenario: An oco limit bid is submitted and the client
+    sends 3 modify requests for limit, take profit and stop loss
+    price.
+    """
+    limit_bid = create_order_simple(
+        "buy1",
+        Side.BID,
+        OrderType.LIMIT,
+        quantity=10,
+        limit_price=100.0,
+        tp_price=150.0,
+        sl_price=50.0,
+    )
+    engine.place_order(limit_bid)
+
+    modify_request = ModifyRequest(order_id="buy1", limit_price=120.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["limit_price"] == 120.0
+
+    modify_request = ModifyRequest(order_id="buy1", take_profit=200.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["take_profit"] == 200.0
+
+    modify_request = ModifyRequest(order_id="buy1", stop_loss=100.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["stop_loss"] == 100.0
+
+
+def test_modify_order_filled_order(engine: SpotEngine):
+    """
+    Scenario: An oco limit bid is submitted and filled and the client
+    sends 3 modify requests for limit, take profit and stop loss
+    price. Only the take profit and stop loss modifications should succeed.
+    """
+    limit_bid = create_order_simple(
+        "buy1",
+        Side.BID,
+        OrderType.LIMIT,
+        quantity=10,
+        limit_price=100.0,
+        tp_price=150.0,
+        sl_price=50.0,
+    )
+
+    market_sell = create_order_simple(
+        "sell1",
+        Side.ASK,
+        OrderType.MARKET,
+        quantity=10,
+    )
+
+    engine.place_order(limit_bid)
+    engine.place_order(market_sell)
+
+    modify_request = ModifyRequest(order_id="buy1", limit_price=120.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["limit_price"] == 100.0
+
+    modify_request = ModifyRequest(order_id="buy1", take_profit=200.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["take_profit"] == 200.0
+
+    modify_request = ModifyRequest(order_id="buy1", stop_loss=100.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["stop_loss"] == 100.0
+
+
+def test_modify_order_partially_filled_order(engine: SpotEngine):
+    """
+    Scenario: An oco limit bid is submitted and partially filled the client
+    sends 3 modify requests for limit, take profit and stop loss
+    price. Of which all should succeed.
+    """
+    limit_bid = create_order_simple(
+        "buy1",
+        Side.BID,
+        OrderType.LIMIT,
+        quantity=10,
+        limit_price=100.0,
+        tp_price=150.0,
+        sl_price=50.0,
+    )
+
+    market_sell = create_order_simple(
+        "sell1",
+        Side.ASK,
+        OrderType.MARKET,
+        quantity=5,
+    )
+
+    engine.place_order(limit_bid)
+    engine.place_order(market_sell)
+
+    modify_request = ModifyRequest(order_id="buy1", limit_price=120.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["limit_price"] == 120.0
+
+    modify_request = ModifyRequest(order_id="buy1", take_profit=200.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["take_profit"] == 200.0
+
+    modify_request = ModifyRequest(order_id="buy1", stop_loss=100.0)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["stop_loss"] == 100.0

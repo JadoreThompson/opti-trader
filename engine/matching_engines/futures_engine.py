@@ -51,7 +51,8 @@ class FuturesEngine(BaseEngine[Order]):
                 and ob.best_bid is not None
                 and payload["limit_price"] <= ob.best_bid
             ):
-                order.set_price(payload["limit_price"])
+                # order.set_price(payload["limit_price"])
+                order.price = payload["limit_price"]
                 ob.append(order, order.price)
                 pos.entry_order = order
                 return
@@ -68,7 +69,8 @@ class FuturesEngine(BaseEngine[Order]):
                 return
 
         price = payload["limit_price"] or result.price or ob.price
-        order.set_price(price)
+        # order.set_price(price)
+        order.price = price
         ob.append(order, price)
         pos.entry_order = order
 
