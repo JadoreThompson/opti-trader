@@ -1,3 +1,4 @@
+from traceback import print_list
 from enums import OrderType, Side
 from .base_engine import BaseEngine
 from ..balance_manager import BalanceManger
@@ -70,6 +71,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         self, order: SpotOrder, payload: dict, ob: OrderBook[SpotOrder]
     ) -> None:
         oco_order: OCOOrder = self._oco_manager.create()
+        # payload['oco_id'] = oco_order.id # Only assigning during tests
 
         if payload["order_type"] == OrderType.LIMIT:
             if not (  # Checking if not crossable
@@ -113,41 +115,33 @@ class SpotEngine(BaseEngine[SpotOrder]):
     ) -> None:
         # TODO: Open it up for different order_id OCO orders.
         if order.side == Side.BID:
-            print(1)
             balance_update = self._balance_manager.increase_balance(
                 order.id, filled_quantity
             )
         else:
-            self._balance_manager.decrease_balance(order.id, filled_quantity)
-
-        print(order.id)
-        print(balance_update)
+            balance_update = self._balance_manager.decrease_balance(order.id, filled_quantity)
 
         if order.tag == Tag.ENTRY:
-            print(2)
             ob.remove(order, order.price)
 
             if order.oco_id is not None:
                 oco_order = self._oco_manager.get(order.oco_id)
-                print(order.id)
-                if oco_order.leg_a is None and oco_order.leg_b is None:
-                    print(3)
+                if oco_order.leg_b is None and oco_order.leg_c is None:
                     self._place_tp_sl(oco_order, ob)
                 else:
-                    print(4)
                     self._mutate_tp_sl(
                         self._oco_manager.get(order.oco_id),
                         balance_update.open_quantity,
                     )
             else:
-                print(5)
                 self._balance_manager.remove(order.id)
-            if order.id == "buy1":
-                raise RuntimeError()
         else:
             oco_order = self._oco_manager.get(order.oco_id)
             self._remove_tp_sl(oco_order, ob)
-            self._oco_manager.remove(oco_order.id)
+            
+            if balance_update.open_quantity == 0 and balance_update.standing_quantity == 0:
+                self._oco_manager.remove(oco_order.id)
+                self._balance_manager.remove(order.id)
 
     def _handle_touched_order(
         self,

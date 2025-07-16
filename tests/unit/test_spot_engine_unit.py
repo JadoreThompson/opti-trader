@@ -1,7 +1,5 @@
-import sys
 import pytest
 
-from pprint import pprint
 from engine import SpotEngine
 from engine.enums import Tag
 from engine.orderbook import OrderBook
@@ -172,24 +170,25 @@ def test_full_position_close():
     assert market_sell["open_quantity"] == 0
     assert balance_manager.get(market_sell["order_id"]) is None
 
-    print(ob.asks)
     assert ob.best_ask == 50.0
     assert ob.asks[50.0].head == ob.asks[50.0].tail
 
-    market_sell = create_order_simple(
-        "sell2",
-        Side.ASK,
+    market_bid = create_order_simple(
+        "buy2",
+        Side.BID,
         OrderType.MARKET,
         quantity=10,
-        open_quantity=10,
-        standing_quantity=0,
+        open_quantity=0,
+        standing_quantity=10,
         instrument=instrument,
     )
 
-    engine.place_order(market_sell)
+    engine.place_order(market_bid)
 
+    assert market_bid['standing_quantity'] == 0
+    assert market_bid['open_quantity'] == 10
     assert limit_bid["standing_quantity"] == 0
     assert limit_bid["open_quantity"] == 0
+    
     assert balance_manager.get(limit_bid["order_id"]) is None
-
-    print(mock_oco_manager)
+    assert mock_oco_manager.get(limit_bid["oco_id"]) is None
