@@ -16,7 +16,9 @@ MatchResult = namedtuple(
 )
 Book = Literal["bids", "asks"]
 CloseRequestQuantity = Union[Literal["ALL"], int]
-BalanceUpdate = namedtuple("BalanceUpdate", ("open_quantity", "standing_quantity", "total_balance"))
+BalanceUpdate = namedtuple(
+    "BalanceUpdate", ("open_quantity", "standing_quantity", "total_asset_balance")
+)
 
 
 @dataclass
@@ -31,8 +33,7 @@ class CancelRequest:
     quantity: CloseRequestQuantity
 
 
-@dataclass
-class ModifyRequest:
+class ModifyRequest(BaseModel):
     order_id: str
     limit_price: float | None = MODIFY_DEFAULT
     take_profit: float | None = MODIFY_DEFAULT
@@ -70,9 +71,12 @@ class Event(BaseModel):
     stop_loss: float | None = None
     take_profit: float | None = None
     limit_price: float | None = None
-    balance: float = None
+    balance: float | None = None
     asset_balance: int = None
     created_at: datetime = Field(default_factory=get_datetime)
+    metadata: dict | None = (
+        None  # Tag for an order etc. Helps with understanding cash balance direction
+    )
 
     def model_dump(self) -> dict:
         d = super().model_dump()
@@ -87,4 +91,3 @@ def to_typed_dict(typ):
 
 
 EventDict = to_typed_dict(Event)
-print(EventDict)

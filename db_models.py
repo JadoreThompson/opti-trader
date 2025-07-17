@@ -169,3 +169,18 @@ class OrderEvents(Base):
     # Relationships
     user = relationship("Users", back_populates="order_events")
     order = relationship("Orders", back_populates="order_events")
+
+
+class Escrows(Base):
+    __tablename__ = "escrows"
+
+    escrow_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, nullable=False, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    order_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False
+    )
+    balance: Mapped[float] = mapped_column(Float, nullable=False)

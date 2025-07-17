@@ -121,6 +121,7 @@ def test_market_bid_and_limit_ask_neutralise(engine: SpotEngine):
         open_quantity=0,
     )
     market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=10)
+    engine._balance_manager._users["sell1"] = 10
 
     engine.place_order(limit_sell)
     engine.place_order(market_buy)

@@ -1,3 +1,4 @@
+from enums import Side
 from .typing import BalanceUpdate
 
 
@@ -11,7 +12,7 @@ class BalanceManager:
         self._payloads: dict[str, dict] = {}
         self._users: dict[str, int] = {}
 
-    def append(self, payload: dict) -> None:
+    def append(self, payload: dict) -> bool:
         """
         Appends to the manager. If the order id already
         exists raises error exclaiming it already exists.
@@ -19,20 +20,28 @@ class BalanceManager:
         Args:
             payload (dict): Payload to append.
 
-        Raises:
-            ValueError: A payload with said order_id is already
-                present in the manager.
+        Returns:
+            bool - True if successfull append else False if insufficient balance
+                or order_id already existed.
         """
-        print(payload)
+        # Raises:
+        #     ValueError: A payload with said order_id is already
+        #         present in the manager.
         order_id = payload["order_id"]
         user_id = payload["user_id"]
 
         if order_id in self._payloads:
-            raise ValueError(f"{order_id} already exists.")
+            # raise ValueError(f"{order_id} already exists.")
+            return False
+        if payload["side"] == Side.ASK and payload["quantity"] > self._users.get(
+            payload["user_id"], 0
+        ):
+            return False
         if user_id not in self._users:
             self._users[user_id] = 0
 
         self._payloads[order_id] = payload
+        return True
 
     def remove(self, order_id: str) -> None:
         self._payloads.pop(order_id)

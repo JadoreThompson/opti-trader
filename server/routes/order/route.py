@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from config import REDIS
-from db_models import Users
+from db_models import OrderEvents, Users
 from enums import OrderType, Side
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
@@ -46,10 +46,10 @@ async def create_order(
                 status_code=400, content={"error": "Insufficient balance."}
             )
     else:
-        # res = await db_sess.execute(
-        #     select(Users.balance).where(Users.user_id == jwt_payload.sub)
-        # )
-        # ...
+        res = await db_sess.execute(
+            select(OrderEvents.asset_balance).where(OrderEvents.user_id == jwt_payload.sub, OrderEvents.)
+        )
+        ...
         ...
     balance = res.scalar()
     if parsed_body.quantity * prev_price > balance:
