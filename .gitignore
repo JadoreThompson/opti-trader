@@ -1,16 +1,16 @@
 .idea
 .vscode
 
-venv
 .venv
+pyproject.toml
+uv.lock
 __pycache__
 *.pyc
+.pytest_cache
 
 .env
 client_secret.json
 alembic.ini
 dockerfile
 
-**.log
 rec.py
-notes.txt

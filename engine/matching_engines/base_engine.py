@@ -1,5 +1,7 @@
+from asyncio import AbstractEventLoop
 from typing import Generic, overload, TypeVar
 
+from config import REDIS
 from enums import Side
 from ..enums import MatchOutcome
 from ..orderbook import OrderBook
@@ -10,8 +12,16 @@ O = TypeVar("O", bound=Order)
 
 
 class BaseEngine(Generic[O]):
-    def __init__(self) -> None:
+    def __init__(self, loop=None) -> None:
         self._orderbooks: dict[str, OrderBook[O]] = {}
+        self._loop = loop
+
+    @overload
+    async def run(self) -> None:
+        """
+        Listens to the pubsub channel, routing each message
+        to their respective native function.
+        """
 
     @overload
     def place_order(self, payload: dict) -> None:
@@ -161,3 +171,10 @@ class BaseEngine(Generic[O]):
             pass
 
         raise ValueError(f"Invalid request quantity {request_quantity}")
+
+    def _update_price(self, instrument: str, price: float) -> None:
+        if self._loop and self._loop.is_running():
+            self._loop.create_task(self._send_price_update(instrument, price))
+
+    async def _send_price_update(self, instrument: str, price: float) -> None:
+        await REDIS.set(instrument, price)

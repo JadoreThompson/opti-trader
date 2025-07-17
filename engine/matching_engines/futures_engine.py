@@ -16,8 +16,8 @@ from ..typing import (
 
 
 class FuturesEngine(BaseEngine[Order]):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, loop=None) -> None:
+        super().__init__(loop)
         self._position_manager = PositionManager()
 
     def place_order(self, payload: dict) -> None:

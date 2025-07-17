@@ -1,6 +1,6 @@
 import sqlalchemy
 
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 from sqlalchemy import DateTime, Float, ForeignKey, UUID, Integer, String
 from sqlalchemy.orm import (
@@ -11,12 +11,29 @@ from sqlalchemy.orm import (
     validates,
 )
 
-from config import PH
 from enums import OrderStatus
 
 
+def get_datetime() -> datetime:
+    return datetime.now(UTC)
+
+
 class Base(DeclarativeBase):
-    pass
+    def dump(self, exclude: list[str] | None = None) -> dict:
+        """
+        Converts a SQLAlchemy object to a dictionary. Excluding
+        the keys passed in `exclude`.
+
+        Args:
+            exclude (list[str], optional): Keys to exclude in the dictionary. Defaults to None.
+
+        Returns:
+            dict: Dictionary representation of self's properties.
+        """
+        if exclude is None:
+            exclude = []
+        exclude.append("_sa_instance_state")
+        return {k: v for k, v in vars(self).items() if k not in exclude}
 
 
 class Users(Base):
@@ -26,24 +43,24 @@ class Users(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=True)
     password: Mapped[str] = mapped_column(String, nullable=False)
-    avatar: Mapped[str] = mapped_column(String, nullable=False)
+    avatar: Mapped[str] = mapped_column(String, nullable=True)
     balance: Mapped[float] = mapped_column(
         Float,
         nullable=False,
         default=10000,
         server_default=sqlalchemy.sql.text("10000"),
     )
-
-    @validates("password")
-    def password_validator(self, _, value):
-        return PH.hash(value)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=get_datetime, nullable=False
+    )
 
     # Relationships
     orders = relationship(
         "Orders", back_populates="users", cascade="all, delete-orphan"
     )
+    order_events = relationship("Transactions", back_populates="user")
 
 
 class Orders(Base):
@@ -54,9 +71,6 @@ class Orders(Base):
     )
     user_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
     )
     closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     instrument: Mapped[str] = mapped_column(String, nullable=False)
@@ -70,24 +84,26 @@ class Orders(Base):
     closed_price: Mapped[float] = mapped_column(Float, nullable=True)
     realised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0)
     unrealised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0)
-    status: Mapped[str] = mapped_column(String, nullable=False, default=OrderStatus.PENDING.value)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default=OrderStatus.PENDING.value
+    )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=get_datetime, nullable=False
+    )
 
     # Relationships
     users = relationship("Users", back_populates="orders")
+    order_events = relationship("Transactions", back_populates="order")
 
 
 class MarketData(Base):
     __tablename__ = "market_data"
 
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid4,
-    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     instrument: Mapped[str] = mapped_column(String, nullable=False)
     instrument_id: Mapped[int] = mapped_column(
         Integer,
@@ -95,10 +111,7 @@ class MarketData(Base):
         nullable=False,
     )
     time: Mapped[int] = mapped_column(Integer, nullable=False, default=datetime.now)
-    price: Mapped[float] = mapped_column(
-        Float,
-        nullable=False,
-    )
+    price: Mapped[float] = mapped_column(Float, nullable=False)
 
     # Relationship
     instruments_relationship = relationship(
@@ -118,9 +131,7 @@ class Instruments(Base):
     instrument: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     starting_price: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.now,
-        nullable=False,
+        DateTime(timezone=True), default=get_datetime, nullable=False
     )
 
     # Relationship
@@ -129,3 +140,32 @@ class Instruments(Base):
         back_populates="instruments_relationship",
         cascade="all, delete-orphan",
     )
+
+
+class OrderEvents(Base):
+    __tablename__ = "order_events"
+
+    order_event_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    order_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=True)
+    price: Mapped[float] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
+    take_profit: Mapped[float] = mapped_column(Float, nullable=True)
+    limit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    balance: Mapped[float] = mapped_column(Float, nullable=False)  # Acc balance
+    asset_balance: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=get_datetime, nullable=False
+    )
+
+    # Relationships
+    user = relationship("Users", back_populates="order_events")
+    order = relationship("Orders", back_populates="order_events")

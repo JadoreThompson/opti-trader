@@ -25,7 +25,7 @@ def sanitize_for_snapshot(data: dict) -> dict:
         sanitized_data[order_id] = s_state
     return sanitized_data
 
-
+######## SNAPSHOTS ###########
 @pytest.mark.parametrize("populated_engine", TEST_SIZES, indirect=True)
 def test_place_order_state_snapshot(populated_engine, snapshot):
     """

@@ -9,6 +9,7 @@ class BalanceManager:
 
     def __init__(self) -> None:
         self._payloads: dict[str, dict] = {}
+        self._users: dict[str, int] = {}
 
     def append(self, payload: dict) -> None:
         """
@@ -22,9 +23,14 @@ class BalanceManager:
             ValueError: A payload with said order_id is already
                 present in the manager.
         """
+        print(payload)
         order_id = payload["order_id"]
+        user_id = payload["user_id"]
+
         if order_id in self._payloads:
             raise ValueError(f"{order_id} already exists.")
+        if user_id not in self._users:
+            self._users[user_id] = 0
 
         self._payloads[order_id] = payload
 
@@ -38,7 +44,11 @@ class BalanceManager:
     def get_balance(self, order_id: str) -> BalanceUpdate | None:
         payload = self._payloads.get(order_id)
         if payload:
-            return BalanceUpdate(payload["open_quantity"], payload["standing_quantity"])
+            return BalanceUpdate(
+                payload["open_quantity"],
+                payload["standing_quantity"],
+                self._users[payload["user_id"]],
+            )
 
     def increase_balance(self, order_id: str, quantity: int) -> BalanceUpdate:
         """
@@ -62,8 +72,13 @@ class BalanceManager:
         payload = self._payloads[order_id]
         payload["standing_quantity"] -= quantity
         payload["open_quantity"] += quantity
-        
-        return BalanceUpdate(payload["open_quantity"], payload["standing_quantity"])
+        self._users[payload["user_id"]] += quantity
+
+        return BalanceUpdate(
+            payload["open_quantity"],
+            payload["standing_quantity"],
+            self._users[payload["user_id"]],
+        )
 
     def decrease_balance(self, order_id: str, quantity: int) -> BalanceUpdate:
         """
@@ -85,5 +100,26 @@ class BalanceManager:
 
         payload = self._payloads[order_id]
         payload["open_quantity"] -= quantity
+        self._users[payload["user_id"]] -= quantity
 
-        return BalanceUpdate(payload["open_quantity"], payload["standing_quantity"])
+        return BalanceUpdate(
+            payload["open_quantity"],
+            payload["standing_quantity"],
+            self._users[payload["user_id"]],
+        )
+
+    def synchronise(self, payload: dict) -> None:
+        print(payload)
+        if (
+            payload["order_id"] not in self._payloads
+            or payload["user_id"] not in self._users
+        ):
+            raise ValueError("Payload doesn't exist.")
+
+        ex_payload = self._payloads[payload["order_id"]]
+        prev_op_quantity = ex_payload["open_quantity"]
+        ex_payload["standing_quantity"], ex_payload["open_quantity"] = (
+            payload["standing_quantity"],
+            payload["open_quantity"],
+        )
+        self._users[payload["user_id"]] += payload["open_quantity"] - prev_op_quantity

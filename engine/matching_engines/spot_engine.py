@@ -1,4 +1,5 @@
-from engine.typing import ModifyRequest
+from pydantic import ValidationError
+from config import REDIS, SPOT_QUEUE_KEY
 from enums import OrderType, Side
 from .base_engine import BaseEngine
 from ..balance_manager import BalanceManager
@@ -8,20 +9,50 @@ from ..orders.spot_order import SpotOrder
 from ..oco_manager import OCOManager
 from ..orderbook import OrderBook
 from ..order_manager import OrderManager
-from ..typing import MODIFY_DEFAULT, MatchResult, CloseRequest
+from ..typing import (
+    MODIFY_DEFAULT,
+    ModifyRequest,
+    MatchResult,
+    CloseRequest,
+    Payload,
+    PayloadTopic,
+    Event,
+    EventType,
+)
+from ..utils import log_event
 
 
 class SpotEngine(BaseEngine[SpotOrder]):
     def __init__(
         self,
+        loop=None,
         oco_manager: OCOManager = None,
         balance_manager: BalanceManager = None,
         order_manager: OrderManager = None,
     ):
-        super().__init__()
+        super().__init__(loop)
         self._oco_manager = oco_manager or OCOManager()
         self._balance_manager = balance_manager or BalanceManager()
         self._order_manager = order_manager or OrderManager()
+
+    async def run(self) -> None:
+        async with REDIS.pubsub() as ps:
+            await ps.subscribe(SPOT_QUEUE_KEY)
+            async for m in ps.listen():
+                if m["type"] == "subscribe":
+                    continue
+
+                try:
+                    payload = Payload(**m["data"])
+
+                    if payload.topic == PayloadTopic.CREATE:
+                        self.place_order(payload.data)
+                    elif payload.topic == PayloadTopic.CANCEL:
+                        self.cancel_order(CloseRequest(**payload.data))
+                    elif payload.topic == PayloadTopic.MODIFY:
+                        self.modify_order(ModifyRequest(**payload.data))
+                except ValidationError:
+                    pass
 
     def place_order(self, payload: dict) -> None:
         """
@@ -65,6 +96,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
         if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
             ob.set_price(result.price)
+            self._update_price(payload["instrument"], result.price)
 
             if order.side == Side.BID or (
                 order.side == Side.ASK and order.tag == Tag.ENTRY
@@ -79,6 +111,16 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
             if result.outcome == MatchOutcome.SUCCESS:
                 self._balance_manager.remove(payload["order_id"])
+                log_event.delay(
+                    Event(
+                        quantity=result.quantity,
+                        price=result.price,
+                        user_id=payload["user_id"],
+                        order_id=payload["order_id"],
+                        event_type=EventType.ORDER_FILLED,
+                        asset_balance=result.quantity,
+                    ).model_dump()
+                )
                 return
 
         price = payload["limit_price"] or result.price or ob.price
@@ -123,6 +165,19 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
             self._balance_manager.remove(order.id)
             self._order_manager.remove(order.id)
+            
+        self._balance_manager.synchronise(payload)
+        balance_update = self._balance_manager.get_balance(payload['order_id'])
+        
+        log_event.delay(
+            Event(
+                quantity=remaining_quantity,
+                user_id=payload["user_id"],
+                order_id=payload["order_id"],
+                event_type=EventType.ORDER_CANCELLED,
+                asset_balance=balance_update.total_balance
+            ).model_dump()
+        )
 
     def modify_order(self, request: ModifyRequest) -> None:
         order = self._order_manager.get(request.order_id)
@@ -240,6 +295,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
         if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
             ob.set_price(result.price)
+            self._update_price(payload["instrument"], result.price)
             self._balance_manager.increase_balance(payload["order_id"], result.quantity)
             self._place_tp_sl(oco_order, ob)
 

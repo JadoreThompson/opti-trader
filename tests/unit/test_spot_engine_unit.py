@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from engine import SpotEngine
@@ -72,6 +73,11 @@ def populated_engine_book():
     return engine, instr, liq_ocos
 
 
+def set_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
 def test_place_limit_orders_no_match(engine: SpotEngine):
     """
     Scenario: Two limit orders are placed far from each other and should not match.
@@ -97,7 +103,7 @@ def test_market_bid_gets_filled(populated_engine_book):
     """
     engine, instrument, _ = populated_engine_book
     market_buy = create_order_simple(
-        "buy1", Side.BID, OrderType.MARKET, quantity=10, instrument=instrument
+        Side.BID, OrderType.MARKET, quantity=10, instrument=instrument
     )
 
     engine.place_order(market_buy)
@@ -133,7 +139,7 @@ def test_full_position_close():
         discard of the OCOOrder.
     """
     mock_oco_manager = MockOCOManager()
-    engine = SpotEngine(mock_oco_manager)
+    engine = SpotEngine(oco_manager=mock_oco_manager)
     balance_manager = engine._balance_manager
     instrument = "ticker"
 

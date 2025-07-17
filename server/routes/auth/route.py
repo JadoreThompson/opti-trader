@@ -1,91 +1,59 @@
-import argon2
-
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import DB_LOCK, PH
-from db_models import Users
-from utils.db import get_db_session
-from .models import LoginCredentials, RegisterCredentials
-from ...middleware import JWT, generate_jwt_token, verify_jwt_http
-from ...config import JWT_ALIAS
-
-auth = APIRouter(prefix="/auth", tags=["auth"])
+from db_models import Operations, Users
+from server.middleware import verify_jwt
+from server.typing import JWTPayload
+from server.utils import set_cookie
+from server.utils.db import depends_db_session
+from .models import UserCreate, UserRead
 
 
-@auth.post("/register")
-async def register(body: RegisterCredentials) -> None:
-    body.password = PH.hash(body.password)
-
-    try:
-        async with DB_LOCK:
-            async with get_db_session() as sess:
-                res = await sess.execute(
-                    insert(Users)
-                    .values(**body.model_dump(), balance=10_000_000)
-                    .returning(Users)
-                )
-                user: Users = res.scalar()
-                await sess.commit()
-                
-        resp = Response()
-        resp.set_cookie(
-            JWT_ALIAS,
-            generate_jwt_token(
-                {
-                    "sub": str(user.user_id),
-                    "em": user.email,
-                    "username": user.username,
-                }
-            ),
-            httponly=True,
-            # secure=True
-        )
-        return resp
-    except IntegrityError:
-        raise HTTPException(status_code=409, detail="Credentials already exist")
+route = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@auth.post("/login")
-async def login(body: LoginCredentials) -> None:
-    async with DB_LOCK:
-        async with get_db_session() as sess:
-            res = await sess.execute(select(Users).where(Users.email == body.email))
-            user: Optional[Users] = res.scalar()
-
-    if not user:
+@route.post("/login")
+async def login_user(
+    body: UserCreate,
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    result = await db_sess.execute(select(Users).where(Users.username == body.username))
+    user = result.scalar_one_or_none()
+    if user is None or user.password != body.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    try:
-        PH.verify(user.password, body.password)
-    except argon2.exceptions.VerifyMismatchError:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    rsp = JSONResponse(content={"message": "Logged in successfully."})
+    return set_cookie(user.user_id, rsp)
 
-    resp = Response()
-    resp.set_cookie(
-        JWT_ALIAS,
-        generate_jwt_token(
-            {
-                "sub": str(user.user_id),
-                "em": user.email,
-                "username": user.username,
-            }
-        ),
-        httponly=True,
-        # secure=True
+
+@route.post("/register")
+async def register_user(
+    body: UserCreate,
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    result = await db_sess.execute(select(Users).where(Users.username == body.username))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Username already registered")
+
+    res = await db_sess.execute(
+        insert(Users).values(**body.model_dump()).returning(Users.user_id)
     )
-    return resp
+    user_id = res.scalar()
+
+    await db_sess.commit()
+
+    rsp = JSONResponse(content={"message": "Registered successfully."})
+    return set_cookie(user_id, rsp)
 
 
-@auth.get("/verify-token")
-async def verify_token(jwt: JWT = Depends(verify_jwt_http)):
-    pass
-
-
-@auth.get("/remove-token")
-async def remove_token(jwt: JWT = Depends(verify_jwt_http)):
-    res = Response()
-    res.delete_cookie(JWT_ALIAS)
-    return res
+@route.get("/me")
+async def get_current_user(
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+) -> UserRead:
+    # res = await db_sess.execute(select(Users).where(Users.user_id == jwt_payload.sub))
+    # user = res.scalar()
+    # return UserRead(created_at=user.created_at, username=user.username)
+    ...
