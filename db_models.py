@@ -60,7 +60,10 @@ class Users(Base):
     orders = relationship(
         "Orders", back_populates="users", cascade="all, delete-orphan"
     )
-    order_events = relationship("Transactions", back_populates="user")
+    order_events = relationship("OrderEvents", back_populates="user")
+    escrows = relationship(
+        "Escrows", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Orders(Base):
@@ -77,7 +80,6 @@ class Orders(Base):
     side: Mapped[str] = mapped_column(String, nullable=False)
     market_type: Mapped[str] = mapped_column(String, nullable=False)
     order_type: Mapped[str] = mapped_column(String, nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=True)
     limit_price: Mapped[float] = mapped_column(Float, nullable=True)
     filled_price: Mapped[float] = mapped_column(Float, nullable=True)
@@ -89,6 +91,7 @@ class Orders(Base):
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    open_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=sqlalchemy.sql.text("0"))
     stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -97,7 +100,10 @@ class Orders(Base):
 
     # Relationships
     users = relationship("Users", back_populates="orders")
-    order_events = relationship("Transactions", back_populates="order")
+    order_events = relationship("OrderEvents", back_populates="order")
+    escrow = relationship(
+        "Escrows", back_populates="order", cascade="all, delete-orphan"
+    )
 
 
 class MarketData(Base):
@@ -184,3 +190,7 @@ class Escrows(Base):
         UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False
     )
     balance: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Relationships
+    user = relationship("Users", back_populates="escrows")
+    order = relationship("Orders", back_populates="escrow")

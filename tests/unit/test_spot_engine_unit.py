@@ -11,71 +11,60 @@ from tests.mocks import MockOCOManager
 from tests.utils import create_order_simple
 
 
-@pytest.fixture
-def engine():
-    """Provides a clean instance of the SpotEngine for each test."""
-    return SpotEngine()
+# @pytest.fixture()
+# def populated_spot_engine():
+#     engine = SpotEngine()
+#     instr = "test-ticker"
+#     ob = engine._orderbooks.setdefault(instr, OrderBook())
+#     oco_manager = engine._oco_manager
+#     balance_manager = engine._balance_manager
 
+#     min_price = 1.0
+#     max_price = ob._starting_price * 2
+#     total_quantity = 100_000
+#     q = int((total_quantity * 0.1) // (max_price - min_price))
+#     liq_ocos = []
 
-@pytest.fixture()
-def populated_engine_book():
-    engine = SpotEngine()
-    instr = "test-ticker"
-    ob = engine._orderbooks.setdefault(instr, OrderBook())
-    oco_manager = engine._oco_manager
-    balance_manager = engine._balance_manager
+#     for i in range(1, int(max_price - min_price) + 1):
+#         payload = {
+#             "order_id": f"liquidity_{i}",
+#             "instrument": instr,
+#             "status": OrderStatus.PENDING,
+#             "side": Side.BID,
+#             "quantity": q,
+#             "standing_quantity": 0,
+#             "open_quantity": q,
+#             "filled_price": ob._starting_price,
+#             "take_profit": max_price - i,
+#             "stop_loss": max(1, i - 1),
+#         }
+#         oco_order = oco_manager.create()
+#         balance_manager.append(payload)
+#         liq_ocos.append(oco_order)
 
-    min_price = 1.0
-    max_price = ob._starting_price * 2
-    total_quantity = 100_000
-    q = int((total_quantity * 0.1) // (max_price - min_price))
-    liq_ocos = []
+#         new_order = SpotOrder(
+#             payload["order_id"],
+#             Tag.STOP_LOSS,
+#             Side.ASK,
+#             payload["open_quantity"],
+#             payload["stop_loss"],
+#             oco_id=oco_order.id,
+#         )
+#         ob.append(new_order, new_order.price)
+#         oco_order.leg_b = new_order
 
-    for i in range(1, int(max_price - min_price) + 1):
-        payload = {
-            "order_id": f"liquidity_{i}",
-            "instrument": instr,
-            "status": OrderStatus.PENDING,
-            "side": Side.BID,
-            "quantity": q,
-            "standing_quantity": 0,
-            "open_quantity": q,
-            "filled_price": ob._starting_price,
-            "take_profit": max_price - i,
-            "stop_loss": max(1, i - 1),
-        }
-        oco_order = oco_manager.create()
-        balance_manager.append(payload)
-        liq_ocos.append(oco_order)
+#         new_order = SpotOrder(
+#             payload["order_id"],
+#             Tag.TAKE_PROFIT,
+#             Side.ASK,
+#             payload["open_quantity"],
+#             payload["take_profit"],
+#             oco_id=oco_order.id,
+#         )
+#         ob.append(new_order, new_order.price)
+#         oco_order.leg_c = new_order
 
-        new_order = SpotOrder(
-            payload["order_id"],
-            Tag.STOP_LOSS,
-            Side.ASK,
-            payload["open_quantity"],
-            payload["stop_loss"],
-            oco_id=oco_order.id,
-        )
-        ob.append(new_order, new_order.price)
-        oco_order.leg_b = new_order
-
-        new_order = SpotOrder(
-            payload["order_id"],
-            Tag.TAKE_PROFIT,
-            Side.ASK,
-            payload["open_quantity"],
-            payload["take_profit"],
-            oco_id=oco_order.id,
-        )
-        ob.append(new_order, new_order.price)
-        oco_order.leg_c = new_order
-
-    return engine, instr, liq_ocos
-
-
-def set_loop(loop):
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+#     return engine, instr, liq_ocos
 
 
 def test_place_limit_orders_no_match(engine: SpotEngine):
@@ -97,11 +86,11 @@ def test_place_limit_orders_no_match(engine: SpotEngine):
     assert book_item.head == book_item.tail
 
 
-def test_market_bid_gets_filled(populated_engine_book):
+def test_market_bid_gets_filled(populated_spot_engine):
     """
     Scenario: A resting limit sell is fully filled by an incoming market buy.
     """
-    engine, instrument, _ = populated_engine_book
+    engine, instrument, _ = populated_spot_engine
     market_buy = create_order_simple(
         Side.BID, OrderType.MARKET, quantity=10, instrument=instrument
     )

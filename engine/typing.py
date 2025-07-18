@@ -72,14 +72,14 @@ class Event(BaseModel):
     take_profit: float | None = None
     limit_price: float | None = None
     balance: float | None = None
-    asset_balance: int = None
+    asset_balance: int | None = None
     created_at: datetime = Field(default_factory=get_datetime)
     metadata: dict | None = (
         None  # Tag for an order etc. Helps with understanding cash balance direction
     )
 
-    def model_dump(self) -> dict:
-        d = super().model_dump()
+    def model_dump(self, *args, **kwargs) -> dict:
+        d = super().model_dump(*args, **kwargs)
         return {
             k: (str(v) if isinstance(v, (datetime, UUID)) else v) for k, v in d.items()
         }

@@ -24,14 +24,10 @@ class BalanceManager:
             bool - True if successfull append else False if insufficient balance
                 or order_id already existed.
         """
-        # Raises:
-        #     ValueError: A payload with said order_id is already
-        #         present in the manager.
         order_id = payload["order_id"]
         user_id = payload["user_id"]
 
         if order_id in self._payloads:
-            # raise ValueError(f"{order_id} already exists.")
             return False
         if payload["side"] == Side.ASK and payload["quantity"] > self._users.get(
             payload["user_id"], 0
@@ -79,7 +75,7 @@ class BalanceManager:
             raise ValueError("Quantity must be greater than 0.")
 
         payload = self._payloads[order_id]
-        payload["standing_quantity"] -= quantity
+        payload['standing_quantity'] -= quantity
         payload["open_quantity"] += quantity
         self._users[payload["user_id"]] += quantity
 
@@ -118,7 +114,6 @@ class BalanceManager:
         )
 
     def synchronise(self, payload: dict) -> None:
-        print(payload)
         if (
             payload["order_id"] not in self._payloads
             or payload["user_id"] not in self._users

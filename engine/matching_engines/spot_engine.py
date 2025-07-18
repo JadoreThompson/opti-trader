@@ -66,7 +66,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     event_type=EventType.ORDER_REJECTED,
-                    
                 ).model_dump()
             )
             return
@@ -79,18 +78,18 @@ class SpotEngine(BaseEngine[SpotOrder]):
             self._handle_place_oco_order(order, payload, ob)
             return
 
-        # Check if a limit order would cross the spread and execute immediately
-        is_crossable = (
-            order.side == Side.BID
-            and ob.best_ask is not None
-            and payload["limit_price"] >= ob.best_ask
-        ) or (
-            order.side == Side.ASK
-            and ob.best_bid is not None
-            and payload["limit_price"] <= ob.best_bid
-        )
-
-        if payload["order_type"] == OrderType.LIMIT and not is_crossable:
+        if payload["order_type"] == OrderType.LIMIT and not (
+            (
+                order.side == Side.BID
+                and ob.best_ask is not None
+                and payload["limit_price"] >= ob.best_ask
+            )
+            or (
+                order.side == Side.ASK
+                and ob.best_bid is not None
+                and payload["limit_price"] <= ob.best_bid
+            )
+        ):
             order.price = payload["limit_price"]
             ob.append(order, order.price)
             self._order_manager.append(order)
@@ -133,6 +132,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     asset_balance=balance_update.total_asset_balance,
+                    metadata={"tag": order.tag},
                 ).model_dump()
             )
 
@@ -337,6 +337,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     asset_balance=balance_update.total_asset_balance,
+                    metadata={"tag": order.tag},
                 ).model_dump()
             )
 
@@ -367,9 +368,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         ob: OrderBook[SpotOrder],
     ) -> None:
         """Handle a resting order that was fully filled."""
-        if order.side == Side.BID or (
-            order.side == Side.ASK and order.tag == Tag.ENTRY
-        ):
+        if order.side == Side.BID:
             balance_update = self._balance_manager.increase_balance(
                 order.id, filled_quantity
             )
@@ -387,6 +386,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 quantity=filled_quantity,
                 price=price,
                 asset_balance=balance_update.total_asset_balance,
+                metadata={"tag": order.tag},
             ).model_dump()
         )
 

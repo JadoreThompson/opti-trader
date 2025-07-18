@@ -1,9 +1,11 @@
 import json
 
 from datetime import datetime
+from pprint import pprint
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 from uuid import UUID
+
 from config import CELERY
 from db_models import Escrows, OrderEvents, Orders, Users
 from enums import Side
@@ -12,7 +14,7 @@ from .typing import EventDict, Event, EventType
 from .enums import Tag
 
 
-def handle_filled(ev: Event, db_sess: Session) -> None:
+def handle_filled(event: Event, db_sess: Session) -> None:
     """
     Persists the event and updates the user's cash balance accordingly.
 
@@ -21,38 +23,51 @@ def handle_filled(ev: Event, db_sess: Session) -> None:
         db_sess (Session): _description_
     """
     order = db_sess.execute(
-        select(Orders).where(Orders.order_id == ev.order_id)
+        select(Orders).where(Orders.order_id == event.order_id)
     ).scalar()
     if not order:
         return
 
-    user = db_sess.execute(select(Users).where(Users.user_id == ev.user_id)).scalar()
+    user = db_sess.execute(select(Users).where(Users.user_id == event.user_id)).scalar()
+
     escrow_balance = db_sess.execute(
-        select(Escrows.balance).where(Escrows.order_id == ev.order_id)
+        select(Escrows.balance).where(Escrows.order_id == event.order_id)
     )
     opening_price = db_sess.execute(
         select(OrderEvents.price).where(
             OrderEvents.event_type == EventType.ORDER_PLACED,
-            OrderEvents.order_id == ev.order_id,
+            OrderEvents.order_id == event.order_id,
         )
     ).scalar_one_or_none()
+
     if opening_price is None:
         opening_price = db_sess.execute(
             select(OrderEvents.price)
             .where(
                 OrderEvents.event_type == EventType.ORDER_FILLED,
-                OrderEvents.order_id == ev.order_id,
+                OrderEvents.order_id == event.order_id,
             )
             .order_by(OrderEvents.created_at.asc())
             .limit(1)
-        ).scalar_one_or_none()
+        ).scalar()
 
-    if (
-        ev.metadata.get("tag") in (Tag.STOP_LOSS, Tag.TAKE_PROFIT)
-        or order.side == Side.ASK
-    ):
-        original_value = opening_price * ev.quantity
-        new_value = ev.price * ev.quantity
+    if order.side == Side.ASK:
+        res = (
+            db_sess.execute(
+                select(OrderEvents).join(
+                    select(Orders)
+                    .where(Orders.instrument == order.instrument)
+                    .subquery()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        pprint([r.dump() for r in res])
+
+    elif event.metadata.get("tag") in (Tag.STOP_LOSS, Tag.TAKE_PROFIT):
+        original_value = opening_price * event.quantity
+        new_value = event.price * event.quantity
         diff = abs(original_value - new_value)
 
         if new_value < original_value:
@@ -62,7 +77,7 @@ def handle_filled(ev: Event, db_sess: Session) -> None:
             escrow_balance += diff
             user.balance += diff
 
-        values = ev.model_dump(exclude_unset=True)
+        values = event.model_dump(exclude_unset=True)
         values.pop("metadata")
 
         db_sess.execute(insert(OrderEvents).values(**values, balance=user.balance))
@@ -70,11 +85,29 @@ def handle_filled(ev: Event, db_sess: Session) -> None:
     db_sess.commit()
 
 
+def handle_order_placed_event(event: Event, db_sess: Session):
+    values = event.model_dump(exclude_unset=True, exclude_none=True)
+    values.pop("metadata", None)
+
+    db_sess.execute(
+        insert(OrderEvents).values(
+            **values,
+            balance=select(Users.balance)
+            .where(Users.user_id == event.user_id)
+            .subquery()
+        )
+    )
+    db_sess.commit()
+
+
 @CELERY.task
 def log_event(event: EventDict):
     with get_db_session_sync() as sess:
         parsed_event = Event(**event)
-        if parsed_event.event_type in (
+
+        if parsed_event.event_type == EventType.ORDER_PLACED:
+            handle_order_placed_event(parsed_event, sess)
+        elif parsed_event.event_type in (
             EventType.ORDER_PARTIALLY_FILLED,
             EventType.ORDER_FILLED,
         ):
