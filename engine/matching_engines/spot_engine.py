@@ -1,5 +1,3 @@
-import json
-from pprint import pprint
 from pydantic import ValidationError
 from config import REDIS, SPOT_QUEUE_KEY
 from enums import OrderType, Side
@@ -61,12 +59,23 @@ class SpotEngine(BaseEngine[SpotOrder]):
         """
         Places a new order in the engine.
         """
+        if payload["side"] == Side.ASK:
+            cur_balance = self._balance_manager.get_balance(payload["user_id"])
+            if cur_balance is None or cur_balance < payload["quantity"]:
+                log_event.delay(
+                    Event(
+                        event_type=EventType.ORDER_REJECTED,
+                        order_id=payload["order_id"],
+                        user_id=payload["user_id"],
+                        asset_balance=cur_balance or 0,
+                    ).model_dump()
+                )
+                return
+
         ob = self._orderbooks.setdefault(payload["instrument"], OrderBook())
         self._order_payloads[payload["order_id"]] = payload
         self._balance_manager.append(payload["user_id"])
-        # pprint(f"BalanceManager:\n{json.dumps(self._balance_manager._users)}")
-        # pprint(payload)
-        # print("", end="\n\n")
+
         order = SpotOrder(
             payload["order_id"], Tag.ENTRY, payload["side"], payload["quantity"]
         )
@@ -186,6 +195,10 @@ class SpotEngine(BaseEngine[SpotOrder]):
         )
 
     def modify_order(self, request: ModifyRequest) -> None:
+        """
+        Modifies the properties of an order. If necessary,
+        alters the location of it's TP / SL or entry order.
+        """
         order = self._order_manager.get(request.order_id)
         payload = self._order_payloads[order.id]
         ob = self._orderbooks[payload["instrument"]]
@@ -257,7 +270,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
             Event(
                 event_type=EventType.ORDER_MODIFIED,
                 user_id=payload["user_id"],
-                order_id=payload["order_id"],
                 asset_balance=self._balance_manager.get_balance(payload["user_id"]),
                 **request.model_dump(exclude_unset=True),
             ).model_dump()
@@ -343,6 +355,15 @@ class SpotEngine(BaseEngine[SpotOrder]):
     def _process_trade_fill(
         self, order: SpotOrder, filled_quantity: int, payload: dict
     ) -> None:
+        """
+        Updates the open, standing quantity and total asset balance
+        for an order and user.
+
+        Args:
+            order (SpotOrder): Order that got hit.
+            filled_quantity (int): Quantity filled.
+            payload (dict): Order payload for the `order`.
+        """
         user_id = payload["user_id"]
 
         if order.tag in (Tag.STOP_LOSS, Tag.TAKE_PROFIT):
@@ -410,17 +431,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
         payload = self._order_payloads[order.id]
         self._process_trade_fill(order, touched_quantity, payload)
 
-        if order.side == Side.BID or (
-            order.side == Side.ASK and order.tag == Tag.ENTRY
-        ):
-            balance_update = self._balance_manager.increase_balance(
-                order.id, touched_quantity
-            )
-        else:
-            balance_update = self._balance_manager.decrease_balance(
-                order.id, touched_quantity
-            )
-
         log_event.delay(
             Event(
                 event_type=EventType.ORDER_PARTIALLY_FILLED,
@@ -452,7 +462,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
             ob (OrderBook[SpotOrder]): Order book for appending the TP/SL orders.
         """
         entry_order = oco_order.leg_a
-        payload = self._order_payloads["entry_order.id"]
+        payload = self._order_payloads[entry_order.id]
 
         if payload["stop_loss"] is not None:
             new_order = SpotOrder(

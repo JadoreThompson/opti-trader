@@ -13,7 +13,7 @@ from db_models import Base, Escrows, OrderEvents, Orders, Users, get_default_bal
 from enums import MarketType, OrderType, Side
 from engine import SpotEngine
 from engine.tasks import log_event
-from engine.typing import CloseRequest, EventType
+from engine.typing import CloseRequest, EventType, ModifyRequest
 from tests.utils import create_order_simple
 
 
@@ -62,8 +62,11 @@ def apply_escrow(amount: float, user_id: str | UUID, order_id: str | UUID):
 class MockCelery:
     def __init__(self, func) -> None:
         self.func = func
+        self.last_call = None
 
     def delay(self, *args, **kwargs):
+        """Mocks Celery's delay, storing the call and executing synchronously."""
+        self.last_call = {"args": args, "kwargs": kwargs}
         self.func(*args, **kwargs)
 
 
@@ -74,7 +77,6 @@ def db() -> Generator[None, None, None]:
         yield
     finally:
         Base.metadata.drop_all(bind=TEST_DB_ENGINE)
-        ...
 
 
 @pytest.fixture
@@ -85,9 +87,17 @@ def db_sess(db):
 
 @pytest.fixture
 def patched_log(monkeypatch):
+    """Patches log_event to be synchronous and inspectable."""
     mock_log_event = MockCelery(log_event)
     monkeypatch.setattr("engine.matching_engines.spot_engine.log_event", mock_log_event)
     monkeypatch.setattr("engine.tasks.get_db_session_sync", get_db_sess)
+    yield mock_log_event
+
+
+@pytest.fixture
+def engine():
+    """Provides a fresh SpotEngine instance for each test."""
+    return SpotEngine()
 
 
 def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
@@ -318,3 +328,87 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
     assert events[1].balance == balance
     assert escrow_balance == 500.0
     assert user_balance == 9500.0
+
+
+def test_order_modified_event(engine: SpotEngine, db_sess: Session, patched_log):
+    """
+    Scenario: A resting limit order's price is modified.
+    An ORDER_MODIFIED event should be fired, and the engine state updated,
+    even if the event is not persisted by the task handler.
+    """
+    limit_buy = create_order_simple(
+        "",
+        Side.BID,
+        OrderType.LIMIT,
+        quantity=10,
+        limit_price=100.0,
+    )
+    user_id = create_user()
+    limit_buy["user_id"] = user_id
+    limit_buy.pop("order_id")
+    limit_buy["order_id"] = persist_order(limit_buy)
+    apply_escrow(
+        limit_buy["quantity"] * limit_buy["limit_price"],
+        limit_buy["user_id"],
+        limit_buy["order_id"],
+    )
+
+    engine.place_order(limit_buy)
+
+    new_limit_price = 99.0
+    modify_request = ModifyRequest(
+        order_id=limit_buy["order_id"], limit_price=new_limit_price
+    )
+    engine.modify_order(modify_request)
+
+    event = db_sess.execute(
+        select(OrderEvents)
+        .where(OrderEvents.order_id == limit_buy["order_id"])
+        .order_by(OrderEvents.created_at.desc())
+        .limit(1)
+    ).scalar()
+
+    assert event.event_type == EventType.ORDER_MODIFIED.value
+    assert event.limit_price == new_limit_price
+
+    events = (
+        db_sess.execute(select(OrderEvents).order_by(OrderEvents.created_at.asc()))
+        .scalars()
+        .all()
+    )
+    assert len(events) == 2
+    assert events[0].event_type == EventType.ORDER_PLACED
+
+
+def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log):
+    """
+    Scenario: A user attempts to sell more assets than they own.
+    The engine should reject the order and log an ORDER_REJECTED event.
+    """
+    # 1. Setup user and order
+    sell_order = create_order_simple(
+        "",
+        Side.ASK,
+        OrderType.MARKET,
+        quantity=10,
+    )
+    user_id = create_user()
+    sell_order["user_id"] = user_id
+    sell_order.pop("order_id")
+    sell_order["order_id"] = persist_order(sell_order)
+
+    engine.place_order(sell_order)
+
+    event = db_sess.execute(
+        select(OrderEvents).where(OrderEvents.order_id == sell_order["order_id"])
+    ).scalar_one()
+
+    assert event.event_type == EventType.ORDER_REJECTED
+    assert event.user_id == UUID(user_id)
+    assert event.asset_balance == 0
+    assert event.balance == get_default_balance()
+
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == user_id)
+    ).scalar()
+    assert user_balance == get_default_balance()
