@@ -89,6 +89,9 @@ def patched_log(monkeypatch):
 
 
 def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
+    """
+    Scenario: No best ask so limit is placed triggering ORDER_PLACED event.
+    """
     instrument = "instr"
     buy_order = create_order_simple(
         "", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=99.0
@@ -110,6 +113,11 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
 
 
 def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
+    """
+    Scenario: No best ask so limit is placed triggering ORDER_PLACED event.
+    Market ask comes in at price level triggering ORDER_FILLED on both
+    limit bid and market ask.
+    """
     limit_buy = create_order_simple(
         "",
         Side.BID,
@@ -137,14 +145,69 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     engine.place_order(limit_buy)
     engine.place_order(market_sell)
 
-
     events = (
         db_sess.execute(
-            select(OrderEvents).where(OrderEvents.order_id == limit_buy["order_id"])
+            select(OrderEvents)
+            .where(OrderEvents.order_id == limit_buy["order_id"])
+            .order_by(OrderEvents.created_at.asc())
         )
         .scalars()
         .all()
     )
 
     assert len(events) == 2
-    print(events)
+    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].asset_balance == 0
+    assert events[0].balance == 10_000
+    assert events[1].event_type == EventType.ORDER_FILLED
+    assert events[1].asset_balance == 10
+    assert events[1].balance == 10_000
+
+
+def test_order_partially_filled_event(
+    engine: SpotEngine, db_sess: Session, patched_log
+):
+    limit_buy = create_order_simple(
+        "",
+        Side.BID,
+        OrderType.LIMIT,
+        quantity=10,
+        limit_price=100.0,
+    )
+    user_id = create_user()
+    limit_buy["user_id"] = user_id
+    limit_buy.pop("order_id")
+    limit_buy["order_id"] = persist_order(limit_buy)
+
+    market_sell = create_order_simple(
+        "",
+        Side.ASK,
+        OrderType.MARKET,
+        quantity=5,
+    )
+    user_id = create_user()
+    market_sell["user_id"] = user_id
+    market_sell.pop("order_id")
+    market_sell["order_id"] = persist_order(market_sell)
+    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+
+    engine.place_order(limit_buy)
+    engine.place_order(market_sell)
+
+    events = (
+        db_sess.execute(
+            select(OrderEvents)
+            .where(OrderEvents.order_id == limit_buy["order_id"])
+            .order_by(OrderEvents.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    assert len(events) == 2
+    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].asset_balance == 0
+    assert events[0].balance == 10_000
+    assert events[1].event_type == EventType.ORDER_PARTIALLY_FILLED
+    assert events[1].asset_balance == 5
+    assert events[1].balance == 10_000

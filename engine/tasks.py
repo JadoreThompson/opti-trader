@@ -14,7 +14,7 @@ from .typing import EventDict, Event, EventType
 from .enums import Tag
 
 
-def handle_filled(event: Event, db_sess: Session) -> None:
+def handle_order_filled_event(event: Event, db_sess: Session) -> None:
     """
     Persists the event and updates the user's cash balance accordingly.
 
@@ -32,7 +32,8 @@ def handle_filled(event: Event, db_sess: Session) -> None:
 
     escrow_balance = db_sess.execute(
         select(Escrows.balance).where(Escrows.order_id == event.order_id)
-    )
+    ).scalar()
+
     opening_price = db_sess.execute(
         select(OrderEvents.price).where(
             OrderEvents.event_type == EventType.ORDER_PLACED,
@@ -44,28 +45,25 @@ def handle_filled(event: Event, db_sess: Session) -> None:
         opening_price = db_sess.execute(
             select(OrderEvents.price)
             .where(
-                OrderEvents.event_type == EventType.ORDER_FILLED,
+                OrderEvents.event_type.in_(
+                    (EventType.ORDER_PARTIALLY_FILLED, EventType.ORDER_FILLED)
+                ),
                 OrderEvents.order_id == event.order_id,
             )
             .order_by(OrderEvents.created_at.asc())
             .limit(1)
         ).scalar()
+        
+    if opening_price is None:
+        opening_price = event.price
 
-    if order.side == Side.ASK:
-        res = (
-            db_sess.execute(
-                select(OrderEvents).join(
-                    select(Orders)
-                    .where(Orders.instrument == order.instrument)
-                    .subquery()
-                )
-            )
-            .scalars()
-            .all()
-        )
-        pprint([r.dump() for r in res])
+    dumped_event = event.model_dump(exclude_unset=True, exclude_none=True)
+    dumped_event.pop("metadata")
 
-    elif event.metadata.get("tag") in (Tag.STOP_LOSS, Tag.TAKE_PROFIT):
+    if (
+        event.metadata.get("tag") in (Tag.STOP_LOSS, Tag.TAKE_PROFIT)
+        or order.side == Side.ASK
+    ):
         original_value = opening_price * event.quantity
         new_value = event.price * event.quantity
         diff = abs(original_value - new_value)
@@ -77,11 +75,7 @@ def handle_filled(event: Event, db_sess: Session) -> None:
             escrow_balance += diff
             user.balance += diff
 
-        values = event.model_dump(exclude_unset=True)
-        values.pop("metadata")
-
-        db_sess.execute(insert(OrderEvents).values(**values, balance=user.balance))
-
+    db_sess.execute(insert(OrderEvents).values(**dumped_event, balance=user.balance))
     db_sess.commit()
 
 
@@ -94,7 +88,7 @@ def handle_order_placed_event(event: Event, db_sess: Session):
             **values,
             balance=select(Users.balance)
             .where(Users.user_id == event.user_id)
-            .subquery()
+            .scalar_subquery(),
         )
     )
     db_sess.commit()
@@ -102,6 +96,8 @@ def handle_order_placed_event(event: Event, db_sess: Session):
 
 @CELERY.task
 def log_event(event: EventDict):
+    pprint(event)
+    print("", end="\n\n\n")
     with get_db_session_sync() as sess:
         parsed_event = Event(**event)
 
@@ -111,4 +107,4 @@ def log_event(event: EventDict):
             EventType.ORDER_PARTIALLY_FILLED,
             EventType.ORDER_FILLED,
         ):
-            handle_filled(parsed_event, sess)
+            handle_order_filled_event(parsed_event, sess)
