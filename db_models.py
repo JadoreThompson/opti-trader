@@ -18,6 +18,10 @@ def get_datetime() -> datetime:
     return datetime.now(UTC)
 
 
+def get_default_balance() -> float:
+    return 10_000
+
+
 class Base(DeclarativeBase):
     def dump(self, exclude: list[str] | None = None) -> dict:
         """
@@ -50,7 +54,7 @@ class Users(Base):
         Float,
         nullable=False,
         default=10000,
-        server_default=sqlalchemy.sql.text("10000"),
+        server_default=sqlalchemy.sql.text(f"{get_default_balance()}"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=get_datetime, nullable=False

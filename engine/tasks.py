@@ -30,8 +30,11 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
 
     user = db_sess.execute(select(Users).where(Users.user_id == event.user_id)).scalar()
 
-    escrow_balance = db_sess.execute(
-        select(Escrows.balance).where(Escrows.order_id == event.order_id)
+    # escrow_balance = db_sess.execute(
+    #     select(Escrows.balance).where(Escrows.order_id == event.order_id)
+    # ).scalar()
+    escrow = db_sess.execute(
+        select(Escrows).where(Escrows.order_id == event.order_id)
     ).scalar()
 
     opening_price = db_sess.execute(
@@ -53,7 +56,7 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
             .order_by(OrderEvents.created_at.asc())
             .limit(1)
         ).scalar()
-        
+
     if opening_price is None:
         opening_price = event.price
 
@@ -69,17 +72,19 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
         diff = abs(original_value - new_value)
 
         if new_value < original_value:
-            escrow_balance -= diff
+            # escrow_balance -= diff
+            escrow.balance -= diff
             user.balance -= diff
         elif new_value > original_value:
-            escrow_balance += diff
+            # escrow_balance += diff
+            escrow.balance += diff
             user.balance += diff
 
     db_sess.execute(insert(OrderEvents).values(**dumped_event, balance=user.balance))
     db_sess.commit()
 
 
-def handle_order_placed_event(event: Event, db_sess: Session):
+def handle_order_placed_event(event: Event, db_sess: Session) -> None:
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
 
@@ -91,6 +96,34 @@ def handle_order_placed_event(event: Event, db_sess: Session):
             .scalar_subquery(),
         )
     )
+    db_sess.commit()
+
+
+def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
+    values = event.model_dump(exclude_unset=True, exclude_none=True)
+    values.pop("metadata", None)
+
+    user = db_sess.execute(select(Users).where(Users.user_id == event.user_id)).scalar()
+
+    escrow = db_sess.execute(
+        select(Escrows).where(Escrows.order_id == event.order_id)
+    ).scalar()
+
+    opening_price = db_sess.execute(
+        select(OrderEvents.price)
+        .where(
+            OrderEvents.event_type == EventType.ORDER_PLACED,
+            OrderEvents.order_id == event.order_id,
+        )
+        .order_by(OrderEvents.created_at.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    amount = event.quantity * opening_price
+    user.balance += amount
+    escrow.balance -= amount
+
+    db_sess.execute(insert(OrderEvents).values(**values, balance=user.balance))
     db_sess.commit()
 
 
@@ -108,3 +141,5 @@ def log_event(event: EventDict):
             EventType.ORDER_FILLED,
         ):
             handle_order_filled_event(parsed_event, sess)
+        elif parsed_event.event_type == EventType.ORDER_CANCELLED:
+            handle_order_cancelled_event(parsed_event, sess)

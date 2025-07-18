@@ -1,19 +1,19 @@
-from pprint import pprint
 import pytest
 
 from contextlib import contextmanager
 from faker import Faker
-from uuid import UUID, uuid4
+from pprint import pprint
 from sqlalchemy import insert, select, update
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
+from uuid import UUID, uuid4
 
 from config import TEST_DB_ENGINE
-from db_models import Base, Escrows, OrderEvents, Orders, Users
-from engine.tasks import log_event
-from engine.typing import EventType
+from db_models import Base, Escrows, OrderEvents, Orders, Users, get_default_balance
 from enums import MarketType, OrderType, Side
 from engine import SpotEngine
+from engine.tasks import log_event
+from engine.typing import CloseRequest, EventType
 from tests.utils import create_order_simple
 
 
@@ -49,7 +49,9 @@ def persist_order(values: dict) -> str:
 def apply_escrow(amount: float, user_id: str | UUID, order_id: str | UUID):
     with get_db_sess() as sess:
         sess.execute(
-            update(Users).values(Users.balance - amount).where(Users.user_id == user_id)
+            update(Users)
+            .values(balance=Users.balance - amount)
+            .where(Users.user_id == user_id)
         )
         sess.execute(
             insert(Escrows).values(user_id=user_id, order_id=order_id, balance=amount)
@@ -94,22 +96,30 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
     """
     instrument = "instr"
     buy_order = create_order_simple(
-        "", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=99.0
+        "", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=100.0
     )
     user_id = create_user()
     buy_order["user_id"] = user_id
     buy_order.pop("order_id")
     buy_order["order_id"] = persist_order(buy_order)
+    apply_escrow(
+        buy_order["limit_price"] * buy_order["quantity"],
+        buy_order["user_id"],
+        buy_order["order_id"],
+    )
 
     engine.place_order(buy_order)
 
     event = db_sess.execute(
         select(OrderEvents).where(OrderEvents.order_id == buy_order["order_id"])
-    ).scalar_one_or_none()
+    ).scalar_one()
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == buy_order["user_id"])
+    ).scalar()
 
-    assert event is not None
     assert event.event_type == EventType.ORDER_PLACED
     assert event.quantity == buy_order["quantity"]
+    assert user_balance == 9000.0
 
 
 def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
@@ -129,6 +139,11 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
     limit_buy["order_id"] = persist_order(limit_buy)
+    apply_escrow(
+        limit_buy["limit_price"] * limit_buy["quantity"],
+        limit_buy["user_id"],
+        limit_buy["order_id"],
+    )
 
     market_sell = create_order_simple(
         "",
@@ -155,13 +170,18 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
         .all()
     )
 
+    escrow_balance = db_sess.execute(
+        select(Escrows.balance).where(Escrows.order_id == limit_buy["order_id"])
+    ).scalar()
+
     assert len(events) == 2
     assert events[0].event_type == EventType.ORDER_PLACED
     assert events[0].asset_balance == 0
-    assert events[0].balance == 10_000
+    assert events[0].balance == 9000.0
     assert events[1].event_type == EventType.ORDER_FILLED
     assert events[1].asset_balance == 10
-    assert events[1].balance == 10_000
+    assert events[1].balance == 9000.0
+    assert escrow_balance == 1000.0
 
 
 def test_order_partially_filled_event(
@@ -178,6 +198,12 @@ def test_order_partially_filled_event(
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
     limit_buy["order_id"] = persist_order(limit_buy)
+
+    apply_escrow(
+        limit_buy["limit_price"] * limit_buy["quantity"],
+        limit_buy["user_id"],
+        limit_buy["order_id"],
+    )
 
     market_sell = create_order_simple(
         "",
@@ -203,11 +229,92 @@ def test_order_partially_filled_event(
         .scalars()
         .all()
     )
+    escrow_balance = db_sess.execute(
+        select(Escrows.balance).where(Escrows.order_id == limit_buy["order_id"])
+    ).scalar()
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == limit_buy["user_id"])
+    ).scalar()
 
     assert len(events) == 2
     assert events[0].event_type == EventType.ORDER_PLACED
     assert events[0].asset_balance == 0
-    assert events[0].balance == 10_000
+    assert events[0].balance == 9000.0
     assert events[1].event_type == EventType.ORDER_PARTIALLY_FILLED
     assert events[1].asset_balance == 5
-    assert events[1].balance == 10_000
+    assert events[1].balance == 9000.0
+    assert escrow_balance == 1000.0
+    assert user_balance == 9000.0
+
+
+def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
+    limit_buy = create_order_simple(
+        "",
+        Side.BID,
+        OrderType.LIMIT,
+        quantity=10,
+        limit_price=100.0,
+    )
+    user_id = create_user()
+    limit_buy["user_id"] = user_id
+    limit_buy.pop("order_id")
+    limit_buy["order_id"] = persist_order(limit_buy)
+    apply_escrow(
+        limit_buy["quantity"] * limit_buy["limit_price"],
+        limit_buy["user_id"],
+        limit_buy["order_id"],
+    )
+    engine.place_order(limit_buy)
+
+    # ORDER_PLACED
+    events = (
+        db_sess.execute(
+            select(OrderEvents)
+            .where(OrderEvents.order_id == limit_buy["order_id"])
+            .order_by(OrderEvents.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    escrow_balance = db_sess.execute(
+        select(Escrows.balance).where(Escrows.order_id == limit_buy["order_id"])
+    ).scalar()
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == limit_buy["user_id"])
+    ).scalar()
+
+    balance = get_default_balance() - escrow_balance
+    assert len(events) == 1
+    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].asset_balance == 0
+    assert events[0].balance == balance
+    assert escrow_balance == 1000.0
+    assert user_balance == 9000.0
+
+    # ORDER_CANCELLED
+    cancel_request = CloseRequest(order_id=limit_buy["order_id"], quantity=5)
+    engine.cancel_order(cancel_request)
+
+    events = (
+        db_sess.execute(
+            select(OrderEvents)
+            .where(OrderEvents.order_id == limit_buy["order_id"])
+            .order_by(OrderEvents.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    escrow_balance = db_sess.execute(
+        select(Escrows.balance).where(Escrows.order_id == limit_buy["order_id"])
+    ).scalar()
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == limit_buy["user_id"])
+    ).scalar()
+
+    balance += cancel_request.quantity * limit_buy["limit_price"]
+    assert len(events) == 2
+    assert events[1].event_type == EventType.ORDER_CANCELLED
+    assert events[1].asset_balance == 0
+    assert events[1].balance == balance
+    assert escrow_balance == 500.0
+    assert user_balance == 9500.0
