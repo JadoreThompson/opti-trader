@@ -84,7 +84,10 @@ class SpotEngine(BaseEngine[SpotOrder]):
             payload["order_id"], Tag.ENTRY, payload["side"], payload["quantity"]
         )
 
-        if payload["stop_loss"] is not None or payload["take_profit"] is not None:
+        # if payload["stop_loss"] is not None or payload["take_profit"] is not None:
+        #     self._handle_place_oco_order(order, payload, ob)
+        #     return
+        if payload["order_type"] in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO):
             self._handle_place_oco_order(order, payload, ob)
             return
 

@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from engine.typing import MODIFY_DEFAULT
 from enums import OrderType, Side
 
 
@@ -11,24 +12,23 @@ class BaseOrder(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class BaseSpotOrder(BaseOrder):
+class BaseSpotOCOOrder(BaseOrder):
+    model_config = ConfigDict(extra="forbid")
     take_profit: float | None = None
     stop_loss: float | None = None
 
-    @model_validator(mode="after")
-    def tp_sl_validator(cls, value: "SpotMarketOrder"):
-        if value.side == Side.ASK:
-            if value.take_profit is not None or value.stop_loss is not None:
-                raise ValueError("Cannot set TP or SL on sell order.")
-        return value
+
+class SpotMarketOrder(BaseOrder):
+    model_config = ConfigDict(extra="forbid")
 
 
-class SpotMarketOrder(BaseSpotOrder):
+class SpotMarketOCOOrder(SpotMarketOrder):
     pass
 
 
-class SpotLimitOrder(BaseSpotOrder):
+class SpotLimitOrder(BaseOrder):
     limit_price: float = Field(ge=0)
+    model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def limit_price_validator(cls, value: "SpotLimitOrder"):
@@ -38,7 +38,11 @@ class SpotLimitOrder(BaseSpotOrder):
             raise ValueError("Limit price allowed only for limit orders.")
 
 
-class BaseFuturesOrder(BaseSpotOrder):
+class SpotLimitOCOOrder(SpotLimitOrder):
+    pass
+
+
+class BaseFuturesOrder(BaseOrder):
     take_profit: float | None = None
     stop_loss: float | None = None
 
@@ -49,3 +53,9 @@ class FuturesMarketOrder(BaseFuturesOrder):
 
 class FuturesLimitOrder(BaseFuturesOrder):
     limit_price: float
+
+
+class ModifyOrder(BaseModel):
+    limit_price: float | None = MODIFY_DEFAULT
+    take_profit: float | None = MODIFY_DEFAULT
+    stop_loss: float | None = MODIFY_DEFAULT

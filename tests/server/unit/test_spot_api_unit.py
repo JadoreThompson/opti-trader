@@ -89,7 +89,7 @@ async def test_create_spot_bid_limit_order(http_client_authenticated):
             select(Escrows.balance).where(Escrows.order_id == data["order_id"])
         )
         escrow_balance = escrow_balance.scalar()
-        
+
         user_balance = await sess.execute(
             select(Users.balance).where(
                 Users.user_id
@@ -210,3 +210,69 @@ async def test_create_order_non_existent_instrument(http_client_authenticated):
 
     assert rsp.status_code == 400
     assert "error" in data
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_modify_spot_limit_bid(http_client_authenticated):
+    body = {
+        "order_type": OrderType.LIMIT,
+        "quantity": 10,
+        "instrument": "BTC",
+        "side": Side.BID,
+        "limit_price": 100.0,
+    }
+
+    rsp = await http_client_authenticated.post("/order/spot", json=body)
+    order_id = rsp.json()["order_id"]
+
+    body = {"limit_price": 50.0}
+    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+
+    assert rsp.status_code == 201
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_modify_spot_market_oco_bid(http_client_authenticated):
+    body = {
+        "order_type": OrderType.MARKET_OCO,
+        "quantity": 10,
+        "instrument": "BTC",
+        "side": Side.BID,
+    }
+
+    rsp = await http_client_authenticated.post("/order/spot", json=body)
+    order_id = rsp.json()["order_id"]
+
+    body = {"take_profit": 50.0}
+    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    assert rsp.status_code == 201
+    
+    body = {"stop_loss": 50.0}
+    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    assert rsp.status_code == 201
+    
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_modify_spot_market_bid_returns_400(http_client_authenticated):
+    body = {
+        "order_type": OrderType.MARKET,
+        "quantity": 10,
+        "instrument": "BTC",
+        "side": Side.BID,
+    }
+
+    rsp = await http_client_authenticated.post("/order/spot", json=body)
+    order_id = rsp.json()["order_id"]
+
+    body = {"limit_price": 50.0}
+    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    assert rsp.status_code == 400
+
+    body = {"stop_loss": 50.0}
+    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    assert rsp.status_code == 400
+
+    body = {"take_profit": 50.0}
+    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    assert rsp.status_code == 400
