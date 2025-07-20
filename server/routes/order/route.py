@@ -20,13 +20,6 @@ from .models import BaseOrder, SpotLimitOrder, SpotMarketOrder
 
 route = APIRouter(prefix="/order", tags=["order"])
 
-####################################################
-####################################################
-####################################################
-# Make a event syaing ask or bid submitted
-####################################################
-####################################################
-####################################################
 
 @route.post("/spot", status_code=201)
 async def create_order(

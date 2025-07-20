@@ -42,14 +42,17 @@ async def handle_place_spot_bid_order(
     if order_value > balance:
         return JSONResponse(status_code=400, content={"error": "Insufficient balance."})
 
-    await db_sess.execute(
-        update(Users).values(
+    res = await db_sess.execute(
+        update(Users)
+        .values(
             balance=select(Users.balance)
             .where(Users.user_id == user_id)
             .scalar_subquery()
             - order_value
         )
+        .returning(Users.balance)
     )
+    user_balance = res.scalar()
 
     res = await db_sess.execute(
         insert(Orders)
@@ -63,12 +66,40 @@ async def handle_place_spot_bid_order(
     )
     db_order = res.scalar()
 
+    res = await db_sess.execute(
+        select(OrderEvents.asset_balance)
+        .where(
+            OrderEvents.user_id == user_id,
+            OrderEvents.order_id.in_(
+                select(Orders.order_id)
+                .where(
+                    Orders.user_id == user_id,
+                    Orders.instrument == order.instrument,
+                )
+                .scalar_subquery()
+            ),
+        )
+        .order_by(OrderEvents.created_at.desc())
+        .limit(1)
+    )
+    cur_asset_balance = res.scalar_one_or_none() or 0
+
+    await db_sess.execute(
+        insert(OrderEvents).values(
+            user_id=user_id,
+            order_id=db_order.order_id,
+            event_type=EventType.BID_SUBMITTED,
+            asset_balance=cur_asset_balance,
+            balance=user_balance,
+        )
+    )
+
     await db_sess.execute(
         insert(Escrows).values(
             user_id=user_id, order_id=db_order.order_id, balance=order_value
         )
     )
-    
+
     await db_sess.commit()
     return db_order.dump()
 

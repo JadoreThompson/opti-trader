@@ -42,10 +42,10 @@ async def test_spot_bid_market_order_integration(
         )
         events = res.scalars().all()
 
-    assert len(events) == 1
-    order = events[0]
-    assert order.event_type == EventType.ORDER_PLACED
-    assert str(order.order_id) == data["order_id"]
+    assert len(events) == 2
+    assert events[0].event_type == EventType.BID_SUBMITTED
+    assert events[1].event_type == EventType.ORDER_PLACED
+    assert str(events[1].order_id) == data["order_id"]
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -71,10 +71,10 @@ async def test_spot_bid_limit_order_integration(
         )
         events = res.scalars().all()
 
-    assert len(events) == 1, [e.event_type for e in events]
-    order = events[0]
-    assert order.event_type == EventType.ORDER_PLACED
-    assert str(order.order_id) == data["order_id"]
+    assert len(events) == 2, [e.event_type for e in events]
+    assert events[0].event_type == EventType.BID_SUBMITTED
+    assert events[1].event_type == EventType.ORDER_PLACED
+    assert str(events[1].order_id) == data["order_id"]
 
 
 @pytest.mark.asyncio(loop_scope="module")
