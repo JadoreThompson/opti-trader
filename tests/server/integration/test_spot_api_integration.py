@@ -32,8 +32,6 @@ async def test_spot_bid_market_order_integration(
 
     assert rsp.status_code == 201
 
-    await asyncio.sleep(3)
-
     async with get_db_sess_async() as sess:
         res = await sess.execute(
             select(OrderEvents).where(OrderEvents.order_id == data["order_id"])

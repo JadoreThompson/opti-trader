@@ -81,9 +81,6 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
 
 
 def handle_order_placed_event(event: Event, db_sess: Session) -> None:
-    print("order placed event:", db_sess.bind.url)
-    all_orders = [vars(o) for o in db_sess.execute(select(Orders)).scalars().all()]
-    pprint(all_orders)
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
 
@@ -183,10 +180,7 @@ def handle_order_rejected_event(event: Event, db_sess: Session) -> None:
 
 @CELERY.task
 def log_event(event: EventDict):
-    # pprint(event)
-    # print("", end="\n\n\n")
     with get_db_session_sync() as sess:
-        print("Log event:", sess.bind.url)
         parsed_event = Event(**event)
 
         if parsed_event.event_type == EventType.ORDER_PLACED:

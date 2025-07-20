@@ -1,3 +1,4 @@
+import asyncio
 from json import loads
 from pprint import pprint
 from pydantic import ValidationError
@@ -39,13 +40,12 @@ class SpotEngine(BaseEngine[SpotOrder]):
         self._order_payloads: dict[str, dict] = {}
 
     async def run(self) -> None:
-        print("YOYOOYOY")
         async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe(SPOT_QUEUE_KEY)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
-
+                
                 try:
                     payload = Payload(**loads(m["data"]))
 
@@ -55,7 +55,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                         self.cancel_order(CloseRequest(**payload.data))
                     elif payload.topic == PayloadTopic.MODIFY:
                         self.modify_order(ModifyRequest(**payload.data))
-                    
+
                 except ValidationError:
                     pass
 

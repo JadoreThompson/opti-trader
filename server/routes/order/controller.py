@@ -1,14 +1,10 @@
-from datetime import datetime
-from json import dumps
-from uuid import UUID
 from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Union
 
-from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
 from db_models import Escrows, OrderEvents, Orders, Users
-from engine.typing import EventType, Payload, PayloadTopic
+from engine.typing import EventType
 from enums import MarketType, OrderType
 from .models import SpotLimitOrder, SpotMarketOrder
 
@@ -34,7 +30,6 @@ async def handle_place_spot_bid_order(
             JSONResponse: Insufficient balance.
             dict: Dictionary representation of an Orders object.
     """
-    print("Create order:", db_sess.bind.url)
     res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
     balance = res.scalar()
 
@@ -73,6 +68,8 @@ async def handle_place_spot_bid_order(
             user_id=user_id, order_id=db_order.order_id, balance=order_value
         )
     )
+    
+    await db_sess.commit()
 
     return db_order.dump()
 
