@@ -1,4 +1,5 @@
 import jwt
+from pprint import pprint
 
 from datetime import datetime
 from fastapi import Response
@@ -50,7 +51,6 @@ async def validate_jwt_payload(payload: JWTPayload) -> JWTPayload:
     Returns:
         JWTPayload: The validated JWT payload.
     """
-    payload.sub = int(payload.sub)
     async with get_db_session() as sess:
         res = await sess.execute(select(Users).where(Users.user_id == payload.sub))
         user = res.first()

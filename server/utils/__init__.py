@@ -5,4 +5,3 @@ from .auth import (
     decode_jwt,
     validate_jwt_payload,
 )
-from .utils import dump_sa_obj

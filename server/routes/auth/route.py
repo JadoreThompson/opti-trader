@@ -1,9 +1,10 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db_models import Operations, Users
+from db_models import Users
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils import set_cookie
@@ -33,6 +34,7 @@ async def register_user(
     body: UserCreate,
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
+    result = (await db_sess.execute(text("SELECT 1 FROM users"))).scalar()
     result = await db_sess.execute(select(Users).where(Users.username == body.username))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Username already registered")
@@ -44,16 +46,15 @@ async def register_user(
 
     await db_sess.commit()
 
-    rsp = JSONResponse(content={"message": "Registered successfully."})
+    rsp = JSONResponse(status_code=200, content={"message": "Registered successfully."})
     return set_cookie(user_id, rsp)
 
 
 @route.get("/me")
-async def get_current_user(
-    jwt_payload: JWTPayload = Depends(verify_jwt),
-    db_sess: AsyncSession = Depends(depends_db_session),
-) -> UserRead:
-    # res = await db_sess.execute(select(Users).where(Users.user_id == jwt_payload.sub))
-    # user = res.scalar()
-    # return UserRead(created_at=user.created_at, username=user.username)
-    ...
+async def get_current_user(jwt_payload: JWTPayload = Depends(verify_jwt)):
+    pass
+
+
+@route.get("/me-id")
+async def get_current_user_id(jwt_payload: JWTPayload = Depends(verify_jwt)):
+    return {"user_id": jwt_payload.sub}

@@ -1,7 +1,6 @@
-from asyncio import AbstractEventLoop
-from typing import Generic, overload, TypeVar
+from typing import Generic, override, TypeVar
 
-from config import REDIS
+from config import REDIS_CLIENT
 from enums import Side
 from ..enums import MatchOutcome
 from ..orderbook import OrderBook
@@ -16,14 +15,14 @@ class BaseEngine(Generic[O]):
         self._orderbooks: dict[str, OrderBook[O]] = {}
         self._loop = loop
 
-    @overload
+    @override
     async def run(self) -> None:
         """
         Listens to the pubsub channel, routing each message
         to their respective native function.
         """
 
-    @overload
+    @override
     def place_order(self, payload: dict) -> None:
         """
         Places a new order based on the provided payload dictionary.
@@ -36,7 +35,7 @@ class BaseEngine(Generic[O]):
             payload (dict): A dictionary containing order parameters.
         """
 
-    @overload
+    @override
     def cancel_order(self, request: CloseRequest) -> None:
         """
         Cancels an existing order partially or fully.
@@ -48,7 +47,7 @@ class BaseEngine(Generic[O]):
             request (CloseRequest): Data specifying the order ID and quantity to cancel.
         """
 
-    @overload
+    @override
     def modify_order(self, request: ModifyRequest) -> None:
         """
         Modifies parameters of an existing order.
@@ -120,7 +119,7 @@ class BaseEngine(Generic[O]):
             MatchOutcome.PARTIAL, target_price, starting_quantity - cur_quantity
         )
 
-    @overload
+    @override
     def _handle_filled_order(
         self,
         order: O,
@@ -129,7 +128,7 @@ class BaseEngine(Generic[O]):
         ob: OrderBook[O],
     ) -> None: ...
 
-    @overload
+    @override
     def _handle_touched_order(
         self,
         order: O,
@@ -177,4 +176,4 @@ class BaseEngine(Generic[O]):
             self._loop.create_task(self._send_price_update(instrument, price))
 
     async def _send_price_update(self, instrument: str, price: float) -> None:
-        await REDIS.set(instrument, price)
+        await REDIS_CLIENT.set(instrument, price)

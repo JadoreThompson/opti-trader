@@ -1,7 +1,18 @@
+import asyncio
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncGenerator, Generator
 from uuid import uuid4
 from datetime import datetime
+from config import TEST_DB_ENGINE, TEST_DB_ENGINE_ASYNC
 from engine import SpotEngine
 from enums import OrderStatus, OrderType, Side
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.ext.asyncio import AsyncSession
+
+smaker = sessionmaker(bind=TEST_DB_ENGINE, class_=Session, expire_on_commit=False)
+smaker_async = sessionmaker(
+    bind=TEST_DB_ENGINE_ASYNC, class_=AsyncSession, expire_on_commit=False
+)
 
 
 def create_order_simple(
@@ -85,3 +96,16 @@ def create_order_conditional(i: int, quantity=None) -> dict:
         **tp_sl_details,
     }
     return order
+
+
+@contextmanager
+def get_db_sess() -> Generator[Session, None, None]:
+    with smaker() as sess:
+        yield sess
+
+
+async def test_depends_db_session() -> AsyncGenerator[AsyncSession, None]:
+    async with smaker_async.begin() as sess:
+        yield sess
+
+get_db_sess_async = asynccontextmanager(test_depends_db_session)

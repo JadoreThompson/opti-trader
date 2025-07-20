@@ -1,5 +1,5 @@
 from typing import Generic, TypeVar
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 
 T = TypeVar("T")
 
@@ -12,8 +12,3 @@ class PaginationMeta(BaseModel):
 
 class PaginatedResponse(PaginationMeta, Generic[T]):
     data: list[T]
-    
-hints  = {'name': str}
-model = create_model('My Name', **hints)
-print(model)
-

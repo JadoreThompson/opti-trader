@@ -54,6 +54,8 @@ class Payload(BaseModel):
 
 
 class EventType(str, Enum):
+    ASK_SUBMITTED = 'ask_submitted'
+    BID_SUBMITTED = 'bid_submitted'
     ORDER_PLACED = "order_placed"
     ORDER_CANCELLED = "order_cancelled"
     ORDER_MODIFIED = "order_modified"

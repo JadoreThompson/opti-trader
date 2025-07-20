@@ -1,11 +1,17 @@
-from uuid import uuid4
 import pytest
+import pytest_asyncio
 
+from typing import Generator
+from uuid import uuid4
+
+from config import TEST_DB_ENGINE
+from db_models import Base
 from engine import SpotEngine
 from engine.enums import Tag
 from engine.orderbook import OrderBook
 from engine.orders import SpotOrder
 from enums import OrderStatus, Side
+from tests.utils import get_db_sess, smaker_async
 
 
 @pytest.fixture
@@ -62,7 +68,7 @@ def populated_spot_engine(request):
             payload["order_id"],
             Tag.TAKE_PROFIT,
             Side.ASK,
-            payload["open_quantity"],
+        payload["open_quantity"],
             payload["take_profit"],
             oco_id=oco_order.id,
         )
@@ -70,3 +76,24 @@ def populated_spot_engine(request):
         oco_order.leg_c = new_order
 
     return engine, instr, liq_ocos
+
+
+@pytest.fixture
+def db() -> Generator[None, None, None]:
+    try:
+        Base.metadata.create_all(bind=TEST_DB_ENGINE)
+        yield
+    finally:
+        Base.metadata.drop_all(bind=TEST_DB_ENGINE)
+
+
+@pytest.fixture
+def db_sess(db):
+    with get_db_sess() as sess:
+        yield sess
+
+
+@pytest_asyncio.fixture
+async def db_sess_async(db):
+    async with smaker_async.begin() as sess:
+        yield sess

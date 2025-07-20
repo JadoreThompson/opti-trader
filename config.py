@@ -37,10 +37,11 @@ DB_ENGINE = create_async_engine(DB_URL)
 DB_ENGINE_SYNC = create_engine(DB_URL.replace("+asyncpg", "+psycopg2"))
 TEST_DB_URL = f"postgresql+asyncpg://{os.getenv("TEST_DB_USER")}:{quote(os.getenv("TEST_DB_PASSWORD"))}@{os.getenv("TEST_DB_HOST")}:{os.getenv('TEST_DB_PORT')}/{os.getenv('TEST_DB_NAME')}"
 TEST_DB_ENGINE = create_engine(TEST_DB_URL.replace("+asyncpg", "+psycopg2"))
+TEST_DB_ENGINE_ASYNC = create_async_engine(TEST_DB_URL)
 
 
 # Redis
-REDIS = CustomRedis(
+REDIS_CLIENT = CustomRedis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=int(os.getenv("REDIS_PORT", "6379")),
     password=os.getenv("REDIS_PASSWORD"),
@@ -57,6 +58,8 @@ INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
 
 # Server Security
 COOKIE_ALIAS = "cookie-order-matcher"
-JWT_SECRET_KEY = os.getenv("JWT_SECRET")
-JWT_ALGO = os.getenv("JWT_ALGO")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET", "my-secret")
+JWT_ALGO = os.getenv("JWT_ALGO", "HS256")
 JWT_EXPIRY = timedelta(days=1000)
+
+TEST_BASE_URL = os.getenv("TEST_BASE_URL", "http://localhost:80")

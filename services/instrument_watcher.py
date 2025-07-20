@@ -1,6 +1,6 @@
 from asyncio import create_task, get_event_loop
 from pydantic_core import ValidationError
-from config import FUTURES_QUEUE_KEY, REDIS, SPOT_QUEUE_KEY
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
 from .typing import _Instrument
 
 
@@ -16,7 +16,7 @@ class InstrumentsWatcher:
             self._is_running = True
 
     async def _listen(self) -> None:
-        async with REDIS.pubsub() as ps:
+        async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe("instrument.new")
 
             async for message in ps.listen():
@@ -25,8 +25,8 @@ class InstrumentsWatcher:
 
                 try:
                     data = _Instrument(**message["data"])
-                    await REDIS.publish(FUTURES_QUEUE_KEY, data.model_dump())
-                    await REDIS.publish(SPOT_QUEUE_KEY, data.model_dump())
+                    await REDIS_CLIENT.publish(FUTURES_QUEUE_KEY, data.model_dump())
+                    await REDIS_CLIENT.publish(SPOT_QUEUE_KEY, data.model_dump())
                 except ValidationError:
                     continue
 

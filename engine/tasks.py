@@ -87,9 +87,11 @@ def handle_order_placed_event(event: Event, db_sess: Session) -> None:
     db_sess.execute(
         insert(OrderEvents).values(
             **values,
-            balance=select(Users.balance)
-            .where(Users.user_id == event.user_id)
-            .scalar_subquery(),
+            balance=(
+                select(Users.balance)
+                .where(Users.user_id == event.user_id)
+                .scalar_subquery()
+            ),
         )
     )
     db_sess.commit()

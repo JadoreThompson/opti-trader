@@ -2,13 +2,32 @@ import pytest
 from engine import FuturesEngine
 from engine.typing import CloseRequest, ModifyRequest
 from enums import OrderStatus, OrderType, Side
-from tests.utils import create_order_simple
+from tests.utils import create_order_conditional, create_order_simple
+from typing import Generator
 
 
 @pytest.fixture
 def engine():
     """Provides a clean instance of the FuturesEngine for each test."""
     return FuturesEngine()
+
+
+@pytest.fixture
+def populated_engine(
+    request,
+) -> Generator[tuple[FuturesEngine, tuple[dict, ...]], None, None]:
+    """
+    Creates and populates a FuturesEngine with a given number of orders.
+    This replaces the fixture that used the mock engine.
+    """
+    num_orders = request.param
+    engine = FuturesEngine()
+    orders = tuple(create_order_conditional(i) for i in range(num_orders))
+
+    for order in orders:
+        engine.place_order(order)
+
+    yield engine, orders
 
 
 def test_place_limit_orders_no_match(engine: FuturesEngine):

@@ -1,15 +1,14 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from enums import OrderType, Side
 
 
 class BaseOrder(BaseModel):
-    class Config:
-        extra = "allow"
-
-    quantity: int
+    quantity: int = Field(ge=1)
     instrument: str
     order_type: OrderType
     side: Side
+
+    model_config = ConfigDict(extra="allow")
 
 
 class BaseSpotOrder(BaseOrder):
@@ -29,7 +28,14 @@ class SpotMarketOrder(BaseSpotOrder):
 
 
 class SpotLimitOrder(BaseSpotOrder):
-    limit_price: float
+    limit_price: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def limit_price_validator(cls, value: "SpotLimitOrder"):
+        if value.order_type == OrderType.LIMIT and value.limit_price is None:
+            raise ValueError("Limit price required for limit orders.")
+        if value.limit_price is not None and value.order_type != OrderType.LIMIT:
+            raise ValueError("Limit price allowed only for limit orders.")
 
 
 class BaseFuturesOrder(BaseSpotOrder):
@@ -43,13 +49,3 @@ class FuturesMarketOrder(BaseFuturesOrder):
 
 class FuturesLimitOrder(BaseFuturesOrder):
     limit_price: float
-
-
-m = BaseOrder(
-    quantity=10,
-    instrument="a",
-    side=Side.ASK,
-    order_type=OrderType.LIMIT,
-    take_profit=10,
-)
-print(m.model_extra)

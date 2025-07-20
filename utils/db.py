@@ -5,11 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker, Session
 from typing import AsyncGenerator, Generator
 
-from config import DB_ENGINE, DB_ENGINE_SYNC, DB_URL, TEST_DB_ENGINE
+from config import DB_ENGINE, DB_ENGINE_SYNC, DB_URL
 
 smaker = sessionmaker(bind=DB_ENGINE, class_=AsyncSession, expire_on_commit=False)
 smaker_sync = sessionmaker(bind=DB_ENGINE_SYNC, class_=Session, expire_on_commit=False)
-smaker_test = sessionmaker(bind=TEST_DB_ENGINE, class_=Session, expire_on_commit=False)
 
 
 def write_sqlalchemy_url() -> None:
@@ -43,9 +42,4 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 @contextmanager
 def get_db_session_sync() -> Generator[Session, None, None]:
     with smaker_sync() as sess:
-        yield sess
-
-@contextmanager
-def get_db_session_test() -> Generator[Session, None, None]:
-    with smaker_test() as sess:
         yield sess

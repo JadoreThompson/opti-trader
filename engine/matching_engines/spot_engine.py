@@ -1,5 +1,5 @@
 from pydantic import ValidationError
-from config import REDIS, SPOT_QUEUE_KEY
+from config import REDIS_CLIENT, SPOT_QUEUE_KEY
 from enums import OrderType, Side
 from .base_engine import BaseEngine
 from ..balance_manager import BalanceManager
@@ -37,7 +37,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         self._order_payloads: dict[str, dict] = {}
 
     async def run(self) -> None:
-        async with REDIS.pubsub() as ps:
+        async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe(SPOT_QUEUE_KEY)
             async for m in ps.listen():
                 if m["type"] == "subscribe":

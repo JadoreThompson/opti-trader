@@ -14,14 +14,14 @@ from enums import MarketType, OrderType, Side
 from engine import SpotEngine
 from engine.tasks import log_event
 from engine.typing import CloseRequest, EventType, ModifyRequest
-from tests.utils import create_order_simple
+from tests.utils import create_order_simple, get_db_sess
 
 
-@contextmanager
-def get_db_sess() -> Generator[Session, None, None]:
-    smaker = sessionmaker(bind=TEST_DB_ENGINE, class_=Session, expire_on_commit=False)
-    with smaker() as sess:
-        yield sess
+# @contextmanager
+# def get_db_sess() -> Generator[Session, None, None]:
+#     smaker = sessionmaker(bind=TEST_DB_ENGINE, class_=Session, expire_on_commit=False)
+#     with smaker() as sess:
+#         yield sess
 
 
 def create_user() -> str:
@@ -70,19 +70,19 @@ class MockCelery:
         self.func(*args, **kwargs)
 
 
-@pytest.fixture
-def db() -> Generator[None, None, None]:
-    try:
-        Base.metadata.create_all(bind=TEST_DB_ENGINE)
-        yield
-    finally:
-        Base.metadata.drop_all(bind=TEST_DB_ENGINE)
+# @pytest.fixture
+# def db() -> Generator[None, None, None]:
+#     try:
+#         Base.metadata.create_all(bind=TEST_DB_ENGINE)
+#         yield
+#     finally:
+#         Base.metadata.drop_all(bind=TEST_DB_ENGINE)
 
 
-@pytest.fixture
-def db_sess(db):
-    with get_db_sess() as sess:
-        yield sess
+# @pytest.fixture
+# def db_sess(db):
+#     with get_db_sess() as sess:
+#         yield sess
 
 
 @pytest.fixture
