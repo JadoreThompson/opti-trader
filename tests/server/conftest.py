@@ -1,9 +1,6 @@
-import asyncio
-import pprint
 import pytest
 import pytest_asyncio
 
-from contextlib import asynccontextmanager
 from faker import Faker
 from httpx import ASGITransport, AsyncClient
 
@@ -21,9 +18,7 @@ def patched_db_session(monkeypatch):
     monkeypatch.setattr("server.utils.auth.get_db_session", get_db_sess_async)
 
 
-
 @pytest_asyncio.fixture(loop_scope="module")
-# @pytest.mark.asyncio(loop_scope="module")
 async def http_client_authenticated(db, patched_db_session):
     fkr = Faker()
     async with AsyncClient(
@@ -34,8 +29,4 @@ async def http_client_authenticated(db, patched_db_session):
             json={"username": fkr.user_name(), "password": fkr.password()},
         )
 
-        try:
-            yield client
-        finally:
-            # await asyncio.sleep(20)
-            ...
+        yield client

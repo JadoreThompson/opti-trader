@@ -12,6 +12,7 @@ from engine.typing import EventType, Payload, PayloadTopic
 from enums import MarketType, OrderType
 from .models import SpotLimitOrder, SpotMarketOrder
 
+
 async def handle_place_spot_bid_order(
     order: Union[SpotMarketOrder, SpotLimitOrder],
     user_id: str,
@@ -33,6 +34,7 @@ async def handle_place_spot_bid_order(
             JSONResponse: Insufficient balance.
             dict: Dictionary representation of an Orders object.
     """
+    print("Create order:", db_sess.bind.url)
     res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
     balance = res.scalar()
 

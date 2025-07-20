@@ -10,14 +10,10 @@ from engine import SpotEngine
 from engine.enums import Tag
 from engine.orderbook import OrderBook
 from engine.orders import SpotOrder
+from engine.tasks import log_event
 from enums import OrderStatus, Side
+from tests.mocks import MockCelery
 from tests.utils import get_db_sess, smaker_async
-
-
-@pytest.fixture
-def engine():
-    """Provides a clean instance of the SpotEngine for each test."""
-    return SpotEngine()
 
 
 @pytest.fixture()
@@ -98,3 +94,12 @@ def db_sess(db):
 async def db_sess_async(db):
     async with smaker_async.begin() as sess:
         yield sess
+
+
+@pytest.fixture
+def patched_log(monkeypatch):
+    """Patches log_event in engine to be synchronous and inspectable."""
+    mock_log_event = MockCelery(log_event)
+    monkeypatch.setattr("engine.matching_engines.spot_engine.log_event", mock_log_event)
+    monkeypatch.setattr("engine.tasks.get_db_session_sync", get_db_sess)
+    yield mock_log_event

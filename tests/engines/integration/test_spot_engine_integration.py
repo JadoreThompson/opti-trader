@@ -1,20 +1,18 @@
 import pytest
 
-from contextlib import contextmanager
 from faker import Faker
-from pprint import pprint
 from sqlalchemy import insert, select, update
-from sqlalchemy.orm import sessionmaker, Session
-from typing import Generator
-from uuid import UUID, uuid4
+from sqlalchemy.orm import Session
+from uuid import UUID
 
-from config import TEST_DB_ENGINE
-from db_models import Base, Escrows, OrderEvents, Orders, Users, get_default_balance
+from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
 from enums import MarketType, OrderType, Side
 from engine import SpotEngine
 from engine.tasks import log_event
 from engine.typing import CloseRequest, EventType, ModifyRequest
+from tests.mocks import MockCelery
 from tests.utils import create_order_simple, get_db_sess
+
 
 def create_user() -> str:
     with get_db_sess() as db_sess:
@@ -49,41 +47,6 @@ def apply_escrow(amount: float, user_id: str | UUID, order_id: str | UUID):
             insert(Escrows).values(user_id=user_id, order_id=order_id, balance=amount)
         )
         sess.commit()
-
-
-class MockCelery:
-    def __init__(self, func) -> None:
-        self.func = func
-        self.last_call = None
-
-    def delay(self, *args, **kwargs):
-        """Mocks Celery's delay, storing the call and executing synchronously."""
-        self.last_call = {"args": args, "kwargs": kwargs}
-        self.func(*args, **kwargs)
-
-
-# @pytest.fixture
-# def db() -> Generator[None, None, None]:
-#     try:
-#         Base.metadata.create_all(bind=TEST_DB_ENGINE)
-#         yield
-#     finally:
-#         Base.metadata.drop_all(bind=TEST_DB_ENGINE)
-
-
-# @pytest.fixture
-# def db_sess(db):
-#     with get_db_sess() as sess:
-#         yield sess
-
-
-@pytest.fixture
-def patched_log(monkeypatch):
-    """Patches log_event to be synchronous and inspectable."""
-    mock_log_event = MockCelery(log_event)
-    monkeypatch.setattr("engine.matching_engines.spot_engine.log_event", mock_log_event)
-    monkeypatch.setattr("engine.tasks.get_db_session_sync", get_db_sess)
-    yield mock_log_event
 
 
 @pytest.fixture
@@ -377,7 +340,6 @@ def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log)
     Scenario: A user attempts to sell more assets than they own.
     The engine should reject the order and log an ORDER_REJECTED event.
     """
-    # 1. Setup user and order
     sell_order = create_order_simple(
         "",
         Side.ASK,

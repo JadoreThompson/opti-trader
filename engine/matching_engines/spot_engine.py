@@ -39,6 +39,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         self._order_payloads: dict[str, dict] = {}
 
     async def run(self) -> None:
+        print("YOYOOYOY")
         async with REDIS_CLIENT.pubsub() as ps:
             await ps.subscribe(SPOT_QUEUE_KEY)
             async for m in ps.listen():

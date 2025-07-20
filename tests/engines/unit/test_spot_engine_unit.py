@@ -10,6 +10,11 @@ from enums import OrderStatus, OrderType, Side
 from tests.mocks import MockOCOManager
 from tests.utils import create_order_simple
 
+@pytest.fixture
+def engine():
+    """Provides a clean instance of the SpotEngine for each test."""
+    return SpotEngine()
+
 def test_place_limit_orders_no_match(engine: SpotEngine):
     """
     Scenario: Two limit orders are placed far from each other and should not match.

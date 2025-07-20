@@ -1,6 +1,6 @@
 import pytest
-from sqlalchemy import insert, select, update
 
+from sqlalchemy import insert, select, update
 from config import REDIS_CLIENT
 from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
 from engine.typing import EventType
@@ -186,12 +186,12 @@ async def test_create_spot_ask_insufficient_asset_balance(
         "side": Side.ASK,
         "limit_price": 100.0,
     }
-    
+
     rsp = await http_client_authenticated.post("/order/spot", json=body)
     data = rsp.json()
-    
+
     assert rsp.status_code == 400
-    assert 'error' in data
+    assert "error" in data
 
 
 @pytest.mark.asyncio(loop_scope="module")
