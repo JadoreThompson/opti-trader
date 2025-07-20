@@ -68,7 +68,7 @@ def populated_spot_engine(request):
             payload["order_id"],
             Tag.TAKE_PROFIT,
             Side.ASK,
-        payload["open_quantity"],
+            payload["open_quantity"],
             payload["take_profit"],
             oco_id=oco_order.id,
         )
@@ -84,7 +84,8 @@ def db() -> Generator[None, None, None]:
         Base.metadata.create_all(bind=TEST_DB_ENGINE)
         yield
     finally:
-        Base.metadata.drop_all(bind=TEST_DB_ENGINE)
+        # Base.metadata.drop_all(bind=TEST_DB_ENGINE)
+        ...
 
 
 @pytest.fixture

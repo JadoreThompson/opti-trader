@@ -75,7 +75,7 @@ async def test_create_spot_bid_limit_order(http_client_authenticated):
     rsp = await http_client_authenticated.post("/order/spot", json=body)
     data = rsp.json()
 
-    assert rsp.status_code == 200, vars(rsp)
+    assert rsp.status_code == 201, vars(rsp)
     assert len(data) == 1
     assert "order_id" in data
 

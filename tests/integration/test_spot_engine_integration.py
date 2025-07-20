@@ -16,14 +16,6 @@ from engine.tasks import log_event
 from engine.typing import CloseRequest, EventType, ModifyRequest
 from tests.utils import create_order_simple, get_db_sess
 
-
-# @contextmanager
-# def get_db_sess() -> Generator[Session, None, None]:
-#     smaker = sessionmaker(bind=TEST_DB_ENGINE, class_=Session, expire_on_commit=False)
-#     with smaker() as sess:
-#         yield sess
-
-
 def create_user() -> str:
     with get_db_sess() as db_sess:
         fkr = Faker()

@@ -1,3 +1,5 @@
+from json import loads
+from pprint import pprint
 from pydantic import ValidationError
 from config import REDIS_CLIENT, SPOT_QUEUE_KEY
 from enums import OrderType, Side
@@ -44,7 +46,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     continue
 
                 try:
-                    payload = Payload(**m["data"])
+                    payload = Payload(**loads(m["data"]))
 
                     if payload.topic == PayloadTopic.CREATE:
                         self.place_order(payload.data)
@@ -52,6 +54,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                         self.cancel_order(CloseRequest(**payload.data))
                     elif payload.topic == PayloadTopic.MODIFY:
                         self.modify_order(ModifyRequest(**payload.data))
+                    
                 except ValidationError:
                     pass
 

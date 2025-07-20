@@ -1,20 +1,23 @@
+from datetime import datetime
+from json import dumps
+from uuid import UUID
 from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Union
 
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
 from db_models import Escrows, OrderEvents, Orders, Users
-from engine.typing import EventType
+from engine.typing import EventType, Payload, PayloadTopic
 from enums import MarketType, OrderType
 from .models import SpotLimitOrder, SpotMarketOrder
-
 
 async def handle_place_spot_bid_order(
     order: Union[SpotMarketOrder, SpotLimitOrder],
     user_id: str,
     current_price: float,
     db_sess: AsyncSession,
-) -> JSONResponse | str:
+) -> JSONResponse | dict:
     """
     Validates balance, creates escrow and order record.
     Returns a 400 JSON error if balance is insufficient.
@@ -24,6 +27,11 @@ async def handle_place_spot_bid_order(
         user_id (int): Identifier of the user placing the order.
         current_price (float): Current market price used to value the order.
         db_sess (AsynsSession): Active async database session.
+
+    Returns:
+        JSONResponse | dict:
+            JSONResponse: Insufficient balance.
+            dict: Dictionary representation of an Orders object.
     """
     res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
     balance = res.scalar()
@@ -54,22 +62,37 @@ async def handle_place_spot_bid_order(
             market_type=MarketType.SPOT.value,
             standing_quantity=order.quantity
         )
-        .returning(Orders.order_id)
+        .returning(Orders)
     )
-    order_id = res.scalar()
+    db_order = res.scalar()
 
     await db_sess.execute(
-        insert(Escrows).values(user_id=user_id, order_id=order_id, balance=order_value)
+        insert(Escrows).values(
+            user_id=user_id, order_id=db_order.order_id, balance=order_value
+        )
     )
 
-    return str(order_id)
+    return db_order.dump()
 
 
 async def handle_place_spot_ask_order(
     order: Union[SpotMarketOrder, SpotLimitOrder],
     user_id: str,
     db_sess: AsyncSession,
-) -> None:
+) -> JSONResponse | dict:
+    """
+    Places and validates a spot ask order.
+
+    Args:
+        order (Union[SpotMarketOrder, SpotLimitOrder]): Spot order details.
+        user_id (str): User id being used to place order.
+        db_sess (AsyncSession): Active async database session.
+
+    Returns:
+        JSONResponse | dict:
+            JSONResponse: Insufficient balance.
+            dict: Dictionary representation of an Orders object.
+    """
     res = await db_sess.execute(
         select(OrderEvents.asset_balance)
         .where(
@@ -99,14 +122,14 @@ async def handle_place_spot_ask_order(
             standing_quantity=order.quantity,
             **order.model_dump()
         )
-        .returning(Orders.order_id)
+        .returning(Orders)
     )
-    order_id = res.scalar()
+    db_order = res.scalar()
 
     await db_sess.execute(
         insert(OrderEvents).values(
             user_id=user_id,
-            order_id=order_id,
+            order_id=db_order.order_id,
             event_type=EventType.ASK_SUBMITTED,
             asset_balance=asset_balance - order.quantity,
             balance=select(Users.balance).where(Users.user_id == user_id),
@@ -114,4 +137,4 @@ async def handle_place_spot_ask_order(
     )
 
     await db_sess.commit()
-    return str(order_id)
+    return db_order.dump()

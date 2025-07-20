@@ -1,15 +1,19 @@
+from datetime import datetime
+from uuid import UUID
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import insert, select, update
 
-from config import REDIS_CLIENT
-from db_models import Escrows, OrderEvents, Orders, Users
-from enums import MarketType, OrderType, Side
+from config import REDIS_CLIENT, SPOT_QUEUE_KEY
+from engine.typing import Payload, PayloadTopic
+from enums import OrderType, Side
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
-from .controller import handle_place_spot_ask_order, handle_place_spot_bid_order
+from .controller import (
+    handle_place_spot_ask_order,
+    handle_place_spot_bid_order,
+)
 from .models import BaseOrder, SpotLimitOrder, SpotMarketOrder
 
 
@@ -41,13 +45,21 @@ async def create_order(
         res = await handle_place_spot_bid_order(
             body, jwt_payload.sub, cur_price, db_sess
         )
-        if isinstance(res, str):
-            return {"order_id": res}
-        return res
     else:
-        res = await handle_place_spot_ask_order(
-            body, jwt_payload.sub, db_sess
-        )
-        if isinstance(res, str):
-            return {"order_id": res}
+        res = await handle_place_spot_ask_order(body, jwt_payload.sub, db_sess)
+
+    if isinstance(res, JSONResponse):
         return res
+
+    await REDIS_CLIENT.publish(
+        SPOT_QUEUE_KEY,
+        Payload(
+            topic=PayloadTopic.CREATE,
+            data={
+                k: (str(v) if isinstance(v, (UUID, datetime)) else v)
+                for k, v in res.items()
+            },
+        ).model_dump_json(),
+    )
+
+    return {"order_id": res["order_id"]}
