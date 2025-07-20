@@ -70,7 +70,6 @@ async def handle_place_spot_bid_order(
     )
     
     await db_sess.commit()
-
     return db_order.dump()
 
 

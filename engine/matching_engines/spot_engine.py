@@ -44,12 +44,12 @@ class SpotEngine(BaseEngine[SpotOrder]):
             await ps.subscribe(SPOT_QUEUE_KEY)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
-                    continue
+                    continue                                
                 
                 try:
                     payload = Payload(**loads(m["data"]))
 
-                    if payload.topic == PayloadTopic.CREATE:
+                    if payload.topic == PayloadTopic.CREATE:                        
                         self.place_order(payload.data)
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))

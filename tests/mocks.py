@@ -8,8 +8,6 @@ class MockCelery:
         self.last_call = None
 
     def delay(self, *args, **kwargs):
-        """Mocks Celery's delay, storing the call and executing synchronously."""
-        self.last_call = {"args": args, "kwargs": kwargs}
         self.func(*args, **kwargs)
 
 

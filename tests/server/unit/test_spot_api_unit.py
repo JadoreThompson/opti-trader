@@ -89,6 +89,7 @@ async def test_create_spot_bid_limit_order(http_client_authenticated):
             select(Escrows.balance).where(Escrows.order_id == data["order_id"])
         )
         escrow_balance = escrow_balance.scalar()
+        
         user_balance = await sess.execute(
             select(Users.balance).where(
                 Users.user_id

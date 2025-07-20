@@ -12,8 +12,13 @@ from tests.utils import get_db_sess_async
 def engine():
     engine = SpotEngine()
     loop = asyncio.get_event_loop()
-    loop.create_task(engine.run())
-    yield engine
+    task = loop.create_task(engine.run())
+    
+    try:
+        yield engine
+    finally:
+        task.cancel()
+    
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -39,6 +44,35 @@ async def test_spot_bid_market_order_integration(
         events = res.scalars().all()
 
     assert len(events) == 1
+    order = events[0]
+    assert order.event_type == EventType.ORDER_PLACED
+    assert str(order.order_id) == data["order_id"]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_spot_bid_limit_order_integration(
+    http_client_authenticated, patched_log, engine
+):
+    body = {
+        "order_type": OrderType.LIMIT,
+        "quantity": 10,
+        "instrument": "BTC",
+        "side": Side.BID,
+        "limit_price": 100.0,
+    }
+
+    rsp = await http_client_authenticated.post("/order/spot", json=body)
+    data = rsp.json()
+
+    assert rsp.status_code == 201
+
+    async with get_db_sess_async() as sess:
+        res = await sess.execute(
+            select(OrderEvents).where(OrderEvents.order_id == data["order_id"])
+        )
+        events = res.scalars().all()
+
+    assert len(events) == 1, [e.event_type for e in events]
     order = events[0]
     assert order.event_type == EventType.ORDER_PLACED
     assert str(order.order_id) == data["order_id"]

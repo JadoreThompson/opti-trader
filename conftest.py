@@ -80,7 +80,7 @@ def db() -> Generator[None, None, None]:
         Base.metadata.create_all(bind=TEST_DB_ENGINE)
         yield
     finally:
-        Base.metadata.drop_all(bind=TEST_DB_ENGINE)
+        # Base.metadata.drop_all(bind=TEST_DB_ENGINE)
         ...
 
 
