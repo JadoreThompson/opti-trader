@@ -1,4 +1,5 @@
 import pytest
+from uuid import uuid4
 
 from sqlalchemy import insert, select, update
 from config import REDIS_CLIENT
@@ -141,6 +142,7 @@ async def test_create_spot_ask_limit_order(http_client_authenticated):
     user_id = rsp.json()["user_id"]
 
     async with get_db_sess_async() as sess:
+        # Simulating previous fill
         res = await sess.execute(
             insert(Orders)
             .values(
@@ -246,11 +248,10 @@ async def test_modify_spot_market_oco_bid(http_client_authenticated):
     body = {"take_profit": 50.0}
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
     assert rsp.status_code == 201
-    
+
     body = {"stop_loss": 50.0}
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
     assert rsp.status_code == 201
-    
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -276,3 +277,112 @@ async def test_modify_spot_market_bid_returns_400(http_client_authenticated):
     body = {"take_profit": 50.0}
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
     assert rsp.status_code == 400
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_cancel_order_success(http_client_authenticated):
+    # Create an order to cancel
+    await REDIS_CLIENT.set("BTC", 100.0)
+    create_body = {
+        "order_type": OrderType.LIMIT,
+        "quantity": 10,
+        "instrument": "BTC",
+        "side": Side.BID,
+        "limit_price": 100.0,
+    }
+    rsp_create = await http_client_authenticated.post("/order/spot", json=create_body)
+    assert rsp_create.status_code == 201
+    order_id = rsp_create.json()["order_id"]
+
+    # Simulate that the order has been filled to have open_quantity
+    async with get_db_sess_async() as sess:
+        await sess.execute(
+            update(Orders).where(Orders.order_id == order_id).values(open_quantity=10)
+        )
+        await sess.commit()
+
+    cancel_body = {"quantity": 5}
+    rsp_cancel = await http_client_authenticated.patch(
+        f"/order/cancel/{order_id}", json=cancel_body
+    )
+    assert rsp_cancel.status_code == 201
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_cancel_order_not_found(http_client_authenticated):
+    non_existent_order_id = str(uuid4())
+    cancel_body = {"quantity": 1}
+    rsp = await http_client_authenticated.patch(
+        f"/order/cancel/{non_existent_order_id}", json=cancel_body
+    )
+
+    assert rsp.status_code == 400
+    assert rsp.json() == {"error": "Order doesn't exist."}
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_cancel_order_unauthorized(http_client_authenticated):
+    other_user_id = str(uuid4())
+    async with get_db_sess_async() as sess:
+        # Create a new user for the order
+        await sess.execute(
+            insert(Users).values(
+                user_id=other_user_id,
+                username="other_user_for_cancel_test",
+                password="password",
+            )
+        )
+
+        res = await sess.execute(
+            insert(Orders)
+            .values(
+                user_id=other_user_id,
+                order_type=OrderType.LIMIT,
+                market_type=MarketType.SPOT,
+                instrument="BTC",
+                side=Side.BID,
+                standing_quantity=10,
+                open_quantity=10,
+                quantity=10,
+            )
+            .returning(Orders.order_id)
+        )
+        other_users_order_id = res.scalar()
+        await sess.commit()
+
+    cancel_body = {"quantity": 5}
+    rsp = await http_client_authenticated.patch(
+        f"/order/cancel/{other_users_order_id}", json=cancel_body
+    )
+
+    assert rsp.status_code == 400
+    assert rsp.json() == {"error": "Order doesn't exist."}
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_cancel_order_insufficient_quantity(http_client_authenticated):
+    await REDIS_CLIENT.set("BTC", 100.0)
+    create_body = {
+        "order_type": OrderType.LIMIT,
+        "quantity": 10,
+        "instrument": "BTC",
+        "side": Side.BID,
+        "limit_price": 100.0,
+    }
+    rsp_create = await http_client_authenticated.post("/order/spot", json=create_body)
+    assert rsp_create.status_code == 201
+    order_id = rsp_create.json()["order_id"]
+
+    async with get_db_sess_async() as sess:
+        await sess.execute(
+            update(Orders).where(Orders.order_id == order_id).values(standing_quantity=5)
+        )
+        await sess.commit()
+
+    cancel_body = {"quantity": 10}
+    rsp_cancel = await http_client_authenticated.patch(
+        f"/order/cancel/{order_id}", json=cancel_body
+    )
+
+    assert rsp_cancel.status_code == 400
+    assert rsp_cancel.json() == {"error": "Insufficient open quantity."}

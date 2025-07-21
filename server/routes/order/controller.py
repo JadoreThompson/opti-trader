@@ -6,11 +6,13 @@ from typing import Union
 from db_models import Escrows, OrderEvents, Orders, Users
 from engine.typing import EventType
 from enums import MarketType, OrderType
-from .models import SpotLimitOrder, SpotMarketOrder
+from .models import SpotLimitOCOOrder, SpotLimitOrder, SpotMarketOCOOrder, SpotMarketOrder
 
 
 async def handle_place_spot_bid_order(
-    order: Union[SpotMarketOrder, SpotLimitOrder],
+    order: Union[
+        SpotLimitOCOOrder, SpotLimitOrder, SpotMarketOCOOrder, SpotMarketOrder
+    ],
     user_id: str,
     current_price: float,
     db_sess: AsyncSession,
@@ -35,7 +37,7 @@ async def handle_place_spot_bid_order(
 
     order_value = (
         order.quantity * current_price
-        if order.order_type == OrderType.MARKET
+        if order.order_type in (OrderType.MARKET, OrderType.MARKET_OCO)
         else order.quantity * order.limit_price
     )
 

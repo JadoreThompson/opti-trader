@@ -84,7 +84,7 @@ def test_full_position_close():
     limit_bid = create_order_simple(
         "buy1",
         Side.BID,
-        OrderType.LIMIT,
+        OrderType.LIMIT_OCO,
         quantity=10,
         limit_price=100.0,
         sl_price=50.0,
@@ -241,7 +241,7 @@ def test_modify_order_oco_order(engine: SpotEngine):
     limit_bid = create_order_simple(
         "buy1",
         Side.BID,
-        OrderType.LIMIT,
+        OrderType.LIMIT_OCO,
         quantity=10,
         limit_price=100.0,
         tp_price=150.0,
@@ -274,7 +274,7 @@ def test_modify_order_filled_order(engine: SpotEngine):
     limit_bid = create_order_simple(
         "buy1",
         Side.BID,
-        OrderType.LIMIT,
+        OrderType.LIMIT_OCO,
         quantity=10,
         limit_price=100.0,
         tp_price=150.0,
@@ -316,7 +316,7 @@ def test_modify_order_partially_filled_order(engine: SpotEngine):
     limit_bid = create_order_simple(
         "buy1",
         Side.BID,
-        OrderType.LIMIT,
+        OrderType.LIMIT_OCO,
         quantity=10,
         limit_price=100.0,
         tp_price=150.0,

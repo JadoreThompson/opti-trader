@@ -1,6 +1,7 @@
 import asyncio
 from json import loads
 from pprint import pprint
+from typing import Literal
 from pydantic import ValidationError
 from config import REDIS_CLIENT, SPOT_QUEUE_KEY
 from enums import OrderType, Side
@@ -44,19 +45,20 @@ class SpotEngine(BaseEngine[SpotOrder]):
             await ps.subscribe(SPOT_QUEUE_KEY)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
-                    continue                                
-                
+                    continue
+
                 try:
                     payload = Payload(**loads(m["data"]))
 
-                    if payload.topic == PayloadTopic.CREATE:                        
+                    if payload.topic == PayloadTopic.CREATE:
                         self.place_order(payload.data)
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
                     elif payload.topic == PayloadTopic.MODIFY:
                         self.modify_order(ModifyRequest(**payload.data))
 
-                except ValidationError:
+                except ValidationError as e:
+                    print(e)
                     pass
 
     def place_order(self, payload: dict) -> None:
@@ -84,9 +86,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
             payload["order_id"], Tag.ENTRY, payload["side"], payload["quantity"]
         )
 
-        # if payload["stop_loss"] is not None or payload["take_profit"] is not None:
-        #     self._handle_place_oco_order(order, payload, ob)
-        #     return
         if payload["order_type"] in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO):
             self._handle_place_oco_order(order, payload, ob)
             return
@@ -206,86 +205,159 @@ class SpotEngine(BaseEngine[SpotOrder]):
         Modifies the properties of an order. If necessary,
         alters the location of it's TP / SL or entry order.
         """
+
+        def reject_request() -> None:
+            log_event.delay(
+                Event(
+                    event_type=EventType.ORDER_REJECTED,
+                    order_id=payload["order_id"],
+                    user_id=payload["user_id"],
+                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                ).model_dump()
+            )
+
         order = self._order_manager.get(request.order_id)
+        if order is None:
+            return
+
         payload = self._order_payloads[order.id]
+
+        if payload["standing_quantity"] == 0:
+            return reject_request()
+
         ob = self._orderbooks[payload["instrument"]]
 
+        sl_price = payload["stop_loss"]
+        tp_price = payload["take_profit"]
+        limit_price = payload["limit_price"]
+
         if (
-            request.limit_price != MODIFY_DEFAULT
-            and payload["limit_price"] != request.limit_price
-            and payload["standing_quantity"] != 0
-            and payload["order_type"] == OrderType.LIMIT
+            payload["order_type"] in (OrderType.LIMIT, OrderType.LIMIT_OCO)
+            and request.limit_price != MODIFY_DEFAULT
         ):
+            limit_price = request.limit_price
+        if payload["order_type"] in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO):
+            if request.stop_loss != MODIFY_DEFAULT:
+                sl_price = request.stop_loss
+            if request.take_profit != MODIFY_DEFAULT:
+                tp_price = request.take_profit
+
+        ob_price = ob.price
+
+        if limit_price is None:
+            return reject_request()
+
+        if ob_price is not None and (
+            (payload["side"] == Side.BID and limit_price >= ob_price)
+            or (payload["side"] == Side.ASK and limit_price <= ob_price)
+        ):
+            return reject_request()
+
+        if sl_price is not None:
+            if sl_price >= limit_price:
+                return reject_request()
+            if ob_price is not None and sl_price >= ob_price:
+                return reject_request()
+
+        if tp_price is not None:
+            if tp_price <= limit_price:
+                return reject_request()
+            if ob_price is not None and tp_price <= ob_price:
+                return reject_request()
+
+        if sl_price is not None and tp_price is not None:
+            if sl_price >= tp_price:
+                return reject_request()
+
+        oco_order = self._oco_manager.get(order.oco_id)
+
+        if payload["order_type"] in (OrderType.LIMIT, OrderType.LIMIT_OCO):
+            self._order_manager.remove(payload["order_id"])
+
             ob.remove(order, order.price)
-            if request.limit_price is not None:
-                payload["limit_price"] = request.limit_price
-                order.price = request.limit_price
-                ob.append(order, order.price)
+            order = SpotOrder(
+                order.id,
+                Tag.ENTRY,
+                Side.BID,
+                payload["quantity"],
+                limit_price,
+                oco_id=order.oco_id,
+            )
+            self._order_manager.append(order)
+            ob.append(order, order.price)
 
-        if order.oco_id is not None:
-            oco_order = self._oco_manager.get(order.oco_id)
-            if (
-                request.take_profit is not MODIFY_DEFAULT
-                and request.take_profit != payload["take_profit"]
-            ):
-                payload["take_profit"] = request.take_profit
-                tp_order = oco_order.leg_c
+            if oco_order is not None:
+                oco_order.leg_a = order
 
-                if tp_order is not None:
-                    ob.remove(tp_order, tp_order.price)
-                if request.take_profit is None:
-                    oco_order.leg_c = None
-                else:
-                    if tp_order is None:
-                        tp_order = SpotOrder(
-                            order.id,
-                            Tag.TAKE_PROFIT,
-                            Side.ASK,
-                            payload["open_quantity"],
-                            oco_id=order.oco_id,
-                        )
-                        oco_order.leg_c = tp_order
-                    tp_order.price = request.take_profit
-                    ob.append(tp_order, tp_order.price)
+        if oco_order is not None:
+            if oco_order.leg_b is not None:
+                ob.remove(oco_order.leg_b, oco_order.leg_b.price)
+            if sl_price is not None:
+                oco_order.leg_b = SpotOrder(
+                    order.id,
+                    Tag.STOP_LOSS,
+                    Side.ASK,
+                    payload["open_quantity"],
+                    sl_price,
+                    oco_id=order.oco_id,
+                )
+                ob.append(oco_order.leg_b, oco_order.leg_b.price)
 
-            if (
-                request.stop_loss is not MODIFY_DEFAULT
-                and request.stop_loss != payload["stop_loss"]
-            ):
-                payload["stop_loss"] = request.stop_loss
-                sl_order = oco_order.leg_b
+            if oco_order.leg_c is not None:
+                ob.remove(oco_order.leg_c, oco_order.leg_c.price)
+            if tp_price is not None:
+                oco_order.leg_c = SpotOrder(
+                    order.id,
+                    Tag.TAKE_PROFIT,
+                    Side.ASK,
+                    payload["open_quantity"],
+                    tp_price,
+                    oco_id=order.oco_id,
+                )
+                ob.append(oco_order.leg_c, oco_order.leg_c.price)
 
-                if sl_order is not None:
-                    ob.remove(sl_order, sl_order.price)
-                if request.stop_loss is None:
-                    oco_order.leg_b = None
-                else:
-                    if sl_order is None:
-                        sl_order = SpotOrder(
-                            order.id,
-                            Tag.STOP_LOSS,
-                            Side.ASK,
-                            payload["open_quantity"],
-                            oco_id=order.oco_id,
-                        )
-                        oco_order.leg_b = sl_order
-
-                    sl_order.price = request.stop_loss
-                    ob.append(sl_order, sl_order.price)
+        payload["stop_loss"] = sl_price
+        payload["take_profit"] = tp_price
+        payload["limit_price"] = limit_price
 
         log_event.delay(
             Event(
                 event_type=EventType.ORDER_MODIFIED,
                 user_id=payload["user_id"],
+                order_id=payload["order_id"],
                 asset_balance=self._balance_manager.get_balance(payload["user_id"]),
-                **request.model_dump(exclude_unset=True),
+                limit_price=payload["limit_price"],
+                stop_loss=payload["stop_loss"],
+                take_profit=payload["take_profit"],
             ).model_dump()
         )
+
+    def _update_or_remove_leg(
+        self, price: float | None, order: SpotOrder, ob: OrderBook[SpotOrder]
+    ) -> None:
+        ob.remove(order, order.price)
+
+        if price is not None:
+            order.price = price
+            ob.append(order, order.price)
 
     def _handle_place_oco_order(
         self, order: SpotOrder, payload: dict, ob: OrderBook[SpotOrder]
     ) -> None:
         """Place an order with OCO (One-Cancels-Other) handling."""
+
+        def place_order_event():
+            log_event.delay(
+                Event(
+                    event_type=EventType.ORDER_PLACED,
+                    user_id=payload["user_id"],
+                    order_id=order.id,
+                    quantity=order.quantity - order.filled_quantity,
+                    price=order.price,
+                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                ).model_dump()
+            )
+
         oco_order: OCOOrder = self._oco_manager.create()
         payload["oco_id"] = oco_order.id
         order.set_oco_id(oco_order.id)
@@ -302,19 +374,10 @@ class SpotEngine(BaseEngine[SpotOrder]):
             and payload["limit_price"] <= ob.best_bid
         )
 
-        if payload["order_type"] == OrderType.LIMIT and not is_crossable:
+        if payload["order_type"] == OrderType.LIMIT_OCO and not is_crossable:
             order.price = payload["limit_price"]
             ob.append(order, order.price)
-            log_event.delay(
-                Event(
-                    event_type=EventType.ORDER_PLACED,
-                    user_id=payload["user_id"],
-                    order_id=order.id,
-                    quantity=order.quantity,
-                    price=order.price,
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
-                ).model_dump()
-            )
+            place_order_event()
             return
 
         result: MatchResult = self._match(order, ob)
@@ -348,16 +411,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         order.price = price
         ob.append(order, price)
 
-        log_event.delay(
-            Event(
-                event_type=EventType.ORDER_PLACED,
-                user_id=payload["user_id"],
-                order_id=order.id,
-                quantity=order.quantity - order.filled_quantity,
-                price=order.price,
-                asset_balance=self._balance_manager.get_balance(payload["user_id"]),
-            ).model_dump()
-        )
+        place_order_event()
 
     def _process_trade_fill(
         self, order: SpotOrder, filled_quantity: int, payload: dict
@@ -396,18 +450,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
         payload = self._order_payloads[order.id]
         self._process_trade_fill(order, filled_quantity, payload)
 
-        log_event.delay(
-            Event(
-                event_type=EventType.ORDER_FILLED,
-                user_id=payload["user_id"],
-                order_id=order.id,
-                quantity=filled_quantity,
-                price=price,
-                asset_balance=self._balance_manager.get_balance(payload["user_id"]),
-                metadata={"tag": order.tag},
-            ).model_dump()
-        )
-
         if order.tag == Tag.ENTRY:
             ob.remove(order, order.price)
             if order.oco_id is not None:
@@ -427,6 +469,18 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 self._balance_manager.remove(order.id)
                 self._order_manager.remove(order.id)
 
+        log_event.delay(
+            Event(
+                event_type=EventType.ORDER_FILLED,
+                user_id=payload["user_id"],
+                order_id=order.id,
+                quantity=filled_quantity,
+                price=price,
+                asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                metadata={"tag": order.tag},
+            ).model_dump()
+        )
+
     def _handle_touched_order(
         self,
         order: SpotOrder,
@@ -437,6 +491,13 @@ class SpotEngine(BaseEngine[SpotOrder]):
         """Handle a resting order that was partially filled (touched)."""
         payload = self._order_payloads[order.id]
         self._process_trade_fill(order, touched_quantity, payload)
+
+        if order.oco_id is not None:
+            oco_order = self._oco_manager.get(order.oco_id)
+            if oco_order.leg_b is None and oco_order.leg_c is None:
+                self._place_tp_sl(oco_order, ob)
+            else:
+                self._mutate_tp_sl(oco_order, payload["open_quantity"])
 
         log_event.delay(
             Event(
@@ -449,13 +510,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 metadata={"tag": order.tag.value},
             ).model_dump()
         )
-
-        if order.oco_id is not None:
-            oco_order = self._oco_manager.get(order.oco_id)
-            if oco_order.leg_b is None and oco_order.leg_c is None:
-                self._place_tp_sl(oco_order, ob)
-            else:
-                self._mutate_tp_sl(oco_order, payload["open_quantity"])
 
     def _place_tp_sl(self, oco_order: OCOOrder, ob: OrderBook[SpotOrder]) -> None:
         """
