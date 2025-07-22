@@ -2,15 +2,16 @@
 .vscode
 
 .venv
+__pycache__
 pyproject.toml
 uv.lock
-__pycache__
-*.pyc
 .pytest_cache
+.benchmarks
 
 .env
 client_secret.json
 alembic.ini
 dockerfile
+app.log
 
 rec.py

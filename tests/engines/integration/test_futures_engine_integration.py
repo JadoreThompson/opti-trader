@@ -2,13 +2,8 @@ import copy
 import json
 import random
 import pytest
-from pprint import pprint
 from engine.typing import CloseRequest, CloseRequestQuantity, ModifyRequest
 from enums import OrderStatus, OrderType, Side
-from tests.utils import (
-    # Fixture Imports
-    populated_engine,
-)
 
 
 TEST_SIZES = [int(2**i) for i in range(2, 9)] + [512, 1000]

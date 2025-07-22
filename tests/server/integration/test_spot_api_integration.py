@@ -1,6 +1,6 @@
 import asyncio
-from uuid import uuid4
 import pytest
+
 from sqlalchemy import func, insert, select, update
 from config import REDIS_CLIENT
 from db_models import OrderEvents, Orders, Users, get_default_balance
@@ -26,6 +26,11 @@ def engine():
 async def test_spot_bid_market_order_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: A user places a spot market bid order. The system should
+        successfully accept the order and log the 'BID_SUBMITTED' and
+        'ORDER_PLACED' events in the database.
+    """
     body = {
         "order_type": OrderType.MARKET,
         "quantity": 10,
@@ -54,6 +59,11 @@ async def test_spot_bid_market_order_integration(
 async def test_spot_bid_limit_order_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: A user places a spot limit bid order. The system should
+        successfully accept the order and log the 'BID_SUBMITTED' and
+        'ORDER_PLACED' events.
+    """
     body = {
         "order_type": OrderType.LIMIT,
         "quantity": 10,
@@ -83,6 +93,11 @@ async def test_spot_bid_limit_order_integration(
 async def test_spot_ask_limit_order_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: After simulating a previous fill to establish an asset
+        balance, a user places a spot limit ask order. The system should
+        successfully accept the new order and log an 'ORDER_PLACED' event.
+    """
     body = {
         "order_type": OrderType.LIMIT,
         "quantity": 10,
@@ -145,6 +160,12 @@ async def test_spot_ask_limit_order_integration(
 async def test_modify_spot_limit_order_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: A user places a spot limit bid order and then successfully
+        modifies its limit price. The system should log an
+        'ORDER_MODIFIED' event and update the order's price in the
+        database.
+    """
     initial_limit_price = 100.0
     body = {
         "order_type": OrderType.LIMIT,
@@ -158,15 +179,11 @@ async def test_modify_spot_limit_order_integration(
     assert rsp.status_code == 201
     order_id = rsp.json()["order_id"]
 
-    # await asyncio.sleep(0.1)
-
     new_limit_price = 80.0
     body = {"limit_price": new_limit_price}
 
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
     assert rsp.status_code == 201
-
-    # await asyncio.sleep(3)
 
     async with get_db_sess_async() as sess:
         res = await sess.execute(
@@ -191,6 +208,12 @@ async def test_modify_spot_limit_order_integration(
 async def test_modify_spot_ask_limit_order_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: After acquiring an asset from a previous fill, a user
+        places a spot limit ask order and then successfully modifies its
+        limit price. The system should log the modification event and
+        update the order record.
+    """
     instrument = "BTC"
     rsp = await http_client_authenticated.get("/auth/me-id")
     user_id = rsp.json()["user_id"]
@@ -238,16 +261,12 @@ async def test_modify_spot_ask_limit_order_integration(
     assert create_rsp.status_code == 201
     order_id = create_rsp.json()["order_id"]
 
-    # await asyncio.sleep(0.1)
-
     new_limit_price = 210.0
     modify_body = {"limit_price": new_limit_price}
     modify_rsp = await http_client_authenticated.patch(
         f"/order/modify/{order_id}", json=modify_body
     )
     assert modify_rsp.status_code == 201
-
-    # await asyncio.sleep(0.1)
 
     async with get_db_sess_async() as sess:
         modified_event = await sess.scalar(
@@ -269,6 +288,13 @@ async def test_modify_spot_ask_limit_order_integration(
 async def test_modify_spot_bid_order_rejected_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: A user places a limit bid and then attempts to modify its
+        price to one that violates a market rule (e.g., price is too
+        high). The modification should be rejected by the engine, an
+        'ORDER_REJECTED' event should be logged, and the original order
+        should remain unchanged.
+    """
     instrument = "**"
     market_price = 100.0
     await REDIS_CLIENT.set(instrument, market_price)
@@ -292,8 +318,6 @@ async def test_modify_spot_bid_order_rejected_integration(
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
     assert rsp.status_code == 201
 
-    # await asyncio.sleep(0.1)
-
     async with get_db_sess_async() as sess:
         rejected_event = await sess.scalar(
             select(OrderEvents).where(
@@ -315,6 +339,12 @@ async def test_modify_spot_bid_order_rejected_integration(
 async def test_modify_spot_ask_order_rejected_integration(
     http_client_authenticated, patched_log, engine
 ):
+    """
+    Scenario: A user places a limit ask and then attempts to modify its
+        price to one that violates a market rule (e.g., price is too
+        low). The modification should be rejected, an 'ORDER_REJECTED'
+        event logged, and the original order remains unchanged.
+    """
     instrument = "BTC"
     market_price = 100.0
     await REDIS_CLIENT.set(instrument, market_price)
@@ -387,7 +417,17 @@ async def test_modify_spot_ask_order_rejected_integration(
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_cancel_order_integration(http_client_authenticated, patched_log, engine):
+async def test_cancel_order_integration(
+    http_client_authenticated, patched_log, engine, payload_pusher, payload_queue
+):
+    """
+    Scenario: A user places a limit order and then sends a request to
+        cancel the entire order. The system should log the
+        'ORDER_CANCELLED' event and update the order's status and
+        standing quantity accordingly.
+    """
+    engine._payload_queue = payload_queue
+
     body = {
         "order_type": OrderType.LIMIT,
         "quantity": 10,
@@ -399,18 +439,13 @@ async def test_cancel_order_integration(http_client_authenticated, patched_log, 
     assert rsp_create.status_code == 201
     order_id = rsp_create.json()["order_id"]
 
-    # async with get_db_sess_async() as sess:
-    #     # Simulating partial fill
-    #     await sess.execute(
-    #         update(Orders).where(Orders.order_id == order_id).values(standing_quantity=5)
-    #     )
-    #     await sess.commit()
-
     cancel_body = {"quantity": 10}
-    rsp_cancel = await http_client_authenticated.delete(
-        f"/order/cancel/{order_id}", json=cancel_body
+    rsp_cancel = await http_client_authenticated.request(
+        "DELETE", url=f"/order/cancel/{order_id}", json=cancel_body
     )
-    assert rsp_cancel.status_code == 200, rsp_cancel.json()
+    await asyncio.sleep(1)  # Allowing PayloadPusher to commit
+
+    assert rsp_cancel.status_code == 201, rsp_cancel.json()
 
     async with get_db_sess_async() as sess:
         cancelled_event = await sess.scalar(
@@ -431,8 +466,15 @@ async def test_cancel_order_integration(http_client_authenticated, patched_log, 
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_partial_cancel_order_integration(
-    http_client_authenticated, patched_log, engine
+    http_client_authenticated, patched_log, engine, payload_pusher, payload_queue
 ):
+    """
+    Scenario: A user places a limit order and then sends a request to
+        partially cancel it. The system should log the 'ORDER_CANCELLED'
+        event for the cancelled portion and update the order's standing
+        quantity, while the order remains pending.
+    """
+    engine._payload_queue = payload_queue
     order_quantity = 10
     cancel_quantity = 4
 
@@ -457,10 +499,13 @@ async def test_partial_cancel_order_integration(
         await sess.commit()
 
     cancel_body = {"quantity": cancel_quantity}
-    rsp_cancel = await http_client_authenticated.delete(
-        f"/order/cancel/{order_id}", json=cancel_body
+    rsp_cancel = await http_client_authenticated.request(
+        "DELETE", url=f"/order/cancel/{order_id}", json=cancel_body
     )
-    assert rsp_cancel.status_code == 200
+
+    await asyncio.sleep(1)
+
+    assert rsp_cancel.status_code == 201
 
     async with get_db_sess_async() as sess:
         cancelled_event = await sess.scalar(
@@ -482,8 +527,15 @@ async def test_partial_cancel_order_integration(
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_cancel_filled_order_is_ignored_integration(
-    http_client_authenticated, patched_log, engine
+    http_client_authenticated, patched_log, engine, payload_pusher, payload_queue
 ):
+    """
+    Scenario: A user places an order that gets fully filled. A subsequent
+        attempt to cancel this filled order should be rejected, and the
+        order's status should remain 'FILLED' with no cancellation event
+        logged.
+    """
+    engine._payload_queue = payload_queue
     instrument = "DOGE"
     price = 0.1
     quantity = 100
@@ -502,6 +554,7 @@ async def test_cancel_filled_order_is_ignored_integration(
     assert rsp_bid.status_code == 201
     bid_order_id = rsp_bid.json()["order_id"]
 
+    # Pre-requisites for ask order.
     async with get_db_sess_async() as sess:
         res = await sess.execute(
             insert(Users)
@@ -510,7 +563,8 @@ async def test_cancel_filled_order_is_ignored_integration(
         )
         user_id = res.scalar()
         res = await sess.execute(
-            insert(Orders).values(
+            insert(Orders)
+            .values(
                 **{
                     "instrument": instrument,
                     "user_id": user_id,
@@ -529,13 +583,15 @@ async def test_cancel_filled_order_is_ignored_integration(
         ask_order = res.scalar()
         await sess.commit()
 
-    ask_user_id = str(uuid4())
-    engine._balance_manager.append(ask_user_id)
-    engine._balance_manager._users[ask_user_id] = quantity
-
     ask_order.user_id = str(ask_order.user_id)
     ask_order.order_id = str(ask_order.order_id)
+
+    engine._balance_manager.append(ask_order.user_id)
+    engine._balance_manager._users[ask_order.user_id] = quantity
+
     engine.place_order(ask_order.dump())
+
+    await asyncio.sleep(1)  # Giving PayloadPusher some time
 
     async with get_db_sess_async() as sess:
         filled_order = await sess.scalar(
@@ -545,11 +601,11 @@ async def test_cancel_filled_order_is_ignored_integration(
     assert filled_order is not None
     assert filled_order.status == OrderStatus.FILLED
 
-    rsp_cancel = await http_client_authenticated.delete(
-        f"/order/cancel/{bid_order_id}", json={"quantity": quantity}
+    rsp_cancel = await http_client_authenticated.request(
+        "DELETE", url=f"/order/cancel/{bid_order_id}", json={"quantity": quantity}
     )
-    assert rsp_cancel.status_code == 200
-    await asyncio.sleep(0.1)
+    assert rsp_cancel.status_code == 400
+    await asyncio.sleep(1)  # Giving PayloadPusher some time
 
     async with get_db_sess_async() as sess:
         cancel_event_count = await sess.scalar(

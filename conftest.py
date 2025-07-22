@@ -1,9 +1,9 @@
+import asyncio
 import pytest
 import pytest_asyncio
 
 from typing import Generator
 from uuid import uuid4
-
 from config import TEST_DB_ENGINE
 from db_models import Base
 from engine import SpotEngine
@@ -12,66 +12,9 @@ from engine.orderbook import OrderBook
 from engine.orders import SpotOrder
 from engine.tasks import log_event
 from enums import OrderStatus, Side
-from tests.mocks import MockCelery
-from tests.utils import get_db_sess, smaker_async
-
-
-@pytest.fixture()
-def populated_spot_engine(request):
-    order_id_factory = request.param or (lambda i: f"liquidity_{i}")
-    engine = SpotEngine()
-    instr = "test-ticker"
-    ob = engine._orderbooks.setdefault(instr, OrderBook())
-    oco_manager = engine._oco_manager
-    balance_manager = engine._balance_manager
-
-    min_price = 1.0
-    max_price = ob._starting_price * 2
-    total_quantity = 100_000
-    q = int((total_quantity * 0.1) // (max_price - min_price))
-    liq_ocos = []
-
-    for i in range(1, int(max_price - min_price) + 1):
-        payload = {
-            "order_id": order_id_factory(i),
-            "user_id": str(uuid4()),
-            "instrument": instr,
-            "status": OrderStatus.PENDING,
-            "side": Side.BID,
-            "quantity": q,
-            "standing_quantity": 0,
-            "open_quantity": q,
-            "filled_price": ob._starting_price,
-            "take_profit": max_price - i,
-            "stop_loss": max(1, i - 1),
-        }
-        oco_order = oco_manager.create()
-        balance_manager.append(payload)
-        liq_ocos.append(oco_order)
-
-        new_order = SpotOrder(
-            payload["order_id"],
-            Tag.STOP_LOSS,
-            Side.ASK,
-            payload["open_quantity"],
-            payload["stop_loss"],
-            oco_id=oco_order.id,
-        )
-        ob.append(new_order, new_order.price)
-        oco_order.leg_b = new_order
-
-        new_order = SpotOrder(
-            payload["order_id"],
-            Tag.TAKE_PROFIT,
-            Side.ASK,
-            payload["open_quantity"],
-            payload["take_profit"],
-            oco_id=oco_order.id,
-        )
-        ob.append(new_order, new_order.price)
-        oco_order.leg_c = new_order
-
-    return engine, instr, liq_ocos
+from services import PayloadPusher
+from tests.mocks import MockCelery, MockQueue
+from tests.utils import get_db_sess, smaker_async, get_db_sess_async
 
 
 @pytest.fixture
@@ -102,3 +45,23 @@ def patched_log(monkeypatch):
     monkeypatch.setattr("engine.matching_engines.spot_engine.log_event", mock_log_event)
     monkeypatch.setattr("engine.tasks.get_db_session_sync", get_db_sess)
     yield mock_log_event
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def payload_queue():
+    queue = MockQueue()
+    yield queue
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def payload_pusher(monkeypatch, db):
+    monkeypatch.setattr(
+        "services.payload_pusher.payload_pusher.get_db_session", get_db_sess_async
+    )
+    pp = PayloadPusher()
+    task = asyncio.create_task(pp.start())
+
+    try:
+        yield pp
+    finally:
+        task.cancel()

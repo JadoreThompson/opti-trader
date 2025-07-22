@@ -1,5 +1,4 @@
 import jwt
-from pprint import pprint
 
 from datetime import datetime
 from fastapi import Response

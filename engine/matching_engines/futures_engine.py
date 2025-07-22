@@ -7,9 +7,8 @@ from ..orders import Order
 from ..position import Position
 from ..position_manager import PositionManager
 from ..typing import (
-    MODIFY_DEFAULT,
+    MODIFY_SENTINEL,
     CloseRequest,
-    CloseRequestQuantity,
     MatchResult,
     ModifyRequest,
 )
@@ -155,7 +154,7 @@ class FuturesEngine(BaseEngine[Order]):
         ob = self._orderbooks[pos.instrument]
         payload = pos.payload
 
-        if request.limit_price != MODIFY_DEFAULT:
+        if request.limit_price != MODIFY_SENTINEL:
             if pos.status == OrderStatus.PENDING:
                 payload["limit_price"] = request.limit_price
                 order = pos.entry_order
@@ -172,7 +171,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         opposite_side = Side.BID if payload["side"] == Side.ASK else Side.BID
 
-        if request.take_profit != MODIFY_DEFAULT:
+        if request.take_profit != MODIFY_SENTINEL:
             payload["take_profit"] = request.take_profit
 
             if pos.status != OrderStatus.PENDING:
@@ -193,7 +192,7 @@ class FuturesEngine(BaseEngine[Order]):
                 else:
                     pos.take_profit_order = None
 
-        if request.stop_loss != MODIFY_DEFAULT:
+        if request.stop_loss != MODIFY_SENTINEL:
             payload["stop_loss"] = request.stop_loss
 
             if pos.status != OrderStatus.PENDING:

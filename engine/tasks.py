@@ -1,16 +1,11 @@
-import json
-
-from datetime import datetime
-from pprint import pprint
 from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
-from uuid import UUID
 
 from config import CELERY
 from db_models import Escrows, OrderEvents, Orders, Users
 from enums import Side
 from utils.db import get_db_session_sync
-from .typing import MODIFY_DEFAULT, EventDict, Event, EventType
+from .typing import MODIFY_SENTINEL, EventDict, Event, EventType
 from .enums import Tag
 
 
@@ -134,11 +129,11 @@ def handle_order_modified_event(event: Event, db_sess: Session) -> None:
     """
     values_to_update = {}
 
-    if event.limit_price is not MODIFY_DEFAULT:
+    if event.limit_price is not MODIFY_SENTINEL:
         values_to_update["limit_price"] = event.limit_price
-    if event.take_profit is not MODIFY_DEFAULT:
+    if event.take_profit is not MODIFY_SENTINEL:
         values_to_update["take_profit"] = event.take_profit
-    if event.stop_loss is not MODIFY_DEFAULT:
+    if event.stop_loss is not MODIFY_SENTINEL:
         values_to_update["stop_loss"] = event.stop_loss
 
     if values_to_update:

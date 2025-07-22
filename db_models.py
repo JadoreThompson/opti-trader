@@ -10,7 +10,6 @@ from sqlalchemy.orm import (
     relationship,
     validates,
 )
-
 from enums import OrderStatus
 
 
@@ -47,9 +46,9 @@ class Users(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=True)
+    email: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     password: Mapped[str] = mapped_column(String, nullable=False)
-    avatar: Mapped[str] = mapped_column(String, nullable=True)
+    avatar: Mapped[str | None] = mapped_column(String, nullable=True)
     balance: Mapped[float] = mapped_column(
         Float,
         nullable=False,
@@ -79,25 +78,25 @@ class Orders(Base):
     user_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id")
     )
-    closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     instrument: Mapped[str] = mapped_column(String, nullable=False)
     side: Mapped[str] = mapped_column(String, nullable=False)
     market_type: Mapped[str] = mapped_column(String, nullable=False)
     order_type: Mapped[str] = mapped_column(String, nullable=False)
-    price: Mapped[float] = mapped_column(Float, nullable=True)
-    limit_price: Mapped[float] = mapped_column(Float, nullable=True)
-    filled_price: Mapped[float] = mapped_column(Float, nullable=True)
-    closed_price: Mapped[float] = mapped_column(Float, nullable=True)
-    realised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0)
-    unrealised_pnl: Mapped[float] = mapped_column(Float, nullable=True, default=0)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    limit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    filled_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    closed_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realised_pnl: Mapped[float | None] = mapped_column(Float, nullable=True, default=0)
+    unrealised_pnl: Mapped[float | None] = mapped_column(Float, nullable=True, default=0)
     status: Mapped[str] = mapped_column(
         String, nullable=False, default=OrderStatus.PENDING.value
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     open_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=sqlalchemy.sql.text("0"))
-    stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
-    take_profit: Mapped[float] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=get_datetime, nullable=False
     )
@@ -165,11 +164,11 @@ class OrderEvents(Base):
         UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False
     )
     event_type: Mapped[str] = mapped_column(String, nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=True)
-    price: Mapped[float] = mapped_column(Float, nullable=True)
-    stop_loss: Mapped[float] = mapped_column(Float, nullable=True)
-    take_profit: Mapped[float] = mapped_column(Float, nullable=True)
-    limit_price: Mapped[float] = mapped_column(Float, nullable=True)
+    quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    limit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     balance: Mapped[float] = mapped_column(Float, nullable=False)  # Acc balance
     asset_balance: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

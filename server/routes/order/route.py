@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from config import REDIS_CLIENT, SPOT_QUEUE_KEY
 from db_models import Orders
-from engine.typing import MODIFY_DEFAULT, Payload, PayloadTopic
+from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
@@ -116,7 +116,7 @@ async def modify_order(
             )
 
     elif order.market_type == MarketType.SPOT:
-        if body.limit_price != MODIFY_DEFAULT and order.order_type not in (
+        if body.limit_price != MODIFY_SENTINEL and order.order_type not in (
             OrderType.LIMIT,
             OrderType.LIMIT_OCO,
         ):
@@ -128,7 +128,7 @@ async def modify_order(
             )
 
         if (
-            body.take_profit != MODIFY_DEFAULT or body.stop_loss != MODIFY_DEFAULT
+            body.take_profit != MODIFY_SENTINEL or body.stop_loss != MODIFY_SENTINEL
         ) and order.order_type not in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO):
             return JSONResponse(
                 status_code=400,
@@ -136,8 +136,6 @@ async def modify_order(
                     "error": f"Cannot take profit or stop loss price for order type {order.order_type}. Must be an OCO order."
                 },
             )
-
-    print("Order Id", order.order_id)
 
     await REDIS_CLIENT.publish(
         SPOT_QUEUE_KEY,
@@ -153,7 +151,7 @@ async def modify_order(
     )
 
 
-@route.patch("/cancel/{order_id}", status_code=201)
+@route.delete("/cancel/{order_id}", status_code=201)
 async def cancel_order(
     order_id: str,
     body: CancelOrder,

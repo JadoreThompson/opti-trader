@@ -2,13 +2,14 @@ from collections import namedtuple
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Literal, TypedDict, Union, get_type_hints
+from multiprocessing import Queue as MPQueue
+from typing import Literal, Protocol, TypedDict, Union, get_type_hints
 from uuid import UUID
 from pydantic import BaseModel, Field
-
 from db_models import get_datetime
 
-MODIFY_DEFAULT = float("inf")
+
+MODIFY_SENTINEL = float("inf")
 
 MatchResult = namedtuple(
     "MatchResult",
@@ -16,9 +17,6 @@ MatchResult = namedtuple(
 )
 Book = Literal["bids", "asks"]
 CloseRequestQuantity = Union[Literal["ALL"], int]
-BalanceUpdate = namedtuple(
-    "BalanceUpdate", ("open_quantity", "standing_quantity", "total_asset_balance")
-)
 
 
 @dataclass
@@ -35,9 +33,9 @@ class CancelRequest:
 
 class ModifyRequest(BaseModel):
     order_id: str
-    limit_price: float | None = MODIFY_DEFAULT
-    take_profit: float | None = MODIFY_DEFAULT
-    stop_loss: float | None = MODIFY_DEFAULT
+    limit_price: float | None = MODIFY_SENTINEL
+    take_profit: float | None = MODIFY_SENTINEL
+    stop_loss: float | None = MODIFY_SENTINEL
 
 
 class PayloadTopic(Enum):
@@ -54,8 +52,8 @@ class Payload(BaseModel):
 
 
 class EventType(str, Enum):
-    ASK_SUBMITTED = 'ask_submitted'
-    BID_SUBMITTED = 'bid_submitted'
+    ASK_SUBMITTED = "ask_submitted"
+    BID_SUBMITTED = "bid_submitted"
     ORDER_PLACED = "order_placed"
     ORDER_CANCELLED = "order_cancelled"
     ORDER_MODIFIED = "order_modified"
@@ -87,8 +85,39 @@ class Event(BaseModel):
         }
 
 
+class Queue:
+    def __init__(self):
+        self._queue = MPQueue()
+
+    def _dump_dict(self, obj: dict):
+        for k, v in obj.items():
+            if isinstance(v, dict):
+                obj[k] = self._dump_dict(v)
+            elif isinstance(v, (UUID, datetime)):
+                obj[k] = str(v)
+            elif isinstance(v, Enum):
+                obj[k] = v.value
+
+        return obj
+
+    def append(self, obj: object):
+        if isinstance(obj, dict):
+            obj = self._dump_dict(obj)
+        return self._queue.put(obj)
+
+    def get(self, *args, **kwargs):
+        return self._queue.get(*args, **kwargs)
+
+    def size(self):
+        return self._queue.qsize()
+
+
+class SupportsAppend(Protocol):
+    def append(self, *args, **kwargs) -> None: ...
+
+
 def to_typed_dict(typ):
-    hints = get_type_hints(Event)
+    hints = get_type_hints(typ)
     return TypedDict(f"{typ.__name__}Dict", hints)
 
 

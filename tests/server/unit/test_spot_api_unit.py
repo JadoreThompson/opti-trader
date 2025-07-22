@@ -295,8 +295,8 @@ async def test_cancel_order_success(http_client_authenticated):
     order_id = rsp_create.json()["order_id"]
 
     cancel_body = {"quantity": 5}
-    rsp_cancel = await http_client_authenticated.patch(
-        f"/order/cancel/{order_id}", json=cancel_body
+    rsp_cancel = await http_client_authenticated.request(
+        'DELETE', url=f"/order/cancel/{order_id}", json=cancel_body
     )
     assert rsp_cancel.status_code == 201
 
@@ -305,8 +305,8 @@ async def test_cancel_order_success(http_client_authenticated):
 async def test_cancel_order_not_found(http_client_authenticated):
     non_existent_order_id = str(uuid4())
     cancel_body = {"quantity": 1}
-    rsp = await http_client_authenticated.patch(
-        f"/order/cancel/{non_existent_order_id}", json=cancel_body
+    rsp = await http_client_authenticated.request(
+        "DELETE", url=f"/order/cancel/{non_existent_order_id}", json=cancel_body
     )
 
     assert rsp.status_code == 400
@@ -334,8 +334,8 @@ async def test_cancel_order_unauthorized(http_client_authenticated):
                 market_type=MarketType.SPOT,
                 instrument="BTC",
                 side=Side.BID,
-                standing_quantity=10, # Values don't matter, the api should say.
-                open_quantity=10,     # the order doesn't exist.
+                standing_quantity=10,  # Values don't matter, the api should say.
+                open_quantity=10,  # the order doesn't exist.
                 quantity=10,
             )
             .returning(Orders.order_id)
@@ -344,8 +344,8 @@ async def test_cancel_order_unauthorized(http_client_authenticated):
         await sess.commit()
 
     cancel_body = {"quantity": 5}
-    rsp = await http_client_authenticated.patch(
-        f"/order/cancel/{other_users_order_id}", json=cancel_body
+    rsp = await http_client_authenticated.request(
+        "DELETE", url=f"/order/cancel/{other_users_order_id}", json=cancel_body
     )
 
     assert rsp.status_code == 400
@@ -368,13 +368,15 @@ async def test_cancel_order_insufficient_quantity(http_client_authenticated):
 
     async with get_db_sess_async() as sess:
         await sess.execute(
-            update(Orders).where(Orders.order_id == order_id).values(standing_quantity=5)
+            update(Orders)
+            .where(Orders.order_id == order_id)
+            .values(standing_quantity=5)
         )
         await sess.commit()
 
     cancel_body = {"quantity": 10}
-    rsp_cancel = await http_client_authenticated.patch(
-        f"/order/cancel/{order_id}", json=cancel_body
+    rsp_cancel = await http_client_authenticated.request(
+        "DELETE", url=f"/order/cancel/{order_id}", json=cancel_body
     )
 
     assert rsp_cancel.status_code == 400

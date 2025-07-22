@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from engine.typing import MODIFY_DEFAULT
+from engine.typing import MODIFY_SENTINEL
 from enums import OrderType, Side
 
 
@@ -64,9 +64,9 @@ class FuturesLimitOrder(BaseFuturesOrder):
 
 
 class ModifyOrder(BaseModel):
-    limit_price: float | None = MODIFY_DEFAULT
-    take_profit: float | None = MODIFY_DEFAULT
-    stop_loss: float | None = MODIFY_DEFAULT
+    limit_price: float | None = MODIFY_SENTINEL
+    take_profit: float | None = MODIFY_SENTINEL
+    stop_loss: float | None = MODIFY_SENTINEL
 
 
 class CancelOrder(BaseModel):
