@@ -294,13 +294,6 @@ async def test_cancel_order_success(http_client_authenticated):
     assert rsp_create.status_code == 201
     order_id = rsp_create.json()["order_id"]
 
-    # Simulate that the order has been filled to have open_quantity
-    async with get_db_sess_async() as sess:
-        await sess.execute(
-            update(Orders).where(Orders.order_id == order_id).values(open_quantity=10)
-        )
-        await sess.commit()
-
     cancel_body = {"quantity": 5}
     rsp_cancel = await http_client_authenticated.patch(
         f"/order/cancel/{order_id}", json=cancel_body
@@ -341,8 +334,8 @@ async def test_cancel_order_unauthorized(http_client_authenticated):
                 market_type=MarketType.SPOT,
                 instrument="BTC",
                 side=Side.BID,
-                standing_quantity=10,
-                open_quantity=10,
+                standing_quantity=10, # Values don't matter, the api should say.
+                open_quantity=10,     # the order doesn't exist.
                 quantity=10,
             )
             .returning(Orders.order_id)
@@ -385,4 +378,4 @@ async def test_cancel_order_insufficient_quantity(http_client_authenticated):
     )
 
     assert rsp_cancel.status_code == 400
-    assert rsp_cancel.json() == {"error": "Insufficient open quantity."}
+    assert rsp_cancel.json() == {"error": "Insufficient standing quantity."}

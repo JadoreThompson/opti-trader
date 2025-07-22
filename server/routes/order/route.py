@@ -171,7 +171,7 @@ async def cancel_order(
 
     if order.standing_quantity < body.quantity:
         return JSONResponse(
-            status_code=400, content={"error": "Insufficient open quantity."}
+            status_code=400, content={"error": "Insufficient standing quantity."}
         )
 
     await REDIS_CLIENT.publish(
