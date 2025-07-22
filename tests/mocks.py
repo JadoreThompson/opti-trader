@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 from enum import Enum
 from json import dumps
+from pprint import pprint
 from uuid import UUID, uuid4
 from config import PAYLOAD_PUSHER_QUEUE, REDIS_CLIENT
 from engine.orders import OCOOrder
@@ -13,6 +14,7 @@ class MockCelery:
         self.last_call = None
 
     def delay(self, *args, **kwargs):
+        pprint(args)
         self.func(*args, **kwargs)
 
 

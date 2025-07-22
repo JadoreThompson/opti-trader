@@ -1,5 +1,6 @@
 import pytest
 from engine import SpotEngine
+from engine.balance_manager import BalanceManager
 from engine.orderbook import OrderBook
 from engine.typing import CloseRequest, ModifyRequest
 from enums import OrderStatus, OrderType, Side
@@ -38,7 +39,9 @@ def test_market_bid_gets_filled(engine):
     Scenario: A resting limit sell is fully filled by an incoming market buy.
     """
     instrument = "abc"
-    engine._orderbooks.setdefault(instrument, OrderBook())
+    _, balance_manager = engine._orderbooks.setdefault(
+        instrument, (OrderBook(), BalanceManager())
+    )
 
     # Setting up resting order
     ask_limit = create_order_simple(
@@ -50,7 +53,7 @@ def test_market_bid_gets_filled(engine):
         instrument=instrument,
     )
     ask_limit["user_id"] = "jeff"
-    engine._balance_manager._users[ask_limit["user_id"]] = 100
+    balance_manager._users[ask_limit["user_id"]] = 100
     engine.place_order(ask_limit)
 
     market_buy = create_order_simple(
@@ -76,7 +79,11 @@ async def test_market_bid_and_limit_ask_neutralise(engine: SpotEngine):
         quantity=10,
         limit_price=100.0,
     )
-    engine._balance_manager._users[limit_sell["user_id"]] = 10
+    _, balance_manager = engine._orderbooks.setdefault(
+        limit_sell['instrument'], (OrderBook(), BalanceManager())
+    )
+
+    balance_manager._users[limit_sell["user_id"]] = 10
 
     market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=10)
 
@@ -98,8 +105,10 @@ def test_full_position_close():
     """
     mock_oco_manager = MockOCOManager()
     engine = SpotEngine(oco_manager=mock_oco_manager)
-    balance_manager = engine._balance_manager
     instrument = "ticker"
+    ob, balance_manager = engine._orderbooks.setdefault(
+        instrument, (OrderBook(), BalanceManager())
+    )
 
     limit_bid = create_order_simple(
         "buy1",
@@ -124,8 +133,6 @@ def test_full_position_close():
 
     engine.place_order(limit_bid)
     engine.place_order(market_sell)
-
-    ob = engine._orderbooks[instrument]
 
     assert limit_bid["standing_quantity"] == 0
     assert limit_bid["open_quantity"] == 10
@@ -181,7 +188,7 @@ def test_cancel_order(engine: SpotEngine):
     assert limit_bid["standing_quantity"] == 0
     assert limit_bid["open_quantity"] == 0
     assert engine._order_manager.get("buy") is None
-    assert engine._balance_manager.get_balance(limit_bid["user_id"]) is None
+    assert engine._orderbooks[limit_bid['instrument']][1].get_balance(limit_bid["user_id"]) is None
 
 
 def test_cancel_partially_filled_order(engine: SpotEngine):
@@ -198,7 +205,11 @@ def test_cancel_partially_filled_order(engine: SpotEngine):
     )
     market_sell = create_order_simple("sell1", Side.ASK, OrderType.MARKET, quantity=5)
 
-    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    _, balance_manager = engine._orderbooks.setdefault(
+        limit_bid['instrument'], (OrderBook(), BalanceManager())
+    )
+    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+
     engine.place_order(limit_bid)
     engine.place_order(market_sell)
 
@@ -214,7 +225,7 @@ def test_cancel_partially_filled_order(engine: SpotEngine):
     assert limit_bid["open_quantity"] == 5
 
     market_sell = create_order_simple("sell1", Side.ASK, OrderType.MARKET, quantity=1)
-    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
     engine.place_order(market_sell)
 
     assert limit_bid["standing_quantity"] == 1
@@ -225,7 +236,7 @@ def test_cancel_partially_filled_order(engine: SpotEngine):
 
     assert limit_bid["standing_quantity"] == 0
     assert limit_bid["open_quantity"] == 6
-    assert engine._balance_manager.get_balance(limit_bid["user_id"]) is not None
+    assert balance_manager.get_balance(limit_bid["user_id"]) is not None
     assert engine._order_manager.get("buy1") is None
 
 
@@ -313,7 +324,11 @@ def test_modify_order_filled_order(engine: SpotEngine):
         OrderType.MARKET,
         quantity=10,
     )
-    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    _, balance_manager = engine._orderbooks.setdefault(
+        limit_bid['instrument'], (OrderBook(), BalanceManager())
+    )
+
+    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
 
     engine.place_order(limit_bid)
     engine.place_order(market_sell)
@@ -356,7 +371,11 @@ def test_modify_order_partially_filled_order(engine: SpotEngine):
         OrderType.MARKET,
         quantity=5,
     )
-    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    _, balance_manager = engine._orderbooks.setdefault(
+        limit_bid['instrument'], (OrderBook(), BalanceManager())
+    )
+
+    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
 
     engine.place_order(limit_bid)
     engine.place_order(market_sell)

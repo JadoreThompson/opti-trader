@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
+from engine.balance_manager import BalanceManager
+from engine.orderbook import OrderBook
 from enums import MarketType, OrderType, Side
 from engine import SpotEngine
-from engine.tasks import log_event
 from engine.typing import CloseRequest, EventType, ModifyRequest
-from tests.mocks import MockCelery
 from tests.utils import create_order_simple, get_db_sess
 
 
@@ -120,7 +120,10 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     market_sell["user_id"] = user_id
     market_sell.pop("order_id")
     market_sell["order_id"] = persist_order(market_sell)
-    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    _, balance_manager = engine._orderbooks.setdefault(
+        market_sell["instrument"], (OrderBook(), BalanceManager())
+    )
+    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
 
     engine.place_order(limit_buy)
     engine.place_order(market_sell)
@@ -180,7 +183,10 @@ def test_order_partially_filled_event(
     market_sell["user_id"] = user_id
     market_sell.pop("order_id")
     market_sell["order_id"] = persist_order(market_sell)
-    engine._balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    _, balance_manager = engine._orderbooks.setdefault(
+        market_sell["instrument"], (OrderBook(), BalanceManager())
+    )
+    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
 
     engine.place_order(limit_buy)
     engine.place_order(market_sell)

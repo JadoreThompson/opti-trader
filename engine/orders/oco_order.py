@@ -19,17 +19,6 @@ class OCOOrder:
         leg_b: SpotOrder | None = None,
         leg_c: SpotOrder | None = None,
     ) -> None:
-        # count = 0
-
-        # if leg_a is not None:
-        #     count += 1
-        # if leg_b is not None:
-        #     count += 1
-        # if leg_c is not None:
-        #     count += 1
-        # if count < 2:
-        #     raise ValueError("Must provide at least 2 legs for OCO order.")
-
         self._id = id_
         self.leg_a = leg_a
         self.leg_b = leg_b

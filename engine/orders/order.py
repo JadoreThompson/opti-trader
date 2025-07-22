@@ -19,7 +19,6 @@ class Order:
         self._tag = tag
         self._side = side
         self.quantity = quantity
-        # self._price = price
         self.price = price
         self.filled_quantity = 0
 
@@ -34,20 +33,6 @@ class Order:
     @property
     def side(self) -> Side:
         return self._side
-
-    # @property
-    # def price(self) -> float | None:
-    #     return self._price
-
-    # def set_price(self, price: float) -> None:
-    #     """
-    #     Sets the price property to `price` if it isn't already set.
-
-    #     Args:
-    #         price (float): _description_
-    #     """
-    #     if self._price is None:
-    #         self._price = price
 
     def __eq__(self, value: object) -> bool:
         if issubclass(type(value), Order):

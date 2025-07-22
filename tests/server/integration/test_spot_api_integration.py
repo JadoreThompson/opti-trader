@@ -5,6 +5,8 @@ from sqlalchemy import func, insert, select, update
 from config import REDIS_CLIENT
 from db_models import OrderEvents, Orders, Users, get_default_balance
 from engine import SpotEngine
+from engine.balance_manager import BalanceManager
+from engine.orderbook.orderbook import OrderBook
 from engine.typing import EventType
 from enums import MarketType, OrderStatus, OrderType, Side
 from tests.utils import get_db_sess_async
@@ -247,7 +249,10 @@ async def test_modify_spot_ask_limit_order_integration(
         await sess.commit()
 
     # Simulating previous fill
-    engine._balance_manager._users[user_id] = 100
+    _, balance_manager = engine._orderbooks.setdefault(
+        instrument, (OrderBook(), BalanceManager())
+    )
+    balance_manager._users[user_id] = 100
 
     initial_limit_price = 200.0
     create_body = {
@@ -379,7 +384,10 @@ async def test_modify_spot_ask_order_rejected_integration(
         )
         await sess.commit()
 
-    engine._balance_manager._users[user_id] = 100
+    _, balance_manager = engine._orderbooks.setdefault(
+        instrument, (OrderBook(), BalanceManager())
+    )
+    balance_manager._users[user_id] = 100
     initial_limit_price = 110.0
     body = {
         "order_type": OrderType.LIMIT,
@@ -586,8 +594,9 @@ async def test_cancel_filled_order_is_ignored_integration(
     ask_order.user_id = str(ask_order.user_id)
     ask_order.order_id = str(ask_order.order_id)
 
-    engine._balance_manager.append(ask_order.user_id)
-    engine._balance_manager._users[ask_order.user_id] = quantity
+    _, balance_manager = engine._orderbooks[ask_order.instrument]
+    balance_manager.append(ask_order.user_id)
+    balance_manager._users[ask_order.user_id] = quantity
 
     engine.place_order(ask_order.dump())
 

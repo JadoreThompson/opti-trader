@@ -9,14 +9,15 @@ from pydantic import BaseModel, Field
 from db_models import get_datetime
 
 
-MODIFY_SENTINEL = float("inf")
 
 MatchResult = namedtuple(
     "MatchResult",
     ("outcome", "price", "quantity"),
 )
 Book = Literal["bids", "asks"]
+
 CloseRequestQuantity = Union[Literal["ALL"], int]
+MODIFY_SENTINEL = float("inf")
 
 
 @dataclass
@@ -84,7 +85,7 @@ class Event(BaseModel):
             k: (str(v) if isinstance(v, (datetime, UUID)) else v) for k, v in d.items()
         }
 
-
+############### Queue ###############
 class Queue:
     def __init__(self):
         self._queue = MPQueue()
@@ -116,6 +117,7 @@ class SupportsAppend(Protocol):
     def append(self, *args, **kwargs) -> None: ...
 
 
+############### Dicts of Types ###############
 def to_typed_dict(typ):
     hints = get_type_hints(typ)
     return TypedDict(f"{typ.__name__}Dict", hints)

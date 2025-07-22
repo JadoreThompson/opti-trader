@@ -31,21 +31,21 @@ from ..tasks import log_event
 
 logger = logging.getLogger(__file__)
 
+
 class SpotEngine(BaseEngine[SpotOrder]):
     def __init__(
         self,
         loop=None,
         oco_manager: OCOManager = None,
-        balance_manager: BalanceManager = None,
         order_manager: OrderManager = None,
         payload_queue: SupportsAppend = None,
     ):
         super().__init__(loop)
         self._oco_manager = oco_manager or OCOManager()
-        self._balance_manager = balance_manager or BalanceManager()
         self._order_manager = order_manager or OrderManager()
         self._order_payloads: dict[str, dict] = {}
         self._payload_queue = payload_queue or Queue()
+        self._orderbooks = {}
 
     async def run(self) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
@@ -65,16 +65,24 @@ class SpotEngine(BaseEngine[SpotOrder]):
                         self.modify_order(ModifyRequest(**payload.data))
 
                 except ValidationError as e:
-                    logger.error(f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}")
+                    logger.error(
+                        f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"
+                    )
                     pass
 
     def place_order(self, payload: dict) -> None:
         """
         Places a new order in the engine.
         """
+
+        ob, balance_manager = self._orderbooks.setdefault(
+            payload["instrument"], (OrderBook(), BalanceManager())
+        )
+
         if payload["side"] == Side.ASK:
-            cur_balance = self._balance_manager.get_balance(payload["user_id"])
+            cur_balance = balance_manager.get_balance(payload["user_id"])
             if cur_balance is None or cur_balance < payload["quantity"]:
+                print("waving", cur_balance)
                 log_event.delay(
                     Event(
                         event_type=EventType.ORDER_REJECTED,
@@ -85,18 +93,15 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 )
                 return
 
-        ob = self._orderbooks.setdefault(
-            payload["instrument"], OrderBook()
-        )  # remove in prod
         self._order_payloads[payload["order_id"]] = payload
-        self._balance_manager.append(payload["user_id"])
+        balance_manager.append(payload["user_id"])
 
         order = SpotOrder(
             payload["order_id"], Tag.ENTRY, payload["side"], payload["quantity"]
         )
 
         if payload["order_type"] in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO):
-            self._handle_place_oco_order(order, payload, ob)
+            self._handle_place_oco_order(order, payload, ob, balance_manager)
             return
 
         if payload["order_type"] == OrderType.LIMIT and not (  # Crossable?
@@ -121,7 +126,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     order_id=order.id,
                     quantity=order.quantity,
                     price=order.price,
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                    asset_balance=balance_manager.get_balance(payload["user_id"]),
                     metadata={"tag": order.tag},
                 ).model_dump()
             )
@@ -133,7 +138,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
             order.filled_quantity = result.quantity
             payload["open_quantity"] = result.quantity
             payload["standing_quantity"] = order.quantity - result.quantity
-            self._balance_manager.increase_balance(payload["user_id"], result.quantity)
+            balance_manager.increase_balance(payload["user_id"], result.quantity)
 
         if result.outcome == MatchOutcome.SUCCESS:
             payload["status"] = OrderStatus.FILLED
@@ -155,13 +160,13 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     price=result.price,
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                    asset_balance=balance_manager.get_balance(payload["user_id"]),
                     metadata={"tag": order.tag},
                 ).model_dump()
             )
 
         if result.outcome == MatchOutcome.SUCCESS:
-            self._balance_manager.remove(payload["user_id"])
+            balance_manager.remove(payload["user_id"])
         else:
             price = payload["limit_price"] or result.price or ob.price
             order.price = price
@@ -175,7 +180,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     order_id=order.id,
                     quantity=order.quantity - order.filled_quantity,
                     price=order.price,
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                    asset_balance=balance_manager.get_balance(payload["user_id"]),
                 ).model_dump()
             )
 
@@ -185,13 +190,12 @@ class SpotEngine(BaseEngine[SpotOrder]):
         """Cancel or reduce an existing order."""
         order = self._order_manager.get(request.order_id)
         payload = self._order_payloads[order.id]
-        ob = self._orderbooks[payload["instrument"]]
+        ob, balance_manager = self._orderbooks[payload["instrument"]]
 
-        # Order is fully filled. Cannot perform cancel.
         if payload["standing_quantity"] == 0:
             return
 
-        asset_balance = self._balance_manager.get_balance(payload['user_id'])
+        asset_balance = balance_manager.get_balance(payload["user_id"])
         standing_quantity = payload["standing_quantity"]
         requested_quantity = self._validate_close_req_quantity(
             request.quantity, standing_quantity
@@ -217,8 +221,8 @@ class SpotEngine(BaseEngine[SpotOrder]):
             else:
                 payload["status"] = OrderStatus.FILLED
 
-            if self._balance_manager.get_balance(payload["user_id"]) == 0:
-                self._balance_manager.remove(payload["user_id"])
+            if balance_manager.get_balance(payload["user_id"]) == 0:
+                balance_manager.remove(payload["user_id"])
 
         log_event.delay(
             Event(
@@ -229,8 +233,8 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 asset_balance=asset_balance,
             ).model_dump()
         )
-        
-        if payload['status'] == OrderStatus.FILLED:
+
+        if payload["status"] == OrderStatus.FILLED:
             log_event.delay(
                 Event(
                     event_type=EventType.ORDER_FILLED,
@@ -252,13 +256,13 @@ class SpotEngine(BaseEngine[SpotOrder]):
             request (ModifyRequest): ModifyRequest containing the details.
         """
 
-        def reject_request(payload: dict) -> None:
+        def reject_request(payload: dict, asset_balance: int) -> None:
             log_event.delay(
                 Event(
                     event_type=EventType.ORDER_REJECTED,
                     order_id=payload["order_id"],
                     user_id=payload["user_id"],
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                    asset_balance=asset_balance,
                 ).model_dump()
             )
 
@@ -289,7 +293,8 @@ class SpotEngine(BaseEngine[SpotOrder]):
         if is_oco_order and request.stop_loss != MODIFY_SENTINEL:
             updated_sl_price = request.stop_loss
 
-        ob = self._orderbooks[payload["instrument"]]
+        ob, balance_manager = self._orderbooks[payload["instrument"]]
+        asset_balance = balance_manager.get_balance(payload["user_id"])
         ob_price: float | None = ob.price
 
         tmp_sl_price = (
@@ -328,57 +333,56 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 and payload["side"] == Side.BID
                 and not (tmp_sl_price < tmp_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
             if (
                 is_filled
                 and payload["side"] == Side.ASK
                 and not (tmp_sl_price > tmp_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
             if (
                 not is_filled
                 and payload["side"] == Side.BID
                 and not (tmp_sl_price < tmp_limit_price <= ob_price < tmp_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
             if (
                 not is_filled
                 and payload["side"] == Side.ASK
                 and not (tmp_sl_price > tmp_limit_price >= ob_price > tmp_tp_price)
             ):
-                return reject_request(payload)
-
+                return reject_request(payload, asset_balance)
         elif is_oco_order:
             if (
                 is_filled
                 and payload["side"] == Side.BID
                 and not (tmp_sl_price < tmp_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
             if (
                 is_filled
                 and payload["side"] == Side.ASK
                 and not (tmp_sl_price > tmp_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
             if (
                 not is_filled
                 and payload["side"] == Side.BID
                 and not (updated_sl_price < ob_price < updated_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
             if (
                 not is_filled
                 and payload["side"] == Side.ASK
                 and not (updated_sl_price > ob_price > updated_tp_price)
             ):
-                return reject_request(payload)
+                return reject_request(payload, asset_balance)
 
         oco_order = self._oco_manager.get(order.oco_id)
 
@@ -447,7 +451,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 event_type=EventType.ORDER_MODIFIED,
                 user_id=payload["user_id"],
                 order_id=payload["order_id"],
-                asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                asset_balance=asset_balance,
                 limit_price=payload["limit_price"],
                 stop_loss=payload["stop_loss"],
                 take_profit=payload["take_profit"],
@@ -466,11 +470,15 @@ class SpotEngine(BaseEngine[SpotOrder]):
             ob.append(order, order.price)
 
     def _handle_place_oco_order(
-        self, order: SpotOrder, payload: dict, ob: OrderBook[SpotOrder]
+        self,
+        order: SpotOrder,
+        payload: dict,
+        ob: OrderBook[SpotOrder],
+        balance_manager: BalanceManager,
     ) -> None:
         """Place an order with OCO (One-Cancels-Other) handling."""
 
-        def place_order_event():
+        def place_order_event(asset_balance: int):
             log_event.delay(
                 Event(
                     event_type=EventType.ORDER_PLACED,
@@ -478,7 +486,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     order_id=order.id,
                     quantity=order.quantity - order.filled_quantity,
                     price=order.price,
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                    asset_balance=asset_balance,
                 ).model_dump()
             )
 
@@ -501,7 +509,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         if payload["order_type"] == OrderType.LIMIT_OCO and not is_crossable:
             order.price = payload["limit_price"]
             ob.append(order, order.price)
-            place_order_event()
+            place_order_event(balance_manager.get_balance(payload["user_id"]))
             return
 
         result: MatchResult = self._match(order, ob)
@@ -511,7 +519,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
             order.filled_quantity = result.quantity
             payload["open_quantity"] = result.quantity
             payload["standing_quantity"] = order.quantity - result.quantity
-            self._balance_manager.increase_balance(payload["user_id"], result.quantity)
+            balance_manager.increase_balance(payload["user_id"], result.quantity)
 
         if result.outcome == MatchOutcome.SUCCESS:
             payload["status"] = OrderStatus.FILLED
@@ -534,7 +542,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     price=result.price,
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
-                    asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                    asset_balance=balance_manager.get_balance(payload["user_id"]),
                     metadata={"tag": order.tag},
                 ).model_dump()
             )
@@ -544,12 +552,16 @@ class SpotEngine(BaseEngine[SpotOrder]):
             order.price = price
             ob.append(order, price)
 
-            place_order_event()
+            place_order_event(balance_manager.get_balance(payload["user_id"]))
 
         self._push_to_queue(payload)
 
     def _update_payload_quantities(
-        self, order: SpotOrder, filled_quantity: int, payload: dict
+        self,
+        order: SpotOrder,
+        filled_quantity: int,
+        payload: dict,
+        balance_manager: BalanceManager,
     ) -> None:
         """
         Updates the open, standing quantity and total asset balance
@@ -564,15 +576,15 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
         if order.tag in (Tag.STOP_LOSS, Tag.TAKE_PROFIT):
             payload["open_quantity"] -= filled_quantity
-            self._balance_manager.decrease_balance(user_id, filled_quantity)
+            balance_manager.decrease_balance(user_id, filled_quantity)
         elif order.side == Side.BID:
             payload["open_quantity"] += filled_quantity
             payload["standing_quantity"] -= filled_quantity
-            self._balance_manager.increase_balance(user_id, filled_quantity)
+            balance_manager.increase_balance(user_id, filled_quantity)
         else:
             payload["open_quantity"] += filled_quantity
             payload["standing_quantity"] -= filled_quantity
-            self._balance_manager.decrease_balance(user_id, filled_quantity)
+            balance_manager.decrease_balance(user_id, filled_quantity)
 
     def _handle_filled_order(
         self,
@@ -583,8 +595,11 @@ class SpotEngine(BaseEngine[SpotOrder]):
     ) -> None:
         """Handle a resting order that was fully filled."""
         payload = self._order_payloads[order.id]
-        self._update_payload_quantities(order, filled_quantity, payload)
-        asset_balance = self._balance_manager.get_balance(payload['user_id'])
+        _, balance_manager = self._orderbooks[payload["instrument"]]
+        self._update_payload_quantities(
+            order, filled_quantity, payload, balance_manager
+        )
+        asset_balance = balance_manager.get_balance(payload["user_id"])
 
         if order.tag == Tag.ENTRY:
             payload["status"] = OrderStatus.FILLED
@@ -597,14 +612,14 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 else:
                     self._mutate_tp_sl(oco_order, payload["open_quantity"])
             else:
-                self._balance_manager.remove(payload["user_id"])
+                balance_manager.remove(payload["user_id"])
                 self._order_manager.remove(order.id)
         else:
             oco_order = self._oco_manager.get(order.oco_id)
             self._remove_tp_sl(oco_order, ob)
             if payload["open_quantity"] == 0 and payload["standing_quantity"] == 0:
                 self._oco_manager.remove(oco_order.id)
-                self._balance_manager.remove(payload["user_id"])
+                balance_manager.remove(payload["user_id"])
                 self._order_manager.remove(order.id)
                 payload["status"] = OrderStatus.CLOSED
             elif payload["status"] == OrderStatus.FILLED:
@@ -632,7 +647,10 @@ class SpotEngine(BaseEngine[SpotOrder]):
     ) -> None:
         """Handle a resting order that was partially filled (touched)."""
         payload = self._order_payloads[order.id]
-        self._update_payload_quantities(order, touched_quantity, payload)
+        _, balance_manager = self._orderbooks[payload["instrument"]]
+        self._update_payload_quantities(
+            order, touched_quantity, payload, balance_manager
+        )
 
         if payload["status"] == OrderStatus.PENDING:
             payload["status"] = OrderStatus.PARTIALLY_FILLED
@@ -653,7 +671,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 order_id=order.id,
                 quantity=touched_quantity,
                 price=price,
-                asset_balance=self._balance_manager.get_balance(payload["user_id"]),
+                asset_balance=balance_manager.get_balance(payload["user_id"]),
                 metadata={"tag": order.tag.value},
             ).model_dump()
         )
