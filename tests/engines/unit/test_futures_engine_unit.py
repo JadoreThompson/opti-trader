@@ -6,11 +6,11 @@ from tests.utils import create_order_simple
 from typing import Generator
 
 
+
 @pytest.fixture
 def engine():
     """Provides a clean instance of the FuturesEngine for each test."""
     return FuturesEngine()
-
 
 def test_place_limit_orders_no_match(engine: FuturesEngine):
     """
@@ -54,6 +54,7 @@ def test_market_bid_fills_limit_ask(engine: FuturesEngine):
         sl_price=110.0,
     )
     market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=10)
+    market_buy["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(limit_sell)
     engine.place_order(market_buy)
@@ -81,6 +82,7 @@ def test_market_bid_partially_fills_limit_ask(engine: FuturesEngine):
         "sell1", Side.ASK, OrderType.LIMIT, quantity=50, limit_price=100.0
     )
     market_buy = create_order_simple("buy1", Side.BID, OrderType.MARKET, quantity=20)
+    market_buy["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(limit_sell)
     engine.place_order(market_buy)
@@ -114,6 +116,7 @@ def test_close_long_position_for_loss(engine: FuturesEngine):
     long_pos_order = create_order_simple(
         "long_pos", Side.BID, OrderType.MARKET, instrument=instrument, quantity=10
     )
+    long_pos_order["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(setup_sell)
     engine.place_order(long_pos_order)
@@ -180,6 +183,7 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
     long_pos_order = create_order_simple(
         "long_pos", Side.BID, OrderType.MARKET, instrument=instrument, quantity=10
     )
+    long_pos_order["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(setup_sell)
     engine.place_order(long_pos_order)
@@ -234,6 +238,7 @@ def test_partially_close_order(engine: FuturesEngine):
         "buy1", Side.BID, OrderType.LIMIT, limit_price=100.0, quantity=10
     )
     market_sell = create_order_simple("sell1", Side.ASK, OrderType.MARKET, quantity=5)
+    market_sell["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(limit_buy)
     engine.place_order(market_sell)
@@ -305,6 +310,7 @@ def test_modify_filled_order_no_effect(engine: FuturesEngine):
         "setup_sell", Side.ASK, OrderType.LIMIT, limit_price=100.0
     )
     long_pos_order = create_order_simple("long_pos", Side.BID, OrderType.MARKET)
+    long_pos_order["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(setup_sell)
     engine.place_order(long_pos_order)
@@ -400,6 +406,7 @@ def test_cancel_filled_order_raises_error(engine: FuturesEngine):
         "setup_sell", Side.ASK, OrderType.LIMIT, limit_price=100.0
     )
     market_buy = create_order_simple("market_buy", Side.BID, OrderType.MARKET)
+    market_buy["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(setup_sell)
     engine.place_order(market_buy)
@@ -428,6 +435,7 @@ def test_cancel_partially_filled_order_raises_error(engine: FuturesEngine):
     market_buy = create_order_simple(
         "market_buy", Side.BID, OrderType.MARKET, quantity=20
     )
+    market_buy["tmp_price"] = 100.0  # Simulate market price for the buy order
 
     engine.place_order(limit_sell)
     engine.place_order(market_buy)
@@ -454,6 +462,7 @@ def test_partial_filled_pnl(engine: FuturesEngine):
         OrderType.MARKET,
         quantity=5,
     )
+    aggressive_sell["tmp_price"] = 100.0  # Simulate market price
 
     engine.place_order(limit_buy)
     engine.place_order(aggressive_sell)
@@ -466,6 +475,7 @@ def test_partial_filled_pnl(engine: FuturesEngine):
         OrderType.MARKET,
         quantity=5,
     )
+    aggressive_buy["tmp_price"] = 120.0  # Simulate market price
     engine.place_order(aggressive_buy)
 
     assert aggressive_buy["status"] == OrderStatus.FILLED

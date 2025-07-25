@@ -19,6 +19,14 @@ def patched_db_session(monkeypatch):
 
 
 @pytest_asyncio.fixture(loop_scope="module")
+async def http_client(db, patched_db_session):
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=TEST_BASE_URL
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture(loop_scope="module")
 async def http_client_authenticated(db, patched_db_session):
     fkr = Faker()
     async with AsyncClient(

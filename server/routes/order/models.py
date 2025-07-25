@@ -1,4 +1,11 @@
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from engine.typing import MODIFY_SENTINEL
 from enums import OrderType, Side
 
@@ -13,10 +20,10 @@ class BaseOrder(BaseModel):
 
 
 class BaseSpotOCOOrder(BaseOrder):
-
-    model_config = ConfigDict(extra="forbid")
     take_profit: float | None = Field(None, ge=0)
     stop_loss: float | None = Field(None, ge=0)
+    
+    model_config = ConfigDict(extra="forbid")
 
 
 class SpotMarketOrder(BaseOrder):
@@ -54,6 +61,8 @@ class BaseFuturesOrder(BaseOrder):
     take_profit: float | None = None
     stop_loss: float | None = None
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class FuturesMarketOrder(BaseFuturesOrder):
     pass
@@ -61,6 +70,13 @@ class FuturesMarketOrder(BaseFuturesOrder):
 
 class FuturesLimitOrder(BaseFuturesOrder):
     limit_price: float
+
+    @field_validator("order_type", mode="after")
+    def order_type_validator(cls, v: OrderType) -> OrderType:
+        if v != OrderType.LIMIT:
+            raise ValueError("Limit price only allowed for limit orders.")
+
+        return v
 
 
 class ModifyOrder(BaseModel):

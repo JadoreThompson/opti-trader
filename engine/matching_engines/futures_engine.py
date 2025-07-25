@@ -42,39 +42,68 @@ class FuturesEngine(BaseEngine[Order]):
             raise ValueError(
                 f"Position with order_id {payload['order_id']} already exists."
             )
-        
+
         pos = self._positions.setdefault(payload["order_id"], Position(payload))
         order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
 
-        if payload["order_type"] == OrderType.LIMIT:
-            if not (
-                (  # Checking if not crossable
-                    order.side == Side.BID
-                    and ob.best_ask is not None
-                    and payload["limit_price"] >= ob.best_ask
-                )
-                or (
-                    order.side == Side.ASK
-                    and ob.best_bid is not None
-                    and payload["limit_price"] <= ob.best_bid
-                )
-            ):
-                order.price = payload["limit_price"]
-                ob.append(order, order.price)
-                pos.entry_order = order
-                
-                return log_event.delay(
-                    Event(
-                        event_type=EventType.ORDER_NEW,
-                        user_id=payload["user_id"],
-                        order_id=order.id,
-                        quantity=order.quantity,
-                        price=order.price,
-                        asset_balance=payload["open_quantity"],
-                        metadata={"tag": order.tag},
-                    ).model_dump()
-                )
+        # if payload["order_type"] == OrderType.LIMIT:
+        #     if not (
+        #         (  # Checking if not crossable
+        #             order.side == Side.BID
+        #             and ob.best_ask is not None
+        #             and payload["limit_price"] >= ob.best_ask
+        #         )
+        #         or (
+        #             order.side == Side.ASK
+        #             and ob.best_bid is not None
+        #             and payload["limit_price"] <= ob.best_bid
+        #         )
+        #     ):
+        #         order.price = payload["limit_price"]
+        #         ob.append(order, order.price)
+        #         pos.entry_order = order
+
+        #         return log_event.delay(
+        #             Event(
+        #                 event_type=EventType.ORDER_NEW,
+        #                 user_id=payload["user_id"],
+        #                 order_id=order.id,
+        #                 quantity=order.quantity,
+        #                 price=order.price,
+        #                 asset_balance=payload["open_quantity"],
+        #                 metadata={"tag": order.tag},
+        #             ).model_dump()
+        #         )
         
+        entry_price = payload["limit_price"] or payload.pop('tmp_price', None) # API provides price in metadata
+
+        if not (
+            (  # Checking if not crossable
+                order.side == Side.BID
+                and ob.best_ask is not None
+                and entry_price >= ob.best_ask
+            )
+            or (
+                order.side == Side.ASK
+                and ob.best_bid is not None
+                and entry_price <= ob.best_bid
+            )
+        ):
+            order.price = entry_price
+            ob.append(order, order.price)
+            pos.entry_order = order
+
+            return log_event.delay(
+                Event(
+                    event_type=EventType.ORDER_NEW,
+                    user_id=payload["user_id"],
+                    order_id=order.id,
+                    quantity=order.quantity,
+                    price=order.price,
+                    asset_balance=payload["open_quantity"],
+                ).model_dump()
+            )
+
         result: MatchResult = self._match(order, ob)
         order.filled_quantity = result.quantity
 
@@ -95,7 +124,7 @@ class FuturesEngine(BaseEngine[Order]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     asset_balance=payload["open_quantity"],
-                    metadata={'market_type': MarketType.FUTURES},
+                    metadata={"market_type": MarketType.FUTURES},
                 ).model_dump()
             )
 
@@ -107,8 +136,6 @@ class FuturesEngine(BaseEngine[Order]):
         ob.append(order, price)
         pos.entry_order = order
 
-        
-        print('here')
         log_event.delay(
             Event(
                 event_type=EventType.ORDER_NEW,
@@ -120,7 +147,6 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
         self._push_to_queue(payload)
-
 
     def close_order(self, request: CloseRequest) -> None:
         """
@@ -487,7 +513,7 @@ class FuturesEngine(BaseEngine[Order]):
                 quantity=filled_quantity,
                 price=price,
                 asset_balance=pos.payload["open_quantity"],
-                metadata={'market_type': MarketType.FUTURES},
+                metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
         self._push_to_queue(pos.payload)

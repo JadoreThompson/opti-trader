@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from config import REDIS_CLIENT, SPOT_QUEUE_KEY
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
 from db_models import Orders
 from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
@@ -14,12 +14,15 @@ from server.typing import JWTPayload
 from server.utils.db import depends_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from .controller import (
-    handle_place_spot_ask_order,
-    handle_place_spot_bid_order,
+    handle_prepare_futures_order,
+    handle_prepare_spot_ask_order,
+    handle_prepare_spot_bid_order,
 )
 from .models import (
     BaseOrder,
     CancelOrder,
+    FuturesLimitOrder,
+    FuturesMarketOrder,
     ModifyOrder,
     SpotLimitOCOOrder,
     SpotLimitOrder,
@@ -31,8 +34,51 @@ from .models import (
 route = APIRouter(prefix="/order", tags=["order"])
 
 
+@route.post("/futures", status_code=201)
+async def create_futures_order(
+    body: BaseOrder,
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    dumped_body = body.model_dump()
+    if body.order_type == OrderType.LIMIT:
+        parsed_body = FuturesLimitOrder(**dumped_body)
+    elif body.order_type == OrderType.MARKET:
+        parsed_body = FuturesMarketOrder(**dumped_body)
+    else:
+        raise ValueError("Invlaid order type.")
+
+    cur_price: float | None = await REDIS_CLIENT.get(parsed_body.instrument)
+    if cur_price is None:
+        return JSONResponse(
+            status_code=400, content={"error": "Instrument doesn't exist."}
+        )
+
+    res = await handle_prepare_futures_order(
+        parsed_body, jwt_payload.sub, cur_price, db_sess
+    )
+
+    if isinstance(res, JSONResponse):
+        return res
+
+    payload_data = {
+        k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in res.items()
+    }
+    payload_data["tmp_price"] = cur_price
+
+    await REDIS_CLIENT.publish(
+        FUTURES_QUEUE_KEY,
+        Payload(
+            topic=PayloadTopic.CREATE,
+            data=payload_data,
+        ).model_dump_json(),
+    )
+
+    return {"order_id": res["order_id"]}
+
+
 @route.post("/spot", status_code=201)
-async def create_order(
+async def create_spot_order(
     body: BaseOrder,
     jwt_payload: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
@@ -57,23 +103,25 @@ async def create_order(
         )
 
     if parsed_body.side == Side.BID:
-        res = await handle_place_spot_bid_order(
+        res = await handle_prepare_spot_bid_order(
             parsed_body, jwt_payload.sub, cur_price, db_sess
         )
     else:
-        res = await handle_place_spot_ask_order(parsed_body, jwt_payload.sub, db_sess)
+        res = await handle_prepare_spot_ask_order(parsed_body, jwt_payload.sub, db_sess)
 
     if isinstance(res, JSONResponse):
         return res
+
+    payload_data = {
+        k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in res.items()
+    }
+    payload_data["metadata"] = {"price": cur_price}
 
     await REDIS_CLIENT.publish(
         SPOT_QUEUE_KEY,
         Payload(
             topic=PayloadTopic.CREATE,
-            data={
-                k: (str(v) if isinstance(v, (UUID, datetime)) else v)
-                for k, v in res.items()
-            },
+            data=payload_data,
         ).model_dump_json(),
     )
 
@@ -99,46 +147,16 @@ async def modify_order(
     )
     order = res.scalar_one_or_none()
 
-    if not order:
+    if order is None:
         return JSONResponse(status_code=400, content={"error": "Order doesn't exist."})
 
-    cur_price: float | None = await REDIS_CLIENT.get(order.instrument)
-    if cur_price is None:
+    if order.status == OrderStatus.CLOSED:
         return JSONResponse(
-            status_code=400, content={"error": "Instrument doesn't exist."}
+            status_code=400, content={"error": "Cannot modify closed order."}
         )
 
-    if order.market_type == MarketType.FUTURES:
-        if order.status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"Cannot modify order with status {order.status}."},
-            )
-
-    elif order.market_type == MarketType.SPOT:
-        if body.limit_price != MODIFY_SENTINEL and order.order_type not in (
-            OrderType.LIMIT,
-            OrderType.LIMIT_OCO,
-        ):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": f"Cannot limit price for order type {order.order_type}. Must be a limit order."
-                },
-            )
-
-        if (
-            body.take_profit != MODIFY_SENTINEL or body.stop_loss != MODIFY_SENTINEL
-        ) and order.order_type not in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": f"Cannot take profit or stop loss price for order type {order.order_type}. Must be an OCO order."
-                },
-            )
-
     await REDIS_CLIENT.publish(
-        SPOT_QUEUE_KEY,
+        SPOT_QUEUE_KEY if order.market_type == MarketType.SPOT else FUTURES_QUEUE_KEY,
         Payload(
             topic=PayloadTopic.MODIFY,
             data={
@@ -173,7 +191,7 @@ async def cancel_order(
         )
 
     await REDIS_CLIENT.publish(
-        SPOT_QUEUE_KEY,
+        SPOT_QUEUE_KEY if order.market_type == MarketType.SPOT else FUTURES_QUEUE_KEY,
         Payload(
             topic=PayloadTopic.CANCEL,
             data={"order_id": order.order_id, "quantity": body.quantity},

@@ -1,7 +1,8 @@
 import pytest
-from uuid import uuid4
 
+from uuid import uuid4
 from sqlalchemy import insert, select, update
+
 from config import REDIS_CLIENT
 from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
 from engine.typing import EventType

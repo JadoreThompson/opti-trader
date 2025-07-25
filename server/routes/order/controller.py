@@ -5,11 +5,19 @@ from typing import Union
 
 from db_models import Escrows, OrderEvents, Orders, Users
 from engine.typing import EventType
-from enums import MarketType, OrderType
-from .models import SpotLimitOCOOrder, SpotLimitOrder, SpotMarketOCOOrder, SpotMarketOrder
+from enums import MarketType, OrderStatus, OrderType, Side
+from .models import (
+    FuturesLimitOrder,
+    FuturesMarketOrder,
+    ModifyOrder,
+    SpotLimitOCOOrder,
+    SpotLimitOrder,
+    SpotMarketOCOOrder,
+    SpotMarketOrder,
+)
 
 
-async def handle_place_spot_bid_order(
+async def handle_prepare_spot_bid_order(
     order: Union[
         SpotLimitOCOOrder, SpotLimitOrder, SpotMarketOCOOrder, SpotMarketOrder
     ],
@@ -106,7 +114,7 @@ async def handle_place_spot_bid_order(
     return db_order.dump()
 
 
-async def handle_place_spot_ask_order(
+async def handle_prepare_spot_ask_order(
     order: Union[SpotMarketOrder, SpotLimitOrder],
     user_id: str,
     db_sess: AsyncSession,
@@ -164,6 +172,84 @@ async def handle_place_spot_ask_order(
             event_type=EventType.ASK_SUBMITTED,
             asset_balance=asset_balance - order.quantity,
             balance=select(Users.balance).where(Users.user_id == user_id),
+        )
+    )
+
+    await db_sess.commit()
+    return db_order.dump()
+
+
+async def handle_prepare_futures_order(
+    order: Union[FuturesLimitOrder, FuturesMarketOrder],
+    user_id: str,
+    current_price: float,
+    db_sess: AsyncSession,
+) -> JSONResponse | dict:
+    """
+    Validates futures order and creates the order record.
+
+    Args:
+        order (Union[FuturesLimitOrder, FuturesMarketOrder]): Futures order details.
+        user_id (str): Identifier of the user placing the order.
+        current_price (float): Current market price used to value the order.
+        db_sess (AsyncSession): Active async database session.
+
+    Returns:
+        str: Order ID of the created order.
+    """
+    res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
+    balance = res.scalar()
+
+    order_value = (
+        order.quantity * current_price
+        if order.order_type == OrderType.MARKET
+        else order.quantity * order.limit_price
+    )
+
+    if order_value > balance:
+        return JSONResponse(status_code=400, content={"error": "Insufficient balance."})
+
+    res = await db_sess.execute(
+        insert(Orders)
+        .values(
+            **order.model_dump(),
+            user_id=user_id,
+            market_type=MarketType.FUTURES.value,
+            standing_quantity=order.quantity
+        )
+        .returning(Orders)
+    )
+    db_order = res.scalar_one()
+
+    res = await db_sess.execute(
+        update(Users)
+        .values(
+            balance=select(Users.balance)
+            .where(Users.user_id == user_id)
+            .scalar_subquery()
+            - order_value
+        )
+        .returning(Users.balance)
+    )
+    user_balance = res.scalar()
+
+    await db_sess.execute(
+        insert(OrderEvents).values(
+            user_id=user_id,
+            order_id=str(db_order.order_id),
+            event_type=(
+                EventType.ASK_SUBMITTED
+                if order.side == Side.ASK
+                else EventType.BID_SUBMITTED
+            ),
+            asset_balance=0,
+            balance=user_balance,
+        )
+    )
+
+    await db_sess.execute(
+        insert(Escrows).values(
+            user_id=user_id, order_id=db_order.order_id, balance=order_value
         )
     )
 
