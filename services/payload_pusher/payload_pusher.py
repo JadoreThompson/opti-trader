@@ -1,19 +1,21 @@
 import asyncio
-import logging
-import db_models
 import json
+import logging
 
 from collections import defaultdict, deque
 from datetime import datetime
 from sqlalchemy import insert, update
-from typing import Type, get_args
+from typing import Type, get_args, get_origin
+from types import UnionType
 
+import db_models
 from config import PAYLOAD_PUSHER_QUEUE, REDIS_CLIENT
 from utils.db import get_db_session
 from utils.utils import get_exc_line
 from .typing import PusherPayload, PusherPayloadTopic, MutationFunc
 
 logger = logging.getLogger(__name__)
+
 
 class PayloadPusher:
     """Listens for payloads from Redis and periodically pushes them to the database."""
@@ -36,9 +38,7 @@ class PayloadPusher:
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
-        if (
-            asyncio.get_event_loop().is_running()
-        ):
+        if asyncio.get_event_loop().is_running():
             await asyncio.gather(self._listen(), self._push())
 
     async def _listen(self) -> None:
@@ -54,35 +54,36 @@ class PayloadPusher:
                     async with self._lock:
                         self._queue[msg.table_cls][msg.action].append(msg.data)
                 except Exception as e:
-                    logger.error(f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}")
+                    logger.error(
+                        f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"
+                    )
 
     async def _push(self) -> None:
         """Periodically flush queued payloads to the database."""
-
         while True:
-            await asyncio.sleep(self._interval)
-            
             coroutines = []
 
             async with self._lock:
                 for table_cls_name in self._queue:
                     for action, records in self._queue[table_cls_name].items():
-                        if action == PusherPayloadTopic.INSERT:
-                            mfunc = insert
-                        else:
-                            mfunc = update
-
                         if records:
                             coroutines.append(
                                 self._mutate(
-                                    mfunc, self._tables[table_cls_name], [*records]
+                                    (
+                                        insert
+                                        if action == PusherPayloadTopic.INSERT
+                                        else update
+                                    ),
+                                    self._tables[table_cls_name],
+                                    [*records],
                                 )
                             )
                             records.clear()
+
             if coroutines:
                 await asyncio.gather(*coroutines)
 
-                
+            await asyncio.sleep(self._interval)
 
     async def _mutate(
         self, mfunc: MutationFunc, table_cls: Type, records: list[dict]
@@ -96,19 +97,25 @@ class PayloadPusher:
         """
         table_annotations = table_cls.__annotations__.items()
 
-        for rec in records:
+        for rec in records:            
             for field, field_typ in table_annotations:
                 val = rec.get(field)
                 if val is None:
                     continue
 
                 typ = get_args(field_typ)[0]
+
+                if (origin := get_origin(typ)) is not None and issubclass(
+                    origin, UnionType
+                ):
+                    typ = get_args(typ)[0]
+
                 if not isinstance(val, typ):
                     if typ == datetime:
                         rec[field] = datetime.fromisoformat(val)
                     else:
                         rec[field] = typ(val)
-        
+                
         try:
             async with get_db_session() as sess:
                 await sess.execute(mfunc(table_cls), records)

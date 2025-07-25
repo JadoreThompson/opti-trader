@@ -5,7 +5,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
+from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
 from engine.balance_manager import BalanceManager
 from engine.orderbook import OrderBook
 from enums import MarketType, OrderType, Side
@@ -260,7 +260,7 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
         select(Users.balance).where(Users.user_id == limit_buy["user_id"])
     ).scalar()
 
-    balance = get_default_balance() - escrow_balance
+    balance = get_default_user_balance() - escrow_balance
     assert len(events) == 1
     assert events[0].event_type == EventType.ORDER_NEW
     assert events[0].asset_balance == 0
@@ -374,9 +374,9 @@ def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log)
     assert event.event_type == EventType.ORDER_REJECTED
     assert event.user_id == UUID(user_id)
     assert event.asset_balance == 0
-    assert event.balance == get_default_balance()
+    assert event.balance == get_default_user_balance()
 
     user_balance = db_sess.execute(
         select(Users.balance).where(Users.user_id == user_id)
     ).scalar()
-    assert user_balance == get_default_balance()
+    assert user_balance == get_default_user_balance()

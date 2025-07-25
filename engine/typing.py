@@ -5,7 +5,7 @@ from enum import Enum
 from multiprocessing import Queue as MPQueue
 from typing import Literal, Protocol, TypedDict, Union, get_type_hints
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from db_models import get_datetime
 
 
@@ -16,7 +16,7 @@ MatchResult = namedtuple(
 Book = Literal["bids", "asks"]
 
 CloseRequestQuantity = Union[Literal["ALL"], int]
-MODIFY_SENTINEL = float("inf")
+MODIFY_SENTINEL = "*"
 
 
 @dataclass
@@ -33,9 +33,17 @@ class CancelRequest:
 
 class ModifyRequest(BaseModel):
     order_id: str
-    limit_price: float | None = MODIFY_SENTINEL
-    take_profit: float | None = MODIFY_SENTINEL
-    stop_loss: float | None = MODIFY_SENTINEL
+    limit_price: float | str | None = MODIFY_SENTINEL
+    take_profit: float | str | None = MODIFY_SENTINEL
+    stop_loss: float | str | None = MODIFY_SENTINEL
+
+    @field_validator("limit_price", "take_profit", "stop_loss")
+    def validate_modify_fields(cls, v):
+        if isinstance(v, str) and v != "*":
+            raise ValueError(
+                "Modify fields must be either a float or the sentinel value '*'."
+            )
+        return v
 
 
 class PayloadTopic(Enum):

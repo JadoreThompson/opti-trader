@@ -172,7 +172,7 @@ from faker import Faker
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
-from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
+from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
 from engine import FuturesEngine
 from engine.typing import CloseRequest, EventType, ModifyRequest
 from enums import MarketType, OrderStatus, OrderType, Side
@@ -409,14 +409,14 @@ def test_order_new_event(engine: FuturesEngine, db_sess: Session, patched_log):
     assert event.quantity == 10
     assert event.price == 100.0
     assert event.asset_balance == 0
-    assert event.balance == get_default_balance()
+    assert event.balance == get_default_user_balance()
 
     user_balance = db_sess.execute(
         select(Users.balance).where(Users.user_id == user.user_id)
     ).scalar_one_or_none()
 
     assert user_balance is not None
-    assert user_balance == get_default_balance()
+    assert user_balance == get_default_user_balance()
 
 
 def test_order_filled_event(engine: FuturesEngine, db_sess: Session, patched_log):
@@ -563,7 +563,7 @@ def test_order_cancelled_event(engine: FuturesEngine, db_sess: Session, patched_
         insert(Escrows).values(
             user_id=str(user.user_id),
             order_id=limit_bid["order_id"],
-            balance=get_default_balance()
+            balance=get_default_user_balance()
             - (limit_bid["quantity"] * limit_bid["limit_price"]),
         )
     )

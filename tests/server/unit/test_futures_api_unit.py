@@ -1,41 +1,16 @@
+import asyncio
 import pytest
 import pytest_asyncio
+
 from faker import Faker
 from sqlalchemy import insert, update
 from uuid import uuid4
 
 from config import REDIS_CLIENT
 from db_models import Orders, OrderStatus, Users
+from engine import FuturesEngine
 from enums import OrderType, Side
 from tests.utils import get_db_sess
-
-
-@pytest_asyncio.fixture(loop_scope="module")
-async def instrument():
-    instr = "TEST-BTC-USD-FUTURES"
-    await REDIS_CLIENT.set(instr, 100.0)
-    # yield instr
-    # await REDIS_CLIENT.delete(instr)
-    return instr
-
-
-@pytest_asyncio.fixture(loop_scope="module")
-async def persisted_futures_order_id(http_client_authenticated, instrument):
-    """Creates a new futures limit order and returns its ID."""
-    limit_bid = {
-        "side": Side.BID,
-        "order_type": OrderType.LIMIT,
-        "limit_price": 90.0,
-        "quantity": 10,
-        "instrument": instrument,
-        "take_profit": 110.0,
-        "stop_loss": 80.0,
-    }
-    rsp = await http_client_authenticated.post("/order/futures", json=limit_bid)
-    data = rsp.json()
-    assert rsp.status_code == 201
-    assert "order_id" in data
-    return data["order_id"]
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -239,6 +214,18 @@ async def test_modify_order_invalid_payload(
 
 
 @pytest.mark.asyncio(loop_scope="module")
+async def test_modify_order_negative_value(
+    http_client_authenticated, persisted_futures_order_id
+):
+    """Error Path: Send a payload with an incorrect data type."""
+    modify_payload = {"limit_price": -1}
+    rsp = await http_client_authenticated.patch(
+        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+    )
+    assert rsp.status_code == 422
+
+
+@pytest.mark.asyncio(loop_scope="module")
 async def test_modify_order_unauthenticated(http_client, persisted_futures_order_id):
     """Error Path: Attempt to modify an order without being authenticated."""
     modify_payload = {"limit_price": 100.0}
@@ -360,3 +347,101 @@ async def test_cancel_order_unauthenticated(http_client, persisted_futures_order
         "DELETE", url=f"/order/cancel/{persisted_futures_order_id}", json=cancel_payload
     )
     assert rsp.status_code == 403
+
+
+############### CLOSE ORDER TESTS ###############
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order(
+    futures_engine,
+    http_client_authenticated,
+    persisted_futures_order_id,
+):
+    """Successfully close a futures order."""
+
+    await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 90.0)
+
+    counter_order = {
+        "side": Side.ASK,
+        "order_type": OrderType.MARKET,
+        "quantity": 10,
+        "instrument": "TEST-BTC-USD-FUTURES",
+    }
+
+    await http_client_authenticated.post("/order/futures", json=counter_order)
+    await asyncio.sleep(1)  # Allow time for the order to be processed
+
+    rsp = await http_client_authenticated.request(
+        "DELETE",
+        url=f"/order/close/{persisted_futures_order_id}",
+        json={"quantity": "ALL"},
+    )
+
+    assert rsp.status_code == 201
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order(
+    futures_engine,
+    http_client_authenticated,
+    persisted_futures_order_id,
+):
+    """Successfully close a futures order."""
+
+    await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 90.0)
+
+    counter_order = {
+        "side": Side.ASK,
+        "order_type": OrderType.MARKET,
+        "quantity": 10,
+        "instrument": "TEST-BTC-USD-FUTURES",
+    }
+
+    await http_client_authenticated.post("/order/futures", json=counter_order)
+    await asyncio.sleep(1)  # Allow time for the order to be processed
+
+    rsp = await http_client_authenticated.request(
+        "DELETE",
+        url=f"/order/close/{persisted_futures_order_id}",
+        json={"quantity": "ALL"},
+    )
+
+    assert rsp.status_code == 201
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order_non_existent(http_client_authenticated):
+    """Error Path: Attempt to close an order that does not exist."""
+    fake_order_id = uuid4()
+    rsp = await http_client_authenticated.request(
+        "DELETE", url=f"/order/close/{fake_order_id}", json={"quantity": "ALL"}
+    )
+    assert rsp.status_code == 400
+    assert "Order doesn't exist" in rsp.json()["error"]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order_sub_zero(
+    http_client_authenticated, persisted_futures_order_id
+):
+    """Error Path: Attempt to close an order that does not exist."""
+    rsp = await http_client_authenticated.request(
+        "DELETE",
+        url=f"/order/close/{persisted_futures_order_id}",
+        json={"quantity": -1},
+    )
+    assert rsp.status_code == 422
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order_invalid_string(
+    http_client_authenticated, persisted_futures_order_id
+):
+    """Error Path: Attempt to close an order that does not exist."""
+    rsp = await http_client_authenticated.request(
+        "DELETE",
+        url=f"/order/close/{persisted_futures_order_id}",
+        json={"quantity": "NONE"},
+    )
+    assert rsp.status_code == 422

@@ -6,8 +6,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from engine.typing import MODIFY_SENTINEL
+from engine.typing import MODIFY_SENTINEL, CloseRequestQuantity
 from enums import OrderType, Side
+
+
+MODIFY_ORDER_SENTINEL = float('inf')
 
 
 class BaseOrder(BaseModel):
@@ -22,7 +25,7 @@ class BaseOrder(BaseModel):
 class BaseSpotOCOOrder(BaseOrder):
     take_profit: float | None = Field(None, ge=0)
     stop_loss: float | None = Field(None, ge=0)
-    
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -80,10 +83,26 @@ class FuturesLimitOrder(BaseFuturesOrder):
 
 
 class ModifyOrder(BaseModel):
-    limit_price: float | None = MODIFY_SENTINEL
-    take_profit: float | None = MODIFY_SENTINEL
-    stop_loss: float | None = MODIFY_SENTINEL
+    limit_price: float | None = MODIFY_ORDER_SENTINEL
+    take_profit: float | None = MODIFY_ORDER_SENTINEL
+    stop_loss: float | None = MODIFY_ORDER_SENTINEL
+
+    @field_validator("limit_price", "take_profit", "stop_loss", mode="after")
+    def price_validator(cls, v: float | None) -> float | None:
+        if v is not None and v < 0.0:
+            raise ValueError("Price must be greater than 0.")
+        return v
 
 
 class CancelOrder(BaseModel):
-    quantity: int = Field(ge=1)
+    quantity: CloseRequestQuantity
+
+    @field_validator("quantity", mode="after")
+    def quantity_validator(cls, v: CloseRequestQuantity) -> CloseRequestQuantity:
+        if not isinstance(v, str) and (v is None or v < 1):
+            raise ValueError("Quantity must be greater than 0.")
+        return v
+
+
+class CloseOrder(CancelOrder):
+    pass

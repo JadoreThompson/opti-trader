@@ -1,6 +1,12 @@
 from asyncio import AbstractEventLoop
+from json import loads
+
+from pydantic import ValidationError
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
 from enums import MarketType, OrderStatus, OrderType, Side
 from logging import getLogger
+
+from utils.utils import get_exc_line
 from .base_engine import BaseEngine
 from ..enums import MatchOutcome, Tag
 from ..orderbook import OrderBook
@@ -14,16 +20,47 @@ from ..typing import (
     ModifyRequest,
     Event,
     EventType,
+    Payload,
+    PayloadTopic,
+    SupportsAppend,
 )
 
 logger = getLogger(__name__)
 
 
 class FuturesEngine(BaseEngine[Order]):
-    def __init__(self, loop: AbstractEventLoop | None = None) -> None:
-        super().__init__(loop)
+    def __init__(
+        self,
+        loop: AbstractEventLoop | None = None,
+        pusher_queue: SupportsAppend | None = None,
+    ) -> None:
+        super().__init__(loop, pusher_queue)
         self._positions: dict[str, Position] = {}
         self._orderbooks: dict[str, OrderBook[Order]] = {}
+
+    async def run(self) -> None:
+        async with REDIS_CLIENT.pubsub() as ps:
+            await ps.subscribe(FUTURES_QUEUE_KEY)
+            async for m in ps.listen():
+                if m["type"] == "subscribe":
+                    continue
+                
+                try:
+                    payload = Payload(**loads(m["data"]))
+
+                    if payload.topic == PayloadTopic.CREATE:
+                        self.place_order(payload.data)
+                    elif payload.topic == PayloadTopic.CANCEL:
+                        self.cancel_order(CloseRequest(**payload.data))
+                    elif payload.topic == PayloadTopic.MODIFY:
+                        self.modify_order(ModifyRequest(**payload.data))
+                    elif payload.topic == PayloadTopic.CLOSE:
+                        self.close_order(CloseRequest(**payload.data))
+
+                except Exception as e:
+                    logger.error(
+                        f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"
+                    )
 
     def place_order(self, payload: dict) -> None:
         """
@@ -46,36 +83,7 @@ class FuturesEngine(BaseEngine[Order]):
         pos = self._positions.setdefault(payload["order_id"], Position(payload))
         order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
 
-        # if payload["order_type"] == OrderType.LIMIT:
-        #     if not (
-        #         (  # Checking if not crossable
-        #             order.side == Side.BID
-        #             and ob.best_ask is not None
-        #             and payload["limit_price"] >= ob.best_ask
-        #         )
-        #         or (
-        #             order.side == Side.ASK
-        #             and ob.best_bid is not None
-        #             and payload["limit_price"] <= ob.best_bid
-        #         )
-        #     ):
-        #         order.price = payload["limit_price"]
-        #         ob.append(order, order.price)
-        #         pos.entry_order = order
-
-        #         return log_event.delay(
-        #             Event(
-        #                 event_type=EventType.ORDER_NEW,
-        #                 user_id=payload["user_id"],
-        #                 order_id=order.id,
-        #                 quantity=order.quantity,
-        #                 price=order.price,
-        #                 asset_balance=payload["open_quantity"],
-        #                 metadata={"tag": order.tag},
-        #             ).model_dump()
-        #         )
-        
-        entry_price = payload["limit_price"] or payload.pop('tmp_price', None) # API provides price in metadata
+        entry_price = payload["limit_price"] or payload["price"]
 
         if not (
             (  # Checking if not crossable
@@ -214,6 +222,7 @@ class FuturesEngine(BaseEngine[Order]):
                     quantity=result.quantity,
                     price=result.price,
                     asset_balance=pos.payload["open_quantity"],
+                    # metadata={'side': }
                 ).model_dump()
             )
 
@@ -267,6 +276,7 @@ class FuturesEngine(BaseEngine[Order]):
                 asset_balance=pos.payload["open_quantity"],
             ).model_dump()
         )
+        self._push_to_queue(pos.payload)
 
     def modify_order(self, request: ModifyRequest) -> None:
         """
@@ -277,7 +287,6 @@ class FuturesEngine(BaseEngine[Order]):
         Args:
             request (ModifyRequest): ModifyRequest containing the details.
         """
-
         def reject_request(payload: dict, asset_balance: int) -> None:
             log_event.delay(
                 Event(

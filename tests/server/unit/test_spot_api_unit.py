@@ -2,9 +2,8 @@ import pytest
 
 from uuid import uuid4
 from sqlalchemy import insert, select, update
-
 from config import REDIS_CLIENT
-from db_models import Escrows, OrderEvents, Orders, Users, get_default_balance
+from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
 from engine.typing import EventType
 from enums import MarketType, OrderType, Side
 from tests.utils import get_db_sess_async
@@ -57,7 +56,7 @@ async def test_create_spot_bid_market_order(http_client_authenticated):
     assert order.side == body["side"]
     assert order.order_type == body["order_type"]
     assert escrow_balance == 1000.0
-    assert user_balance == get_default_balance() - 1000.0
+    assert user_balance == get_default_user_balance() - 1000.0
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -110,7 +109,7 @@ async def test_create_spot_bid_limit_order(http_client_authenticated):
     assert order.order_type == body["order_type"]
     assert order.limit_price == body["limit_price"]
     assert escrow_balance == 1000.0
-    assert user_balance == get_default_balance() - 1000.0
+    assert user_balance == get_default_user_balance() - 1000.0
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -160,7 +159,9 @@ async def test_create_spot_ask_limit_order(http_client_authenticated):
         )
         order_id = res.scalar()
 
-        await sess.execute(update(Users).values(balance=get_default_balance() - 1000.0))
+        await sess.execute(
+            update(Users).values(balance=get_default_user_balance() - 1000.0)
+        )
 
         await sess.execute(
             insert(OrderEvents).values(
@@ -297,7 +298,7 @@ async def test_cancel_order_success(http_client_authenticated):
 
     cancel_body = {"quantity": 5}
     rsp_cancel = await http_client_authenticated.request(
-        'DELETE', url=f"/order/cancel/{order_id}", json=cancel_body
+        "DELETE", url=f"/order/cancel/{order_id}", json=cancel_body
     )
     assert rsp_cancel.status_code == 201
 

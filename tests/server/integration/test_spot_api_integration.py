@@ -3,7 +3,7 @@ import pytest
 
 from sqlalchemy import func, insert, select, update
 from config import REDIS_CLIENT
-from db_models import OrderEvents, Orders, Users, get_default_balance
+from db_models import OrderEvents, Orders, Users, get_default_user_balance
 from engine import SpotEngine
 from engine.balance_manager import BalanceManager
 from engine.orderbook.orderbook import OrderBook
@@ -129,7 +129,9 @@ async def test_spot_ask_limit_order_integration(
         )
         order_id = res.scalar()
 
-        await sess.execute(update(Users).values(balance=get_default_balance() - 1000.0))
+        await sess.execute(
+            update(Users).values(balance=get_default_user_balance() - 1000.0)
+        )
 
         await sess.execute(
             insert(OrderEvents).values(

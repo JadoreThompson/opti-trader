@@ -19,8 +19,10 @@ from .controller import (
     handle_prepare_spot_bid_order,
 )
 from .models import (
+    MODIFY_ORDER_SENTINEL,
     BaseOrder,
     CancelOrder,
+    CloseOrder,
     FuturesLimitOrder,
     FuturesMarketOrder,
     ModifyOrder,
@@ -64,7 +66,9 @@ async def create_futures_order(
     payload_data = {
         k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in res.items()
     }
-    payload_data["tmp_price"] = cur_price
+
+    if body.order_type == OrderType.MARKET:
+        payload_data["tmp_price"] = cur_price
 
     await REDIS_CLIENT.publish(
         FUTURES_QUEUE_KEY,
@@ -112,16 +116,14 @@ async def create_spot_order(
     if isinstance(res, JSONResponse):
         return res
 
-    payload_data = {
-        k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in res.items()
-    }
-    payload_data["metadata"] = {"price": cur_price}
-
     await REDIS_CLIENT.publish(
         SPOT_QUEUE_KEY,
         Payload(
             topic=PayloadTopic.CREATE,
-            data=payload_data,
+            data={
+                k: (str(v) if isinstance(v, (UUID, datetime)) else v)
+                for k, v in res.items()
+            },
         ).model_dump_json(),
     )
 
@@ -161,9 +163,21 @@ async def modify_order(
             topic=PayloadTopic.MODIFY,
             data={
                 "order_id": order.order_id,
-                "limit_price": body.limit_price,
-                "take_profit": body.take_profit,
-                "stop_loss": body.stop_loss,
+                "limit_price": (
+                    body.limit_price
+                    if body.limit_price != MODIFY_ORDER_SENTINEL
+                    else MODIFY_SENTINEL
+                ),
+                "take_profit": (
+                    body.take_profit
+                    if body.take_profit != MODIFY_ORDER_SENTINEL
+                    else MODIFY_SENTINEL
+                ),
+                "stop_loss": (
+                    body.stop_loss
+                    if body.stop_loss != MODIFY_ORDER_SENTINEL
+                    else MODIFY_SENTINEL
+                ),
             },
         ).model_dump_json(),
     )
@@ -185,7 +199,7 @@ async def cancel_order(
     if order is None:
         return JSONResponse(status_code=400, content={"error": "Order doesn't exist."})
 
-    if order.standing_quantity < body.quantity:
+    if body.quantity != "ALL" and order.standing_quantity < body.quantity:
         return JSONResponse(
             status_code=400, content={"error": "Insufficient standing quantity."}
         )
@@ -197,3 +211,43 @@ async def cancel_order(
             data={"order_id": order.order_id, "quantity": body.quantity},
         ).model_dump_json(),
     )
+
+
+@route.delete("/close/{order_id}", status_code=201)
+async def close_order(
+    order_id: str,
+    body: CloseOrder,
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    """Submits a close request for fully filled FUTURES order."""
+    res = await db_sess.execute(
+        select(Orders).where(
+            Orders.user_id == jwt_payload.sub,
+            Orders.order_id == order_id,
+            Orders.market_type == MarketType.FUTURES,
+        )
+    )
+    order = res.scalar_one_or_none()
+
+    if order is None:
+        return JSONResponse(status_code=400, content={"error": "Order doesn't exist."})
+    if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_CLOSED):
+        return JSONResponse(status_code=400, content={"error": "Invalid order status."})
+
+    if order.open_quantity == 0 or (
+        body.quantity != "ALL" and body.quantity > order.open_quantity
+    ):
+        return JSONResponse(
+            status_code=400, content={"error": "Insufficient open quantity."}
+        )
+
+    await REDIS_CLIENT.publish(
+        (SPOT_QUEUE_KEY if order.market_type == MarketType.SPOT else FUTURES_QUEUE_KEY),
+        Payload(
+            topic=PayloadTopic.CLOSE,
+            data={"order_id": order.order_id, "quantity": body.quantity},
+        ).model_dump_json(),
+    )
+
+    return {"message": "All open orders are being closed."}

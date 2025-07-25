@@ -24,10 +24,10 @@ class BaseEngine(Generic[O]):
     def __init__(
         self,
         loop: AbstractEventLoop | None = None,
-        payload_queue: SupportsAppend | None = None,
+        pusher_queue: SupportsAppend | None = None,
     ) -> None:
         self._loop = loop
-        self._payload_queue = payload_queue or Queue()
+        self._pusher_queue = pusher_queue or Queue()
 
     @abstractmethod
     async def run(self) -> None:
@@ -193,7 +193,7 @@ class BaseEngine(Generic[O]):
         await REDIS_CLIENT.set(instrument, price)
 
     def _push_to_queue(self, payload: dict) -> None:
-        self._payload_queue.append(
+        self._pusher_queue.append(
             PusherPayload(
                 action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=payload
             ).model_dump()

@@ -17,7 +17,7 @@ def get_datetime() -> datetime:
     return datetime.now(UTC)
 
 
-def get_default_balance() -> float:
+def get_default_user_balance() -> float:
     return 10_000
 
 
@@ -53,7 +53,7 @@ class Users(Base):
         Float,
         nullable=False,
         default=10000,
-        server_default=sqlalchemy.sql.text(f"{get_default_balance()}"),
+        server_default=sqlalchemy.sql.text(f"{get_default_user_balance()}"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=get_datetime, nullable=False
@@ -88,13 +88,17 @@ class Orders(Base):
     filled_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     closed_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     realised_pnl: Mapped[float | None] = mapped_column(Float, nullable=True, default=0)
-    unrealised_pnl: Mapped[float | None] = mapped_column(Float, nullable=True, default=0)
+    unrealised_pnl: Mapped[float | None] = mapped_column(
+        Float, nullable=True, default=0
+    )
     status: Mapped[str] = mapped_column(
         String, nullable=False, default=OrderStatus.PENDING.value
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     standing_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    open_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=sqlalchemy.sql.text("0"))
+    open_quantity: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=sqlalchemy.sql.text("0")
+    )
     stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

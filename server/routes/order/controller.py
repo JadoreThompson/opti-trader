@@ -215,7 +215,8 @@ async def handle_prepare_futures_order(
             **order.model_dump(),
             user_id=user_id,
             market_type=MarketType.FUTURES.value,
-            standing_quantity=order.quantity
+            standing_quantity=order.quantit,            
+            price=current_price,
         )
         .returning(Orders)
     )
