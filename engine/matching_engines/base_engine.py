@@ -1,28 +1,42 @@
-from typing import Generic, override, TypeVar
+from abc import abstractmethod
+from asyncio import AbstractEventLoop
+from typing import Generic, TypeVar
 
 from config import REDIS_CLIENT
 from enums import Side
+from services.payload_pusher import PusherPayload, PusherPayloadTopic
 from ..enums import MatchOutcome
 from ..orderbook import OrderBook
 from ..orders import Order
-from ..typing import CloseRequestQuantity, MatchResult, CloseRequest, ModifyRequest
+from ..typing import (
+    CloseRequestQuantity,
+    MatchResult,
+    CloseRequest,
+    ModifyRequest,
+    Queue,
+    SupportsAppend,
+)
 
 O = TypeVar("O", bound=Order)
 
 
 class BaseEngine(Generic[O]):
-    def __init__(self, loop=None) -> None:
-        self._orderbooks: dict[str, OrderBook[O]] = {}
+    def __init__(
+        self,
+        loop: AbstractEventLoop | None = None,
+        payload_queue: SupportsAppend | None = None,
+    ) -> None:
         self._loop = loop
+        self._payload_queue = payload_queue or Queue()
 
-    @override
+    @abstractmethod
     async def run(self) -> None:
         """
         Listens to the pubsub channel, routing each message
         to their respective native function.
         """
 
-    @override
+    @abstractmethod
     def place_order(self, payload: dict) -> None:
         """
         Places a new order based on the provided payload dictionary.
@@ -35,7 +49,7 @@ class BaseEngine(Generic[O]):
             payload (dict): A dictionary containing order parameters.
         """
 
-    @override
+    @abstractmethod
     def cancel_order(self, request: CloseRequest) -> None:
         """
         Cancels an existing order partially or fully.
@@ -47,7 +61,7 @@ class BaseEngine(Generic[O]):
             request (CloseRequest): Data specifying the order ID and quantity to cancel.
         """
 
-    @override
+    @abstractmethod
     def modify_order(self, request: ModifyRequest) -> None:
         """
         Modifies parameters of an existing order.
@@ -119,7 +133,7 @@ class BaseEngine(Generic[O]):
             MatchOutcome.PARTIAL, target_price, starting_quantity - cur_quantity
         )
 
-    @override
+    @abstractmethod
     def _handle_filled_order(
         self,
         order: O,
@@ -128,7 +142,7 @@ class BaseEngine(Generic[O]):
         ob: OrderBook[O],
     ) -> None: ...
 
-    @override
+    @abstractmethod
     def _handle_touched_order(
         self,
         order: O,
@@ -177,3 +191,10 @@ class BaseEngine(Generic[O]):
 
     async def _send_price_update(self, instrument: str, price: float) -> None:
         await REDIS_CLIENT.set(instrument, price)
+
+    def _push_to_queue(self, payload: dict) -> None:
+        self._payload_queue.append(
+            PusherPayload(
+                action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=payload
+            ).model_dump()
+        )

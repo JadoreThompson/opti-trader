@@ -1,3 +1,4 @@
+from asyncio import AbstractEventLoop
 import logging
 
 from json import loads
@@ -35,17 +36,16 @@ logger = logging.getLogger(__file__)
 class SpotEngine(BaseEngine[SpotOrder]):
     def __init__(
         self,
-        loop=None,
-        oco_manager: OCOManager = None,
-        order_manager: OrderManager = None,
-        payload_queue: SupportsAppend = None,
+        loop: AbstractEventLoop | None = None,
+        payload_queue: SupportsAppend | None = None,
+        oco_manager: OCOManager | None = None,
+        order_manager: OrderManager | None = None,
     ):
-        super().__init__(loop)
+        super().__init__(loop, payload_queue)
         self._oco_manager = oco_manager or OCOManager()
         self._order_manager = order_manager or OrderManager()
         self._order_payloads: dict[str, dict] = {}
-        self._payload_queue = payload_queue or Queue()
-        self._orderbooks = {}
+        self._orderbooks: dict[str, tuple[OrderBook[SpotOrder], BalanceManager]] = {}
 
     async def run(self) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
@@ -82,7 +82,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
         if payload["side"] == Side.ASK:
             cur_balance = balance_manager.get_balance(payload["user_id"])
             if cur_balance is None or cur_balance < payload["quantity"]:
-                print("waving", cur_balance)
                 log_event.delay(
                     Event(
                         event_type=EventType.ORDER_REJECTED,
@@ -121,7 +120,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
             self._order_manager.append(order)
             log_event.delay(
                 Event(
-                    event_type=EventType.ORDER_PLACED,
+                    event_type=EventType.ORDER_NEW,
                     user_id=payload["user_id"],
                     order_id=order.id,
                     quantity=order.quantity,
@@ -175,7 +174,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
             log_event.delay(
                 Event(
-                    event_type=EventType.ORDER_PLACED,
+                    event_type=EventType.ORDER_NEW,
                     user_id=payload["user_id"],
                     order_id=order.id,
                     quantity=order.quantity - order.filled_quantity,
@@ -189,6 +188,9 @@ class SpotEngine(BaseEngine[SpotOrder]):
     def cancel_order(self, request: CloseRequest) -> None:
         """Cancel or reduce an existing order."""
         order = self._order_manager.get(request.order_id)
+        if order is None:
+            return
+
         payload = self._order_payloads[order.id]
         ob, balance_manager = self._orderbooks[payload["instrument"]]
 
@@ -286,7 +288,11 @@ class SpotEngine(BaseEngine[SpotOrder]):
         updated_tp_price = sentinel
         updated_sl_price = sentinel
 
-        if is_limit_order and not is_filled and request.limit_price != MODIFY_SENTINEL:
+        if (
+            is_limit_order
+            and not is_filled
+            and request.limit_price not in (MODIFY_SENTINEL, None)
+        ):
             updated_limit_price = request.limit_price
         if is_oco_order and request.take_profit != MODIFY_SENTINEL:
             updated_tp_price = request.take_profit
@@ -297,37 +303,57 @@ class SpotEngine(BaseEngine[SpotOrder]):
         asset_balance = balance_manager.get_balance(payload["user_id"])
         ob_price: float | None = ob.price
 
-        tmp_sl_price = (
-            updated_sl_price
-            if updated_sl_price != sentinel
-            else (
-                payload["stop_loss"]
-                if payload["stop_loss"] is not None
-                else float("-inf") if payload["side"] == Side.BID else float("inf")
-            )
-        )
+        # tmp_sl_price = (
+        #     updated_sl_price
+        #     if updated_sl_price != sentinel
+        #     else (
+        #         payload["stop_loss"]
+        #         if payload["stop_loss"] is not None
+        #         else float("-inf") if payload["side"] == Side.BID else float("inf")
+        #     )
+        # )
 
-        tmp_tp_price = (
-            updated_tp_price
-            if updated_tp_price != sentinel
-            else (
-                payload["take_profit"]
-                if payload["take_profit"] is not None
-                else float("inf") if payload["side"] == Side.BID else float("-inf")
-            )
-        )
+        tmp_sl_price = float("-inf") if payload["side"] == Side.BID else float("inf")
+        if updated_sl_price != sentinel:
+            if updated_sl_price is not None:
+                tmp_sl_price = updated_sl_price
+        elif payload["stop_loss"] is not None:
+            tmp_sl_price = payload["stop_loss"]
+
+        # tmp_tp_price = (
+        #     updated_tp_price
+        #     if updated_tp_price != sentinel
+        #     else (
+        #         payload["take_profit"]
+        #         if payload["take_profit"] is not None
+        #         else float("inf") if payload["side"] == Side.BID else float("-inf")
+        #     )
+        # )
+
+        tmp_tp_price = float("inf") if payload["side"] == Side.BID else float("-inf")
+        if updated_tp_price != sentinel:
+            if updated_tp_price is not None:
+                tmp_tp_price = updated_tp_price
+        elif payload["take_profit"] is not None:
+            tmp_tp_price = payload["take_profit"]
+
+        # if is_limit_order:
+        #     tmp_limit_price = (
+        #         updated_limit_price
+        #         if updated_limit_price != sentinel
+        #         else (payload["limit_price"] if not is_filled else (ob_price or 0) - 1)
+        #     )
+        # else:
+        #     tmp_limit_price = sentinel
+
+        tmp_limit_price = sentinel
+        if is_limit_order:
+            if updated_limit_price != sentinel:
+                tmp_limit_price = updated_limit_price
+            else:
+                tmp_limit_price = payload["limit_price"]
 
         if is_limit_order:
-            tmp_limit_price = (
-                updated_limit_price
-                if updated_limit_price != sentinel
-                else (payload["limit_price"] if not is_filled else (ob_price or 0) - 1)
-            )
-        else:
-            tmp_limit_price = sentinel
-
-        if is_limit_order:
-
             if (
                 is_filled
                 and payload["side"] == Side.BID
@@ -355,6 +381,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 and not (tmp_sl_price > tmp_limit_price >= ob_price > tmp_tp_price)
             ):
                 return reject_request(payload, asset_balance)
+
         elif is_oco_order:
             if (
                 is_filled
@@ -373,20 +400,20 @@ class SpotEngine(BaseEngine[SpotOrder]):
             if (
                 not is_filled
                 and payload["side"] == Side.BID
-                and not (updated_sl_price < ob_price < updated_tp_price)
+                and not (tmp_sl_price < ob_price < tmp_tp_price)
             ):
                 return reject_request(payload, asset_balance)
 
             if (
                 not is_filled
                 and payload["side"] == Side.ASK
-                and not (updated_sl_price > ob_price > updated_tp_price)
+                and not (tmp_sl_price > ob_price > tmp_tp_price)
             ):
                 return reject_request(payload, asset_balance)
 
         oco_order = self._oco_manager.get(order.oco_id)
 
-        if is_limit_order and not is_filled:
+        if is_limit_order and not is_filled and updated_limit_price != sentinel:
             self._order_manager.remove(payload["order_id"])
 
             ob.remove(order, order.price)
@@ -395,7 +422,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 Tag.ENTRY,
                 Side.BID,
                 payload["quantity"],
-                tmp_limit_price,
+                updated_limit_price,
                 oco_id=order.oco_id,
             )
             self._order_manager.append(order)
@@ -405,39 +432,38 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 oco_order.leg_a = order
 
         if oco_order is not None:
-            if tmp_sl_price != float("-inf"):
+            if updated_sl_price != sentinel:
                 if oco_order.leg_b is not None:
                     ob.remove(oco_order.leg_b, oco_order.leg_b.price)
 
-                oco_order.leg_b = SpotOrder(
-                    order.id,
-                    Tag.STOP_LOSS,
-                    Side.ASK,
-                    payload["open_quantity"],
-                    tmp_sl_price,
-                    oco_id=order.oco_id,
-                )
-                ob.append(oco_order.leg_b, oco_order.leg_b.price)
+                if updated_sl_price is not None:
+                    oco_order.leg_b = SpotOrder(
+                        order.id,
+                        Tag.STOP_LOSS,
+                        Side.ASK if payload["side"] == Side.BID else Side.BID,
+                        payload["open_quantity"],
+                        updated_sl_price,
+                        oco_id=order.oco_id,
+                    )
+                    ob.append(oco_order.leg_b, oco_order.leg_b.price)
 
-            if tmp_tp_price is not None:
+            if updated_tp_price != sentinel:
                 if oco_order.leg_c is not None:
                     ob.remove(oco_order.leg_c, oco_order.leg_c.price)
+
                 if updated_tp_price is not None:
                     oco_order.leg_c = SpotOrder(
                         order.id,
                         Tag.TAKE_PROFIT,
-                        Side.ASK,
+                        Side.ASK if payload["side"] == Side.BID else Side.BID,
                         payload["open_quantity"],
-                        tmp_tp_price,
+                        updated_tp_price,
                         oco_id=order.oco_id,
                     )
                     ob.append(oco_order.leg_c, oco_order.leg_c.price)
 
-        if is_limit_order and not is_filled:
-            if updated_limit_price == sentinel:
-                payload["limit_price"] = payload["limit_price"]
-            else:
-                payload["limit_price"] = updated_limit_price
+        if is_limit_order and not is_filled and updated_limit_price != sentinel:
+            payload["limit_price"] = updated_limit_price
 
         payload["stop_loss"] = (
             updated_sl_price if updated_sl_price != sentinel else payload["stop_loss"]
@@ -481,7 +507,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         def place_order_event(asset_balance: int):
             log_event.delay(
                 Event(
-                    event_type=EventType.ORDER_PLACED,
+                    event_type=EventType.ORDER_NEW,
                     user_id=payload["user_id"],
                     order_id=order.id,
                     quantity=order.quantity - order.filled_quantity,
@@ -743,10 +769,3 @@ class SpotEngine(BaseEngine[SpotOrder]):
         if oco_order.leg_c is not None:
             ob.remove(oco_order.leg_c, oco_order.leg_c.price)
             oco_order.leg_c = None
-
-    def _push_to_queue(self, payload: dict) -> None:
-        self._payload_queue.append(
-            PusherPayload(
-                action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=payload
-            ).model_dump()
-        )

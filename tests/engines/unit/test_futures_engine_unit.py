@@ -2,7 +2,7 @@ import pytest
 from engine import FuturesEngine
 from engine.typing import CloseRequest, ModifyRequest
 from enums import OrderStatus, OrderType, Side
-from tests.utils import create_order_conditional, create_order_simple
+from tests.utils import create_order_simple
 from typing import Generator
 
 
@@ -10,24 +10,6 @@ from typing import Generator
 def engine():
     """Provides a clean instance of the FuturesEngine for each test."""
     return FuturesEngine()
-
-
-@pytest.fixture
-def populated_engine(
-    request,
-) -> Generator[tuple[FuturesEngine, tuple[dict, ...]], None, None]:
-    """
-    Creates and populates a FuturesEngine with a given number of orders.
-    This replaces the fixture that used the mock engine.
-    """
-    num_orders = request.param
-    engine = FuturesEngine()
-    orders = tuple(create_order_conditional(i) for i in range(num_orders))
-
-    for order in orders:
-        engine.place_order(order)
-
-    yield engine, orders
 
 
 def test_place_limit_orders_no_match(engine: FuturesEngine):
@@ -138,7 +120,7 @@ def test_close_long_position_for_loss(engine: FuturesEngine):
 
     assert long_pos_order["status"] == OrderStatus.FILLED
     assert long_pos_order["filled_price"] == 100.0
-    assert engine._position_manager.get("long_pos") is not None
+    assert engine._positions.get("long_pos") is not None
 
     # Raising price level
     setup_ask = create_order_simple(
@@ -179,7 +161,7 @@ def test_close_long_position_for_loss(engine: FuturesEngine):
     expected_pnl = (90.0 - 100.0) * 10
     assert long_pos_order["realised_pnl"] == pytest.approx(expected_pnl)
 
-    assert engine._position_manager.get("long_pos") == None
+    assert engine._positions.get("long_pos") == None
 
 
 def test_close_long_position_for_profit(engine: FuturesEngine):
@@ -204,7 +186,7 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
 
     assert long_pos_order["status"] == OrderStatus.FILLED
     assert long_pos_order["filled_price"] == 100.0
-    assert engine._position_manager.get("long_pos") is not None
+    assert engine._positions.get("long_pos") is not None
 
     # Raising price level
     setup_ask = create_order_simple(
@@ -244,7 +226,7 @@ def test_close_long_position_for_profit(engine: FuturesEngine):
     assert long_pos_order.get("closed_price") == None
     assert long_pos_order["standing_quantity"] == 0
 
-    assert engine._position_manager.get("long_pos") is not None
+    assert engine._positions.get("long_pos") is not None
 
 
 def test_partially_close_order(engine: FuturesEngine):
@@ -313,7 +295,7 @@ def test_modify_pending_limit_order_price(engine: FuturesEngine):
     assert book_item.head.order.id == "buy1"
 
 
-def test_modify_filled_order_limit_price_raises_error(engine: FuturesEngine):
+def test_modify_filled_order_no_effect(engine: FuturesEngine):
     """
     Scenario: Attempting to change the limit price of a FILLED order should
     raise a ValueError, as this is an invalid operation. This test
@@ -341,6 +323,32 @@ def test_modify_filled_order_limit_price_raises_error(engine: FuturesEngine):
     assert long_pos_order["take_profit"] == None
     assert long_pos_order["stop_loss"] == None
     assert long_pos_order["limit_price"] == None
+
+
+def test_modify_limit_price_no_effect(engine: FuturesEngine):
+    """
+    Scenario: Attempting to change the limit price above the market price
+    should not be executed. Leaving the order's state untouched.
+    """
+    limit_buy = create_order_simple(
+        "buy1", Side.BID, OrderType.LIMIT, limit_price=95.0, quantity=10
+    )
+    engine.place_order(limit_buy)
+
+    assert limit_buy["status"] == OrderStatus.PENDING
+
+    modify_request = ModifyRequest(
+        **{
+            "order_id": "buy1",
+            "limit_price": 101.0,
+            "take_profit": 150.0,
+            "stop_loss": 20.0,
+        }
+    )
+    engine.modify_order(modify_request)
+
+    assert limit_buy["limit_price"] == 95.0
+    assert limit_buy["status"] == OrderStatus.PENDING
 
 
 def test_partially_cancel_order(engine: FuturesEngine):
@@ -371,7 +379,7 @@ def test_cancel_pending_limit_order(engine: FuturesEngine):
     ob = engine._orderbooks[instrument]
     assert ob.best_bid == 95.0, "Order should be on the book before cancellation."
     assert (
-        engine._position_manager.get("buy1") is not None
+        engine._positions.get("buy1") is not None
     ), "Position should exist for the pending order."
 
     engine.cancel_order(CloseRequest(**{"order_id": "buy1", "quantity": "ALL"}))
@@ -380,7 +388,7 @@ def test_cancel_pending_limit_order(engine: FuturesEngine):
 
     assert len(ob.bids) == 0
     assert len(ob.asks) == 0
-    assert engine._position_manager.get("buy1") is None
+    assert engine._positions.get("buy1") is None
 
 
 def test_cancel_filled_order_raises_error(engine: FuturesEngine):

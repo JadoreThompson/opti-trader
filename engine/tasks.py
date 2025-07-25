@@ -3,20 +3,47 @@ from sqlalchemy.orm import Session
 
 from config import CELERY
 from db_models import Escrows, OrderEvents, Orders, Users
-from enums import Side
+from enums import MarketType, Side
 from utils.db import get_db_session_sync
 from .typing import MODIFY_SENTINEL, EventDict, Event, EventType
 from .enums import Tag
 
 
-def handle_order_filled_event(event: Event, db_sess: Session) -> None:
-    """
-    Persists the event and updates the user's cash balance accordingly.
+def record_order_event(event: Event, db_sess: Session) -> None:
+    """Record a generic order-related event with the user's current balance."""
+    values = event.model_dump(exclude_unset=True, exclude_none=True)
+    values.pop("metadata", None)
 
-    Args:
-        ev (Event): _description_
-        db_sess (Session): _description_
-    """
+    db_sess.execute(
+        insert(OrderEvents).values(
+            **values,
+            balance=select(Users.balance)
+            .where(Users.user_id == event.user_id)
+            .scalar_subquery(),
+        )
+    )
+    db_sess.commit()
+
+
+def handle_futures_order_filled_event(event: Event, db_sess: Session) -> None:
+    values = event.model_dump(exclude_unset=True, exclude_none=True)
+    values.pop("metadata", None)
+
+    db_sess.execute(
+        insert(OrderEvents).values(
+            **values,
+            balance=(
+                select(Users.balance)
+                .where(Users.user_id == event.user_id)
+                .scalar_subquery()
+            ),
+        )
+    )
+    db_sess.commit()
+
+
+def handle_spot_order_filled_event(event: Event, db_sess: Session) -> None:
+
     order = db_sess.execute(
         select(Orders).where(Orders.order_id == event.order_id)
     ).scalar()
@@ -31,12 +58,12 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
 
     opening_price = db_sess.execute(
         select(OrderEvents.price).where(
-            OrderEvents.event_type == EventType.ORDER_PLACED,
+            OrderEvents.event_type == EventType.ORDER_NEW,
             OrderEvents.order_id == event.order_id,
         )
     ).scalar_one_or_none()
 
-    if opening_price is None:
+    if opening_price is None:  # look for the filled price from Orders instead.
         opening_price = db_sess.execute(
             select(OrderEvents.price)
             .where(
@@ -75,6 +102,19 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
     db_sess.commit()
 
 
+def handle_order_filled_event(event: Event, db_sess: Session) -> None:
+    """
+    Persists the event and updates the user's cash balance accordingly.
+
+    Args:
+        ev (Event): _description_
+        db_sess (Session): _description_
+    """
+    if event.metadata["market_type"] == MarketType.FUTURES:
+        return handle_futures_order_filled_event(event, db_sess)
+    return handle_spot_order_filled_event(event, db_sess)
+
+
 def handle_order_placed_event(event: Event, db_sess: Session) -> None:
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
@@ -93,6 +133,16 @@ def handle_order_placed_event(event: Event, db_sess: Session) -> None:
 
 
 def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
+    """
+    Handle an order-cancelled event and adjust balances.
+
+    Uses the opening price of the order when calculating the amount to refund,
+    because the user initially committed funds based on that opening price.
+
+    Args:
+        event (Event): The cancelled order event containing order details.
+        db_sess (Session): Active database session used for queries and updates.
+    """
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
 
@@ -105,7 +155,7 @@ def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
     opening_price = db_sess.execute(
         select(OrderEvents.price)
         .where(
-            OrderEvents.event_type == EventType.ORDER_PLACED,
+            OrderEvents.event_type == EventType.ORDER_NEW,
             OrderEvents.order_id == event.order_id,
         )
         .order_by(OrderEvents.created_at.asc())
@@ -123,25 +173,21 @@ def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
 def handle_order_modified_event(event: Event, db_sess: Session) -> None:
     """
     Persists the event and updates the order's attributes in the database.
-    Note: This handler does not adjust escrow, as escrow changes for price
-    modifications would require more complex logic (e.g., calculating standing
-    quantity) and a more detailed event payload from the engine.
+    Note: This handler does not adjust escrow.
+
+    Args:
+        event (Event): The order modification event containing updated details.
+        db_sess (Session): Active database session used for queries and updates.
     """
-    values_to_update = {}
-
-    if event.limit_price is not MODIFY_SENTINEL:
-        values_to_update["limit_price"] = event.limit_price
-    if event.take_profit is not MODIFY_SENTINEL:
-        values_to_update["take_profit"] = event.take_profit
-    if event.stop_loss is not MODIFY_SENTINEL:
-        values_to_update["stop_loss"] = event.stop_loss
-
-    if values_to_update:
-        db_sess.execute(
-            update(Orders)
-            .where(Orders.order_id == event.order_id)
-            .values(**values_to_update)
+    db_sess.execute(
+        update(Orders)
+        .where(Orders.order_id == event.order_id)
+        .values(
+            limit_price=event.limit_price,
+            take_profit=event.take_profit,
+            stop_loss=event.stop_loss,
         )
+    )
 
     event_values = event.model_dump(exclude_unset=True, exclude_none=True)
     event_values.pop("metadata", None)
@@ -155,6 +201,46 @@ def handle_order_modified_event(event: Event, db_sess: Session) -> None:
         )
     )
     db_sess.commit()
+
+
+def handle_order_new_rejected_event(event: Event, db_sess: Session) -> None:
+    """
+    Handle an event where a new order submission was rejected.
+
+    Restores any funds that were previously placed into escrow back to the
+    user's balance, resets the escrow balance for the associated order, and
+    records the rejection event in the order events table.
+
+    Args:
+        event (Event): The rejected order event containing the user and order identifiers.
+        db_sess (Session): The active database session used to query and update records.
+
+    Side Effects:
+        Updates the `Escrows` and `Users` tables to reflect the restored balance,
+        and inserts a new record into `OrderEvents` with the updated user balance.
+    """
+    escrow_balance = db_sess.execute(
+        select(Escrows.balance).where(
+            Escrows.user_id == event.user_id, Escrows.order_id == event.order_id
+        )
+    ).scalar()
+
+    db_sess.execute(
+        update(Escrows)
+        .values(balance=0)
+        .where(Escrows.user_id == event.user_id, Escrows.order_id == event.order_id)
+    )
+
+    user_balance = db_sess.execute(
+        update(Users)
+        .values(balance=Users.balance + escrow_balance)
+        .where(Users.user_id == event.user_id)
+        .returning(Users.balance)
+    ).scalar()
+
+    values = event.model_dump(exclude_unset=True, exclude_none=True)
+    values.pop("metadata", None)
+    db_sess.execute(insert(OrderEvents).values(**values, balance=user_balance))
 
 
 def handle_order_rejected_event(event: Event, db_sess: Session) -> None:
@@ -178,9 +264,21 @@ def log_event(event: EventDict):
     with get_db_session_sync() as sess:
         parsed_event = Event(**event)
 
-        if parsed_event.event_type == EventType.ORDER_PLACED:
-            handle_order_placed_event(parsed_event, sess)
-        elif parsed_event.event_type in (
+        # if parsed_event.event_type == EventType.ORDER_NEW:
+        #     handle_order_placed_event(parsed_event, sess)
+        # elif parsed_event.event_type in (
+        #     EventType.ORDER_PARTIALLY_FILLED,
+        #     EventType.ORDER_FILLED,
+        # ):
+        #     handle_order_filled_event(parsed_event, sess)
+        # elif parsed_event.event_type == EventType.ORDER_CANCELLED:
+        #     handle_order_cancelled_event(parsed_event, sess)
+        # elif parsed_event.event_type == EventType.ORDER_MODIFIED:
+        #     handle_order_modified_event(parsed_event, sess)
+        # elif parsed_event.event_type == EventType.ORDER_REJECTED:
+        #     handle_order_rejected_event(parsed_event, sess)
+
+        if parsed_event.event_type in (
             EventType.ORDER_PARTIALLY_FILLED,
             EventType.ORDER_FILLED,
         ):
@@ -189,5 +287,9 @@ def log_event(event: EventDict):
             handle_order_cancelled_event(parsed_event, sess)
         elif parsed_event.event_type == EventType.ORDER_MODIFIED:
             handle_order_modified_event(parsed_event, sess)
-        elif parsed_event.event_type == EventType.ORDER_REJECTED:
+        elif parsed_event.event_type == EventType.ORDER_REJECTED: # Backwards compatibility, update SpotEngine to use ORDER_NEW_REJECTED or the appropriate event type
             handle_order_rejected_event(parsed_event, sess)
+        elif parsed_event.event_type == EventType.ORDER_NEW_REJECTED:
+            handle_order_new_rejected_event(parsed_event, sess)
+        else:
+            record_order_event(parsed_event, sess)

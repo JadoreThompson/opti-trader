@@ -347,6 +347,11 @@ def test_modify_order_filled_order(engine: SpotEngine):
     engine.modify_order(modify_request)
 
     assert limit_bid["stop_loss"] == 100.0
+    
+    modify_request = ModifyRequest(order_id="buy1", stop_loss=None)
+    engine.modify_order(modify_request)
+
+    assert limit_bid["stop_loss"] == None
 
 
 def test_modify_order_partially_filled_order(engine: SpotEngine):

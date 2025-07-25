@@ -10,9 +10,9 @@ class SpotOrder(Order):
         tag: Tag,
         side: Side,
         quantity: int,
-        price: float = None,
+        price: float | None = None,
         *,
-        oco_id: str = None
+        oco_id: str | None = None
     ) -> None:
         super().__init__(id_, tag, side, quantity, price)
         self._oco_id = oco_id

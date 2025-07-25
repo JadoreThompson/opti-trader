@@ -1,2 +1,2 @@
-from .instrument_watcher import *
-from .payload_pusher import *
+from .instrument_watcher import InstrumentsWatcher
+from .payload_pusher import PayloadPusher

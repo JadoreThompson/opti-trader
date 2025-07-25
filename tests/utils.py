@@ -26,7 +26,7 @@ def create_order_simple(
     limit_price: float | None = None,
     tp_price: float | None = None,
     sl_price: float | None = None,
-):
+) -> dict:
     """A simplified factory for creating test orders."""
     return {
         "order_id": order_id,

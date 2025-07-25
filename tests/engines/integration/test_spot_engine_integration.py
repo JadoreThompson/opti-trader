@@ -14,16 +14,16 @@ from engine.typing import CloseRequest, EventType, ModifyRequest
 from tests.utils import create_order_simple, get_db_sess
 
 
-def create_user() -> str:
+def create_user() -> Users:
     with get_db_sess() as db_sess:
         fkr = Faker()
-        user_id = db_sess.execute(
+        user = db_sess.execute(
             insert(Users)
             .values(username=fkr.user_name(), password=fkr.password())
-            .returning(Users.user_id)
+            .returning(Users)
         ).scalar()
         db_sess.commit()
-    return str(user_id)
+    return user
 
 
 def persist_order(values: dict) -> str:
@@ -63,7 +63,8 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
     buy_order = create_order_simple(
         "", Side.BID, OrderType.LIMIT, instrument=instrument, limit_price=100.0
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     buy_order["user_id"] = user_id
     buy_order.pop("order_id")
     buy_order["order_id"] = persist_order(buy_order)
@@ -82,7 +83,7 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
         select(Users.balance).where(Users.user_id == buy_order["user_id"])
     ).scalar()
 
-    assert event.event_type == EventType.ORDER_PLACED
+    assert event.event_type == EventType.ORDER_NEW
     assert event.quantity == buy_order["quantity"]
     assert user_balance == 9000.0
 
@@ -100,7 +101,8 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
         quantity=10,
         limit_price=100.0,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
     limit_buy["order_id"] = persist_order(limit_buy)
@@ -116,7 +118,8 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
         OrderType.MARKET,
         quantity=10,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     market_sell["user_id"] = user_id
     market_sell.pop("order_id")
     market_sell["order_id"] = persist_order(market_sell)
@@ -143,7 +146,7 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     ).scalar()
 
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].event_type == EventType.ORDER_NEW
     assert events[0].asset_balance == 0
     assert events[0].balance == 9000.0
     assert events[1].event_type == EventType.ORDER_FILLED
@@ -162,7 +165,8 @@ def test_order_partially_filled_event(
         quantity=10,
         limit_price=100.0,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
     limit_buy["order_id"] = persist_order(limit_buy)
@@ -179,7 +183,8 @@ def test_order_partially_filled_event(
         OrderType.MARKET,
         quantity=5,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     market_sell["user_id"] = user_id
     market_sell.pop("order_id")
     market_sell["order_id"] = persist_order(market_sell)
@@ -208,7 +213,7 @@ def test_order_partially_filled_event(
     ).scalar()
 
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].event_type == EventType.ORDER_NEW
     assert events[0].asset_balance == 0
     assert events[0].balance == 9000.0
     assert events[1].event_type == EventType.ORDER_PARTIALLY_FILLED
@@ -226,7 +231,8 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
         quantity=10,
         limit_price=100.0,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
     limit_buy["order_id"] = persist_order(limit_buy)
@@ -256,7 +262,7 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
 
     balance = get_default_balance() - escrow_balance
     assert len(events) == 1
-    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].event_type == EventType.ORDER_NEW
     assert events[0].asset_balance == 0
     assert events[0].balance == balance
     assert escrow_balance == 1000.0
@@ -304,7 +310,8 @@ def test_order_modified_event(engine: SpotEngine, db_sess: Session, patched_log)
         quantity=10,
         limit_price=100.0,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
     limit_buy["order_id"] = persist_order(limit_buy)
@@ -338,7 +345,7 @@ def test_order_modified_event(engine: SpotEngine, db_sess: Session, patched_log)
         .all()
     )
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_PLACED
+    assert events[0].event_type == EventType.ORDER_NEW
 
 
 def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log):
@@ -352,7 +359,8 @@ def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log)
         OrderType.MARKET,
         quantity=10,
     )
-    user_id = create_user()
+    user = create_user()
+    user_id = user.user_id
     sell_order["user_id"] = user_id
     sell_order.pop("order_id")
     sell_order["order_id"] = persist_order(sell_order)

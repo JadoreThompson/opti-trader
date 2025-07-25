@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from db_models import get_datetime
 
 
-
 MatchResult = namedtuple(
     "MatchResult",
     ("outcome", "price", "quantity"),
@@ -55,18 +54,26 @@ class Payload(BaseModel):
 class EventType(str, Enum):
     ASK_SUBMITTED = "ask_submitted"
     BID_SUBMITTED = "bid_submitted"
-    ORDER_PLACED = "order_placed"
+    ORDER_NEW = "order_new"
     ORDER_CANCELLED = "order_cancelled"
     ORDER_MODIFIED = "order_modified"
-    ORDER_FILLED = "order_filled"
     ORDER_PARTIALLY_FILLED = "order_partially_filled"
-    ORDER_REJECTED = "order_rejected"
+    ORDER_FILLED = "order_filled"
+    ORDER_PARTIALLY_CLOSED = "order_partially_closed"
+    ORDER_CLOSED = "order_closed"
+    ORDER_REJECTED = (
+        "order_rejected"  # Backwards compatibility, use ORDER_NEW_REJECTED instead
+    )
+    ORDER_NEW_REJECTED = "order_new_rejected"
+    ORDER_PARTIALLY_CANCELLED = "order_partially_cancelled"
+    ORDER_CANCEL_REJECTED = "order_cancel_rejected"
+    ORDER_MODIFY_REJECTED = "order_modify_rejected"
 
 
 class Event(BaseModel):
-    user_id: str = None
-    order_id: str = None
-    event_type: str = None
+    user_id: str | None = None
+    order_id: str | None = None
+    event_type: str | None = None
     quantity: int | None = None
     price: float | None = None
     stop_loss: float | None = None
@@ -84,6 +91,7 @@ class Event(BaseModel):
         return {
             k: (str(v) if isinstance(v, (datetime, UUID)) else v) for k, v in d.items()
         }
+
 
 ############### Queue ###############
 class Queue:

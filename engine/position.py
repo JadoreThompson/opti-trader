@@ -28,7 +28,7 @@ class Position:
         self._filled_quantity = 0
 
     @property
-    def id(self) -> int:
+    def id(self) -> str:
         return self._payload["order_id"]
 
     @property
@@ -115,10 +115,10 @@ class Position:
         self._payload["open_quantity"] -= quantity
         self.update_upnl(price)
 
-        if self.status == OrderStatus.PARTIALLY_FILLED:
+        if self._payload['status'] == OrderStatus.PARTIALLY_FILLED:
             return
 
-        if self.open_quantity == 0:
+        if self._payload['open_quantity'] == 0:
             self._payload["status"] = OrderStatus.CLOSED
             self._payload["closed_at"] = datetime.now()
             self._payload["closed_price"] = price
@@ -170,7 +170,7 @@ class Position:
         Side Effects:
             - Updates self._payload["unrealised_pnl"].
         """
-        if self.open_quantity > 0:
+        if self._payload['open_quantity'] > 0:
             self._payload["unrealised_pnl"] = self._calculate_pnl(
                 price, self.open_quantity
             )

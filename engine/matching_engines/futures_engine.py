@@ -1,23 +1,29 @@
-from config import PRODUCTION
-from enums import OrderStatus, OrderType, Side
+from asyncio import AbstractEventLoop
+from enums import MarketType, OrderStatus, OrderType, Side
+from logging import getLogger
 from .base_engine import BaseEngine
 from ..enums import MatchOutcome, Tag
 from ..orderbook import OrderBook
 from ..orders import Order
 from ..position import Position
-from ..position_manager import PositionManager
+from ..tasks import log_event
 from ..typing import (
     MODIFY_SENTINEL,
     CloseRequest,
     MatchResult,
     ModifyRequest,
+    Event,
+    EventType,
 )
+
+logger = getLogger(__name__)
 
 
 class FuturesEngine(BaseEngine[Order]):
-    def __init__(self, loop=None) -> None:
+    def __init__(self, loop: AbstractEventLoop | None = None) -> None:
         super().__init__(loop)
-        self._position_manager = PositionManager()
+        self._positions: dict[str, Position] = {}
+        self._orderbooks: dict[str, OrderBook[Order]] = {}
 
     def place_order(self, payload: dict) -> None:
         """
@@ -31,47 +37,90 @@ class FuturesEngine(BaseEngine[Order]):
             payload (dict): Order details including instrument, side, quantity,
                 type, and limit price.
         """
-        if payload["instrument"] not in self._orderbooks:
-            if PRODUCTION:
-                return
-            self._orderbooks[payload["instrument"]] = OrderBook()
-
-        ob = self._orderbooks[payload["instrument"]]
-        pos = self._position_manager.create(payload)
+        ob = self._orderbooks.setdefault(payload["instrument"], OrderBook())
+        if payload["order_id"] in self._positions:
+            raise ValueError(
+                f"Position with order_id {payload['order_id']} already exists."
+            )
+        
+        pos = self._positions.setdefault(payload["order_id"], Position(payload))
         order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
 
         if payload["order_type"] == OrderType.LIMIT:
-            if not (  # Checking if not crossable
-                order.side == Side.BID
-                and ob.best_ask is not None
-                and payload["limit_price"] >= ob.best_ask
-            ) or (
-                order.side == Side.ASK
-                and ob.best_bid is not None
-                and payload["limit_price"] <= ob.best_bid
+            if not (
+                (  # Checking if not crossable
+                    order.side == Side.BID
+                    and ob.best_ask is not None
+                    and payload["limit_price"] >= ob.best_ask
+                )
+                or (
+                    order.side == Side.ASK
+                    and ob.best_bid is not None
+                    and payload["limit_price"] <= ob.best_bid
+                )
             ):
-                # order.set_price(payload["limit_price"])
                 order.price = payload["limit_price"]
                 ob.append(order, order.price)
                 pos.entry_order = order
-                return
-
+                
+                return log_event.delay(
+                    Event(
+                        event_type=EventType.ORDER_NEW,
+                        user_id=payload["user_id"],
+                        order_id=order.id,
+                        quantity=order.quantity,
+                        price=order.price,
+                        asset_balance=payload["open_quantity"],
+                        metadata={"tag": order.tag},
+                    ).model_dump()
+                )
+        
         result: MatchResult = self._match(order, ob)
+        order.filled_quantity = result.quantity
 
         if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
             ob.set_price(result.price)
             self._place_tp_sl(pos, ob)
             pos.apply_entry_fill(result.quantity, result.price)
-            order.filled_quantity = result.quantity
+
+            log_event.delay(
+                Event(
+                    event_type=(
+                        EventType.ORDER_FILLED
+                        if result.outcome == MatchOutcome.SUCCESS
+                        else EventType.ORDER_PARTIALLY_FILLED
+                    ),
+                    quantity=result.quantity,
+                    price=result.price,
+                    user_id=payload["user_id"],
+                    order_id=payload["order_id"],
+                    asset_balance=payload["open_quantity"],
+                    metadata={'market_type': MarketType.FUTURES},
+                ).model_dump()
+            )
 
             if result.outcome == MatchOutcome.SUCCESS:
-                return
+                return self._push_to_queue(payload)
 
         price = payload["limit_price"] or result.price or ob.price
-        # order.set_price(price)
         order.price = price
         ob.append(order, price)
         pos.entry_order = order
+
+        
+        print('here')
+        log_event.delay(
+            Event(
+                event_type=EventType.ORDER_NEW,
+                user_id=payload["user_id"],
+                order_id=order.id,
+                quantity=order.quantity - order.filled_quantity,
+                price=order.price,
+                asset_balance=payload["open_quantity"],
+            ).model_dump()
+        )
+        self._push_to_queue(payload)
+
 
     def close_order(self, request: CloseRequest) -> None:
         """
@@ -84,16 +133,29 @@ class FuturesEngine(BaseEngine[Order]):
             request (CloseRequest): Request specifying the order ID and quantity
                 to close.
         """
-        pos = self._position_manager.get(request.order_id)
+        pos = self._positions.get(request.order_id)
 
-        if pos.status == OrderStatus.PENDING:
+        if pos is None:
+            logger.warn("Position not found for order ID: {request.order_id}")
             return
 
         ob = self._orderbooks[pos.instrument]
+
+        if pos.status == OrderStatus.PENDING:
+            log_event.delay(
+                Event(
+                    event_type=EventType.ORDER_REJECTED,
+                    order_id=pos.id,
+                    user_id=pos.payload["user_id"],
+                    asset_balance=pos.payload["open_quantity"],
+                ).model_dump()
+            )
+            return
+
         requested_qty = self._validate_close_req_quantity(
             request.quantity, pos.open_quantity
         )
-        open_quantity = pos.open_quantity
+
         dummy = Order(
             pos.id,
             Tag.ENTRY,
@@ -107,111 +169,276 @@ class FuturesEngine(BaseEngine[Order]):
             ob.set_price(result.price)
             pos.apply_close(result.quantity, result.price)
 
-            if result.outcome == MatchOutcome.SUCCESS:
-                if requested_qty == open_quantity:
-                    self._remove_tp_sl(pos, ob)
-                    self._position_manager.remove(pos.id)
-                    return
+            if pos.open_quantity == 0:
+                self._remove_tp_sl(pos, ob)
+                if pos.standing_quantity == 0:
+                    event_type = EventType.ORDER_CLOSED
+                    self._positions.pop(pos.id)
+                else:
+                    event_type = EventType.ORDER_PARTIALLY_FILLED
+            else:
+                self._mutate_tp_sl_quantity(pos)
+                event_type = EventType.ORDER_PARTIALLY_FILLED
 
-            self._mutate_tp_sl_quantity(pos)
+            log_event.delay(
+                Event(
+                    event_type=event_type,
+                    order_id=pos.payload["order_id"],
+                    user_id=pos.payload["user_id"],
+                    quantity=result.quantity,
+                    price=result.price,
+                    asset_balance=pos.payload["open_quantity"],
+                ).model_dump()
+            )
 
     def cancel_order(self, request: CloseRequest) -> None:
         """
-        Cancels a pending or partially filled order.
-
-        Cancels the requested quantity, updates position and order book, and
-        removes the order if fully cancelled or filled.
+        Cancels the standing quantity of an existing order.
+        If 'ALL' is passed as the quantity and the open_quantity is 0
+        then the order and it's relating position if removed. Else
+        the order is partially cancelled.
 
         Args:
             request (CloseRequest): Request with order ID and quantity to cancel.
         """
-        pos = self._position_manager.get(request.order_id)
+        # pos = self._position_manager.get(request.order_id)
+        pos = self._positions.get(request.order_id)
+        if pos is None:
+            logger.warn(f"Position not found for order ID: {request.order_id}")
+            return
+
+        if pos.status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
+            return log_event.delay(
+                Event(
+                    event_type=EventType.ORDER_REJECTED,
+                    order_id=pos.id,
+                    user_id=pos.payload["user_id"],
+                    asset_balance=pos.payload["open_quantity"],
+                ).model_dump()
+            )
+
         ob = self._orderbooks[pos.instrument]
         requested_quantity = self._validate_close_req_quantity(
             request.quantity, pos.standing_quantity
         )
-
         pos.apply_cancel(requested_quantity)
+
+        event_type = EventType.ORDER_PARTIALLY_CANCELLED
         if pos.status == OrderStatus.CANCELLED:
             ob.remove(pos.entry_order, pos.entry_order.price)
-            self._position_manager.remove(pos.id)
+            self._positions.pop(pos.id)
+            event_type = EventType.ORDER_CANCELLED
         elif pos.status == OrderStatus.FILLED:
-            if pos.entry_order is not None:
-                ob.remove(pos.entry_order, pos.entry_order.price)
+            ob.remove(pos.entry_order, pos.entry_order.price)
+            event_type = EventType.ORDER_FILLED
+
+        log_event.delay(
+            Event(
+                event_type=event_type,
+                order_id=pos.id,
+                user_id=pos.payload["user_id"],
+                quantity=requested_quantity,
+                asset_balance=pos.payload["open_quantity"],
+            ).model_dump()
+        )
 
     def modify_order(self, request: ModifyRequest) -> None:
         """
-        Modifies an existing order's limit price, take-profit, or stop-loss.
-
-        Updates order parameters and the order book accordingly, only applying
-        changes allowed by the current order status.
+        Modifies the properties of an order. If necessary
+        alters the postiion of it's TP, SL and/or entry order
+        if order was a LIMIT order.
 
         Args:
-            request (ModifyRequest): Contains modifications like new limit price,
-                TP, or SL.
+            request (ModifyRequest): ModifyRequest containing the details.
         """
-        pos = self._position_manager.get(request.order_id)
-        ob = self._orderbooks[pos.instrument]
+
+        def reject_request(payload: dict, asset_balance: int) -> None:
+            log_event.delay(
+                Event(
+                    event_type=EventType.ORDER_REJECTED,
+                    order_id=payload["order_id"],
+                    user_id=payload["user_id"],
+                    asset_balance=asset_balance,
+                ).model_dump()
+            )
+
+        pos = self._positions.get(request.order_id)
+        if pos is None:
+            logger.warn(f"Position not found for order ID: {request.order_id}")
+            return
+
         payload = pos.payload
 
-        if request.limit_price != MODIFY_SENTINEL:
-            if pos.status == OrderStatus.PENDING:
-                payload["limit_price"] = request.limit_price
-                order = pos.entry_order
-                ob.remove(order, order.price)
+        is_limit_order = payload["order_type"] == OrderType.LIMIT
+        is_filled = payload["status"] == OrderStatus.FILLED
+
+        sentinel = float("inf")
+        updated_limit_price = sentinel
+        updated_tp_price = sentinel
+        updated_sl_price = sentinel
+
+        if (
+            is_limit_order
+            and not is_filled
+            and request.limit_price not in (MODIFY_SENTINEL, None)
+        ):
+            updated_limit_price = request.limit_price
+        if request.take_profit != MODIFY_SENTINEL:
+            updated_tp_price = request.take_profit
+        if request.stop_loss != MODIFY_SENTINEL:
+            updated_sl_price = request.stop_loss
+
+        ob = self._orderbooks[payload["instrument"]]
+        asset_balance = pos.open_quantity
+        ob_price: float = ob.price
+
+        # Setting temporary prices based on the request
+        tmp_sl_price = float("-inf") if payload["side"] == Side.BID else float("inf")
+        if updated_sl_price != sentinel:
+            if updated_sl_price is not None:
+                tmp_sl_price = updated_sl_price
+        elif payload["stop_loss"] is not None:
+            tmp_sl_price = payload["stop_loss"]
+
+        tmp_tp_price = float("inf") if payload["side"] == Side.BID else float("-inf")
+        if updated_tp_price != sentinel:
+            if updated_tp_price is not None:
+                tmp_tp_price = updated_tp_price
+        elif payload["take_profit"] is not None:
+            tmp_tp_price = payload["take_profit"]
+
+        tmp_limit_price = sentinel
+        if is_limit_order:
+            if updated_limit_price != sentinel:
+                tmp_limit_price = updated_limit_price
+            else:
+                tmp_limit_price = payload["limit_price"]
+
+        # Validating
+        if is_limit_order:
+            if (
+                is_filled
+                and payload["side"] == Side.BID
+                and not (tmp_sl_price < tmp_tp_price)
+            ):
+                return reject_request(payload, asset_balance)
+
+            if (
+                is_filled
+                and payload["side"] == Side.ASK
+                and not (tmp_sl_price > tmp_tp_price)
+            ):
+                return reject_request(payload, asset_balance)
+
+            if (
+                not is_filled
+                and payload["side"] == Side.BID
+                and not (tmp_sl_price < tmp_limit_price <= ob_price < tmp_tp_price)
+            ):
+                return reject_request(payload, asset_balance)
+
+            if (
+                not is_filled
+                and payload["side"] == Side.ASK
+                and not (tmp_sl_price > tmp_limit_price >= ob_price > tmp_tp_price)
+            ):
+                return reject_request(payload, asset_balance)
+
+        if (
+            is_filled
+            and payload["side"] == Side.BID
+            and not (tmp_sl_price < tmp_tp_price)
+        ):
+            return reject_request(payload, asset_balance)
+
+        if (
+            is_filled
+            and payload["side"] == Side.ASK
+            and not (tmp_sl_price > tmp_tp_price)
+        ):
+            return reject_request(payload, asset_balance)
+
+        if (
+            not is_filled
+            and payload["side"] == Side.BID
+            and not (tmp_sl_price < ob_price < tmp_tp_price)
+        ):
+            return reject_request(payload, asset_balance)
+
+        if (
+            not is_filled
+            and payload["side"] == Side.ASK
+            and not (tmp_sl_price > ob_price > tmp_tp_price)
+        ):
+            return reject_request(payload, asset_balance)
+
+        # Cancel and Replace
+        if is_limit_order and not is_filled:
+            order = pos.entry_order
+            ob.remove(order, order.price)
+            new_order = Order(
+                order.id,
+                Tag.ENTRY,
+                payload["side"],
+                payload["quantity"],
+                tmp_limit_price,
+            )
+            new_order.filled_quantity = order.filled_quantity
+            pos.entry_order = new_order
+            ob.append(new_order, new_order.price)
+
+        if updated_sl_price != sentinel:
+            if pos.stop_loss_order is not None:
+                ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
+
+            if updated_sl_price is not None:
                 new_order = Order(
-                    pos.id,
-                    Tag.ENTRY,
-                    pos.payload["side"],
-                    pos.standing_quantity,
-                    request.limit_price,
+                    payload["order_id"],
+                    Tag.STOP_LOSS,
+                    Side.ASK if payload["side"] == Side.BID else Side.BID,
+                    payload["open_quantity"],
+                    updated_sl_price,
+                )
+                pos.stop_loss_order = new_order
+                ob.append(new_order, new_order.price)
+
+        if updated_tp_price != sentinel:
+            if pos.take_profit_order is not None:
+                ob.remove(pos.take_profit_order, pos.take_profit_order.price)
+
+            if updated_tp_price is not None:
+                new_order = Order(
+                    payload["order_id"],
+                    Tag.TAKE_PROFIT,
+                    Side.ASK if payload["side"] == Side.BID else Side.BID,
+                    payload["open_quantity"],
+                    updated_tp_price,
                 )
                 ob.append(new_order, new_order.price)
-                pos.entry_order = new_order
 
-        opposite_side = Side.BID if payload["side"] == Side.ASK else Side.BID
+        if is_limit_order and not is_filled and updated_limit_price != sentinel:
+            payload["limit_price"] = updated_limit_price
 
-        if request.take_profit != MODIFY_SENTINEL:
-            payload["take_profit"] = request.take_profit
+        payload["stop_loss"] = (
+            updated_sl_price if updated_sl_price != sentinel else payload["stop_loss"]
+        )
+        payload["take_profit"] = (
+            updated_tp_price if updated_tp_price != sentinel else payload["take_profit"]
+        )
 
-            if pos.status != OrderStatus.PENDING:
-                tp_order = pos.take_profit_order
+        log_event.delay(
+            Event(
+                event_type=EventType.ORDER_MODIFIED,
+                user_id=payload["user_id"],
+                order_id=payload["order_id"],
+                asset_balance=asset_balance,
+                limit_price=payload["limit_price"],
+                stop_loss=payload["stop_loss"],
+                take_profit=payload["take_profit"],
+            ).model_dump()
+        )
 
-                if tp_order is not None:
-                    ob.remove(tp_order, tp_order.price)
-
-                if request.take_profit is not None:
-                    tp_order = tp_order or Order(
-                        pos.id,
-                        Tag.TAKE_PROFIT,
-                        opposite_side,
-                        pos.open_quantity,
-                        request.take_profit,
-                    )
-                    pos.take_profit_order = tp_order
-                else:
-                    pos.take_profit_order = None
-
-        if request.stop_loss != MODIFY_SENTINEL:
-            payload["stop_loss"] = request.stop_loss
-
-            if pos.status != OrderStatus.PENDING:
-                sl_order = pos.stop_loss_order
-
-                if sl_order is not None:
-                    ob.remove(sl_order, sl_order.price)
-
-                if request.stop_loss is not None:
-                    sl_order = sl_order or Order(
-                        pos.id,
-                        Tag.STOP_LOSS,
-                        opposite_side,
-                        pos.open_quantity,
-                        request.stop_loss,
-                    )
-                    pos.stop_loss_order = sl_order
-                else:
-                    pos.stop_loss_order = None
+        self._push_to_queue(payload)
 
     def _handle_filled_order(
         self,
@@ -230,8 +457,12 @@ class FuturesEngine(BaseEngine[Order]):
             price (float): Execution price.
             ob (OrderBook): Relevant order book.
         """
-        pos = self._position_manager.get(order.id)
+        pos = self._positions.get(order.id)
+        if pos is None:
+            logger.warn(f"Position not found for order ID: {order.id}")
+            return
 
+        event_type = EventType.ORDER_FILLED
         if order.tag == Tag.ENTRY:
             pos.apply_entry_fill(filled_quantity, price)
             ob.remove(order, order.price)
@@ -245,7 +476,21 @@ class FuturesEngine(BaseEngine[Order]):
             self._remove_tp_sl(pos, ob)
 
             if pos.status == OrderStatus.CLOSED:
-                self._position_manager.remove(pos.id)
+                self._positions.pop(pos.id)
+                event_type = EventType.ORDER_CLOSED
+
+        log_event.delay(
+            Event(
+                event_type=event_type,
+                order_id=pos.id,
+                user_id=pos.payload["user_id"],
+                quantity=filled_quantity,
+                price=price,
+                asset_balance=pos.payload["open_quantity"],
+                metadata={'market_type': MarketType.FUTURES},
+            ).model_dump()
+        )
+        self._push_to_queue(pos.payload)
 
     def _handle_touched_order(
         self,
@@ -263,7 +508,10 @@ class FuturesEngine(BaseEngine[Order]):
             price (float): Execution price.
             ob (OrderBook): Relevant order book.
         """
-        pos = self._position_manager.get(order.id)
+        pos = self._positions.get(order.id)
+        if pos is None:
+            logger.warn(f"Position not found for order ID: {order.id}")
+            return
 
         if order.tag == Tag.ENTRY:
             pos.apply_entry_fill(touched_quantity, price)
@@ -275,6 +523,22 @@ class FuturesEngine(BaseEngine[Order]):
         else:
             pos.apply_close(touched_quantity, price)
             self._mutate_tp_sl_quantity(pos)
+
+        log_event.delay(
+            Event(
+                event_type=(
+                    EventType.ORDER_PARTIALLY_FILLED
+                    if pos.standing_quantity > 0
+                    else EventType.ORDER_PARTIALLY_CLOSED
+                ),
+                order_id=pos.id,
+                user_id=pos.payload["user_id"],
+                quantity=touched_quantity,
+                price=price,
+                asset_balance=pos.payload["open_quantity"],
+            ).model_dump()
+        )
+        self._push_to_queue(pos.payload)
 
     def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
         """

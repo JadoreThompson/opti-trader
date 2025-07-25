@@ -1,5 +1,6 @@
 import logging
 import os
+
 from celery import Celery
 from datetime import timedelta
 from dotenv import load_dotenv
@@ -64,12 +65,12 @@ TEST_BASE_URL = os.getenv("TEST_BASE_URL", "http://localhost:80")
 
 # Logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     filename="app.log",
     filemode="w",
     format="%(asctime)s %(levelname)s: %(message)s",
 )
 console = logging.StreamHandler()
-console.setLevel(logging.DEBUG)
+console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter("%(levelname)s: %(name)s - %(message)s"))
 logging.getLogger().addHandler(console)

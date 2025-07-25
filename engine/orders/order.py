@@ -8,12 +8,12 @@ class Order:
 
     Each Order has a unique identifier, a tag to classify its
     purpose (e.g., entry, take-profit), a side indicating whether
-    it is a buy or sell, a quantity, and an optional price. Tracks
+    it is a bid or ask, a quantity, and an optional price. Tracks
     how much of the order has been filled to support partial executions.
     """
 
     def __init__(
-        self, id_, tag: Tag, side: Side, quantity: int, price: float = None
+        self, id_: str, tag: Tag, side: Side, quantity: int, price: float = None
     ) -> None:
         self._id = id_
         self._tag = tag
@@ -23,7 +23,7 @@ class Order:
         self.filled_quantity = 0
 
     @property
-    def id(self):
+    def id(self) -> str:
         return self._id
 
     @property
