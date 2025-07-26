@@ -5,7 +5,7 @@ from config import CELERY
 from db_models import Escrows, OrderEvents, Orders, Users
 from enums import MarketType, Side
 from utils.db import get_db_session_sync
-from .typing import MODIFY_SENTINEL, EventDict, Event, EventType
+from .typing import EventDict, Event, EventType
 from .enums import Tag
 
 
@@ -43,7 +43,6 @@ def handle_futures_order_filled_event(event: Event, db_sess: Session) -> None:
 
 
 def handle_spot_order_filled_event(event: Event, db_sess: Session) -> None:
-
     order = db_sess.execute(
         select(Orders).where(Orders.order_id == event.order_id)
     ).scalar()
@@ -165,7 +164,6 @@ def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
     amount = event.quantity * opening_price
     user.balance += amount
     escrow.balance -= amount
-    print("Updated user balance to ", user.balance)
     db_sess.execute(insert(OrderEvents).values(**values, balance=user.balance))
     db_sess.commit()
 
@@ -260,10 +258,14 @@ def handle_order_rejected_event(event: Event, db_sess: Session) -> None:
 
 
 def handle_order_closed_event(event: Event, db_sess: Session) -> None:
-    """Persists the order closed event."""
+    """
+    Persists the order closed event. to be called when FUTURES order
+    is closed.
+    """
     order_side = db_sess.execute(
         select(Orders.side).where(Orders.order_id == event.order_id)
     ).scalar_one()
+
     filled_price = db_sess.execute(
         select(Orders.filled_price).where(Orders.order_id == event.order_id)
     ).scalar_one()
@@ -273,32 +275,45 @@ def handle_order_closed_event(event: Event, db_sess: Session) -> None:
             Orders.order_id == event.order_id
         )
     ).scalar_one()
-    
-    db_sess.execute(Update(Orders))
 
-    # direction = -1 if order_side == Side.ASK else 1
-    # return (event.price - filled_price) * event.quantity * direction
-    # db_sess.execute(update(Users.balance))
+    escrow_obj = db_sess.execute(
+        select(Escrows).where(Escrows.order_id == event.order_id)
+    ).scalar()
+
+    escrow_balance = order_price * event.quantity
+    direction = -1 if order_side == Side.ASK else 1
+    pnl = (event.price - filled_price) * event.quantity * direction
+    owed_balance = escrow_balance + pnl
+
+    escrow_obj.balance -= escrow_balance
+
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == event.user_id)
+    ).scalar()
+
+    user_balance = db_sess.execute(
+        update(Users)
+        .values(balance=Users.balance + owed_balance)
+        .where(Users.user_id == event.user_id)
+        .returning(Users.balance)
+    ).scalar()
+
+    db_sess.execute(
+        insert(OrderEvents).values(
+            **event.model_dump(
+                exclude_unset=True, exclude_none=True, exclude={"metadata"}
+            ),
+            balance=user_balance,
+        )
+    )
+
+    db_sess.commit()
 
 
 @CELERY.task
 def log_event(event: EventDict):
     with get_db_session_sync() as sess:
         parsed_event = Event(**event)
-
-        # if parsed_event.event_type == EventType.ORDER_NEW:
-        #     handle_order_placed_event(parsed_event, sess)
-        # elif parsed_event.event_type in (
-        #     EventType.ORDER_PARTIALLY_FILLED,
-        #     EventType.ORDER_FILLED,
-        # ):
-        #     handle_order_filled_event(parsed_event, sess)
-        # elif parsed_event.event_type == EventType.ORDER_CANCELLED:
-        #     handle_order_cancelled_event(parsed_event, sess)
-        # elif parsed_event.event_type == EventType.ORDER_MODIFIED:
-        #     handle_order_modified_event(parsed_event, sess)
-        # elif parsed_event.event_type == EventType.ORDER_REJECTED:
-        #     handle_order_rejected_event(parsed_event, sess)
 
         if parsed_event.event_type in (
             EventType.ORDER_PARTIALLY_FILLED,
@@ -309,9 +324,7 @@ def log_event(event: EventDict):
             handle_order_cancelled_event(parsed_event, sess)
         elif parsed_event.event_type == EventType.ORDER_MODIFIED:
             handle_order_modified_event(parsed_event, sess)
-        elif (
-            parsed_event.event_type == EventType.ORDER_REJECTED
-        ):  # Backwards compatibility, update SpotEngine to use ORDER_NEW_REJECTED or the appropriate event type
+        elif parsed_event.event_type == EventType.ORDER_REJECTED:
             handle_order_rejected_event(parsed_event, sess)
         elif parsed_event.event_type == EventType.ORDER_NEW_REJECTED:
             handle_order_new_rejected_event(parsed_event, sess)
@@ -319,5 +332,6 @@ def log_event(event: EventDict):
             EventType.ORDER_PARTIALLY_CLOSED,
             EventType.ORDER_CLOSED,
         ):
-            # record_order_event(parsed_event, sess)
             handle_order_closed_event(parsed_event, sess)
+        else:
+            record_order_event(parsed_event, sess)

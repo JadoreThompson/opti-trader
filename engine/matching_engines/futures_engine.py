@@ -1,7 +1,6 @@
 from asyncio import AbstractEventLoop
 from json import loads
 
-from pydantic import ValidationError
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
 from enums import MarketType, OrderStatus, OrderType, Side
 from logging import getLogger
@@ -44,10 +43,9 @@ class FuturesEngine(BaseEngine[Order]):
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
-                
+
                 try:
                     payload = Payload(**loads(m["data"]))
-
                     if payload.topic == PayloadTopic.CREATE:
                         self.place_order(payload.data)
                     elif payload.topic == PayloadTopic.CANCEL:
@@ -196,7 +194,7 @@ class FuturesEngine(BaseEngine[Order]):
             Side.BID if pos.payload["side"] == Side.ASK else Side.ASK,
             requested_qty,
         )
-
+                
         result: MatchResult = self._match(dummy, ob)
 
         if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
@@ -205,26 +203,27 @@ class FuturesEngine(BaseEngine[Order]):
 
             if pos.open_quantity == 0:
                 self._remove_tp_sl(pos, ob)
+
                 if pos.standing_quantity == 0:
                     event_type = EventType.ORDER_CLOSED
                     self._positions.pop(pos.id)
                 else:
-                    event_type = EventType.ORDER_PARTIALLY_FILLED
+                    event_type = EventType.ORDER_PARTIALLY_CLOSED
             else:
                 self._mutate_tp_sl_quantity(pos)
-                event_type = EventType.ORDER_PARTIALLY_FILLED
+                event_type = EventType.ORDER_PARTIALLY_CLOSED
 
             log_event.delay(
                 Event(
                     event_type=event_type,
-                    order_id=pos.payload["order_id"],
+                    order_id=pos.id,
                     user_id=pos.payload["user_id"],
                     quantity=result.quantity,
                     price=result.price,
-                    asset_balance=pos.payload["open_quantity"],
-                    # metadata={'side': }
+                    asset_balance=pos.open_quantity,
                 ).model_dump()
             )
+            self._push_to_queue(pos.payload)
 
     def cancel_order(self, request: CloseRequest) -> None:
         """
@@ -236,7 +235,6 @@ class FuturesEngine(BaseEngine[Order]):
         Args:
             request (CloseRequest): Request with order ID and quantity to cancel.
         """
-        # pos = self._position_manager.get(request.order_id)
         pos = self._positions.get(request.order_id)
         if pos is None:
             logger.warn(f"Position not found for order ID: {request.order_id}")
@@ -287,6 +285,7 @@ class FuturesEngine(BaseEngine[Order]):
         Args:
             request (ModifyRequest): ModifyRequest containing the details.
         """
+
         def reject_request(payload: dict, asset_balance: int) -> None:
             log_event.delay(
                 Event(
@@ -521,7 +520,7 @@ class FuturesEngine(BaseEngine[Order]):
                 user_id=pos.payload["user_id"],
                 quantity=filled_quantity,
                 price=price,
-                asset_balance=pos.payload["open_quantity"],
+                asset_balance=pos.open_quantity,
                 metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
@@ -570,7 +569,8 @@ class FuturesEngine(BaseEngine[Order]):
                 user_id=pos.payload["user_id"],
                 quantity=touched_quantity,
                 price=price,
-                asset_balance=pos.payload["open_quantity"],
+                asset_balance=pos.open_quantity,
+                metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
         self._push_to_queue(pos.payload)

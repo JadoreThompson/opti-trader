@@ -1,8 +1,7 @@
 import asyncio
 import pytest
-import pytest_asyncio
-from sqlalchemy import select
 
+from sqlalchemy import select
 from config import REDIS_CLIENT
 from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
 from engine.typing import EventType
@@ -203,10 +202,14 @@ async def test_fully_cancel_order(
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_close_order(
+async def test_close_order_no_profit(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
     await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 90.0)
+    await http_client_authenticated.patch(
+        f"/order/modify/{persisted_futures_order_id}",
+        json={"stop_loss": None, "take_profit": None},
+    )
 
     counter_order = {
         "instrument": "TEST-BTC-USD-FUTURES",
@@ -216,13 +219,24 @@ async def test_close_order(
     }
     await http_client_authenticated.post("/order/futures", json=counter_order)
 
+    resting_bid = {
+        "instrument": "TEST-BTC-USD-FUTURES",
+        "side": "bid",
+        "order_type": "limit",
+        "limit_price": 90.0,
+        "quantity": 10,
+    }
+    await http_client_authenticated.post("/order/futures", json=resting_bid)
+
+    await asyncio.sleep(1)
+
     await http_client_authenticated.request(
         "DELETE",
         f"/order/close/{persisted_futures_order_id}",
         json={"quantity": "ALL"},
     )
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(3)
 
     with get_db_sess() as sess:
         user_balance = sess.execute(
@@ -254,5 +268,172 @@ async def test_close_order(
             select(Orders).where(Orders.order_id == persisted_futures_order_id)
         ).scalar()
 
-    assert user_balance == get_default_user_balance()
-    assert escrow_balance == 0
+    # Original escrow for the limit bid as 450.0.
+    # The market order filled 5 at 90.0 for 0.0 additional pnl.
+    # Other orders occupy the escrow. Making it 2250.0 - 450.0
+    assert user_balance == get_default_user_balance() - 1800.0
+    # Original escrow was 900.0, half quantity is closed leaving 450.0
+    assert escrow_balance == 450.0
+    assert order.status == OrderStatus.PARTIALLY_FILLED
+    assert order.standing_quantity == 5
+    assert len(events) == 5, [e.event_type for e in events]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order_profit(
+    futures_engine, http_client_authenticated, persisted_futures_order_id
+):
+    await http_client_authenticated.patch(
+        f"/order/modify/{persisted_futures_order_id}",
+        json={"stop_loss": None, "take_profit": None},
+    )
+
+    await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 90.0)
+    counter_order = {
+        "instrument": "TEST-BTC-USD-FUTURES",
+        "side": "ask",
+        "order_type": "market",
+        "quantity": 5,
+    }
+    await http_client_authenticated.post("/order/futures", json=counter_order)
+
+    resting_bid = {
+        "instrument": "TEST-BTC-USD-FUTURES",
+        "side": "bid",
+        "order_type": "limit",
+        "limit_price": 100.0,
+        "quantity": 10,
+    }
+    await http_client_authenticated.post("/order/futures", json=resting_bid)
+
+    await asyncio.sleep(1)
+
+    await http_client_authenticated.request(
+        "DELETE",
+        f"/order/close/{persisted_futures_order_id}",
+        json={"quantity": "ALL"},
+    )
+
+    await asyncio.sleep(3)
+
+    with get_db_sess() as sess:
+        user_balance = sess.execute(
+            select(Users.balance).where(
+                Users.user_id
+                == select(Orders.user_id)
+                .where(Orders.order_id == persisted_futures_order_id)
+                .scalar_subquery()
+            )
+        ).scalar()
+
+        events = (
+            sess.execute(
+                select(OrderEvents).where(
+                    OrderEvents.order_id == persisted_futures_order_id
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        escrow_balance = sess.execute(
+            select(Escrows.balance).where(
+                Escrows.order_id == persisted_futures_order_id
+            )
+        ).scalar()
+
+        order = sess.execute(
+            select(Orders).where(Orders.order_id == persisted_futures_order_id)
+        ).scalar()
+
+    # Original escrow for the limit bid as 450.0.
+    # The market order filled 5 at 100.0 for 100.0 additional pnl.
+    # Other orders occupy the escrow. Making it 2350.0 - 500.0
+    assert user_balance == get_default_user_balance() - 1850.0
+    # Original escrow was 900.0, half quantity is closed leaving 450.0
+    assert escrow_balance == 450.0, f"Balance {escrow_balance}"
+    assert order.status == OrderStatus.PARTIALLY_FILLED
+    assert order.standing_quantity == 5
+    assert len(events) == 5
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_close_order_loss(
+    futures_engine, http_client_authenticated, persisted_futures_order_id
+):
+    await http_client_authenticated.patch(
+        f"/order/modify/{persisted_futures_order_id}",
+        json={"stop_loss": None, "take_profit": None},
+    )
+
+    await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 90.0)
+    counter_order = {
+        "instrument": "TEST-BTC-USD-FUTURES",
+        "side": "ask",
+        "order_type": "market",
+        "quantity": 10,
+    }
+    await http_client_authenticated.post("/order/futures", json=counter_order)
+
+    resting_bid = {
+        "instrument": "TEST-BTC-USD-FUTURES",
+        "side": "bid",
+        "order_type": "limit",
+        "limit_price": 80.0,
+        "quantity": 10,
+    }
+    await http_client_authenticated.post("/order/futures", json=resting_bid)
+
+    await asyncio.sleep(1)
+
+    await http_client_authenticated.request(
+        "DELETE",
+        f"/order/close/{persisted_futures_order_id}",
+        json={"quantity": "ALL"},
+    )
+
+    await asyncio.sleep(3)
+
+    with get_db_sess() as sess:
+        user_balance = sess.execute(
+            select(Users.balance).where(
+                Users.user_id
+                == select(Orders.user_id)
+                .where(Orders.order_id == persisted_futures_order_id)
+                .scalar_subquery()
+            )
+        ).scalar()
+
+        events = (
+            sess.execute(
+                select(OrderEvents).where(
+                    OrderEvents.order_id == persisted_futures_order_id
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        escrow_balance = sess.execute(
+            select(Escrows.balance).where(
+                Escrows.order_id == persisted_futures_order_id
+            )
+        ).scalar()
+
+        order = sess.execute(
+            select(Orders).where(Orders.order_id == persisted_futures_order_id)
+        ).scalar()
+
+    # Total escrow on table for al lordes is 2600.0.
+    # The original escrow for the first limit bid was 900.0
+    # The limit bid was closed at 80.0, 10.0 less than
+    # the original price, resulting in a 100.0 loss.
+    # The user is then owed 800.0 which is 100.0 less than the original
+    # 900.0 which was the escrow. Resulting in 1800.0 escrow still
+    # on the table.
+    assert user_balance == get_default_user_balance() - 1800.0
+    # Original escrow was 900.0, full quantity is closed leaving 0.0
+    assert escrow_balance == 0.0, f"Balance {escrow_balance}"
+    assert order.status == OrderStatus.CLOSED
+    assert order.standing_quantity == 0
+    assert len(events) == 5

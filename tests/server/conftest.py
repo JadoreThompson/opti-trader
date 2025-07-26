@@ -65,6 +65,7 @@ async def instrument():
 @pytest_asyncio.fixture(loop_scope="module")
 async def persisted_futures_order_id(http_client_authenticated, instrument):
     """Creates a new futures limit order and returns its ID."""
+    await REDIS_CLIENT.set(instrument, 100.0)
     limit_bid = {
         "side": Side.BID,
         "order_type": OrderType.LIMIT,

@@ -1,9 +1,8 @@
-import asyncio
 from datetime import datetime
-from uuid import UUID
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from uuid import UUID
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
 from db_models import Orders
@@ -232,7 +231,7 @@ async def close_order(
 
     if order is None:
         return JSONResponse(status_code=400, content={"error": "Order doesn't exist."})
-    if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_CLOSED):
+    if order.status in (OrderStatus.PENDING, OrderStatus.CLOSED):
         return JSONResponse(status_code=400, content={"error": "Invalid order status."})
 
     if order.open_quantity == 0 or (
@@ -249,5 +248,3 @@ async def close_order(
             data={"order_id": order.order_id, "quantity": body.quantity},
         ).model_dump_json(),
     )
-
-    return {"message": "All open orders are being closed."}

@@ -5,11 +5,10 @@ from typing import Union
 
 from db_models import Escrows, OrderEvents, Orders, Users
 from engine.typing import EventType
-from enums import MarketType, OrderStatus, OrderType, Side
+from enums import MarketType, OrderType, Side
 from .models import (
     FuturesLimitOrder,
     FuturesMarketOrder,
-    ModifyOrder,
     SpotLimitOCOOrder,
     SpotLimitOrder,
     SpotMarketOCOOrder,
@@ -215,7 +214,7 @@ async def handle_prepare_futures_order(
             **order.model_dump(),
             user_id=user_id,
             market_type=MarketType.FUTURES.value,
-            standing_quantity=order.quantit,            
+            standing_quantity=order.quantity,
             price=current_price,
         )
         .returning(Orders)
