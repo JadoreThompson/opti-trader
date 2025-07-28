@@ -1,4 +1,5 @@
 import pytest
+
 from engine import SpotEngine
 from engine.balance_manager import BalanceManager
 from engine.orderbook import OrderBook
@@ -14,7 +15,6 @@ def engine():
     return SpotEngine()
 
 
-@pytest.fixture(scope="module")
 def test_place_limit_orders_no_match(engine: SpotEngine):
     """
     Scenario: Two limit orders are placed far from each other and should not match.
@@ -29,7 +29,7 @@ def test_place_limit_orders_no_match(engine: SpotEngine):
 
     assert buy_order["status"] == OrderStatus.PENDING
 
-    ob = engine._orderbooks[instrument]
+    ob, _ = engine._orderbooks[instrument]
     book_item = ob.bids[99.0]
     assert book_item.head == book_item.tail
 
@@ -65,7 +65,7 @@ def test_market_bid_gets_filled(engine):
     assert market_buy["standing_quantity"] == 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(scope="session")
 async def test_market_bid_and_limit_ask_neutralise(engine: SpotEngine):
     """
     Scenario: A limit bid is placed into an empty book as a resting order.

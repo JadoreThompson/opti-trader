@@ -7,6 +7,7 @@ from typing import AsyncGenerator, Generator
 
 from config import DB_ENGINE, DB_ENGINE_SYNC, DB_URL
 
+
 smaker = sessionmaker(bind=DB_ENGINE, class_=AsyncSession, expire_on_commit=False)
 smaker_sync = sessionmaker(bind=DB_ENGINE_SYNC, class_=Session, expire_on_commit=False)
 

@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select, text
@@ -9,7 +8,7 @@ from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils import set_cookie
 from server.utils.db import depends_db_session
-from .models import UserCreate, UserRead
+from .models import UserCreate
 
 
 route = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,7 +33,6 @@ async def register_user(
     body: UserCreate,
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    result = (await db_sess.execute(text("SELECT 1 FROM users"))).scalar()
     result = await db_sess.execute(select(Users).where(Users.username == body.username))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Username already registered")

@@ -187,18 +187,7 @@ def handle_order_modified_event(event: Event, db_sess: Session) -> None:
         )
     )
 
-    event_values = event.model_dump(exclude_unset=True, exclude_none=True)
-    event_values.pop("metadata", None)
-
-    db_sess.execute(
-        insert(OrderEvents).values(
-            **event_values,
-            balance=select(Users.balance)
-            .where(Users.user_id == event.user_id)
-            .scalar_subquery(),
-        )
-    )
-    db_sess.commit()
+    record_order_event(event, db_sess)
 
 
 def handle_order_new_rejected_event(event: Event, db_sess: Session) -> None:
@@ -241,22 +230,6 @@ def handle_order_new_rejected_event(event: Event, db_sess: Session) -> None:
     db_sess.execute(insert(OrderEvents).values(**values, balance=user_balance))
 
 
-def handle_order_rejected_event(event: Event, db_sess: Session) -> None:
-    """Persists the order rejection event. No balance changes occur."""
-    values = event.model_dump(exclude_unset=True, exclude_none=True)
-    values.pop("metadata", None)
-
-    db_sess.execute(
-        insert(OrderEvents).values(
-            **values,
-            balance=select(Users.balance)
-            .where(Users.user_id == event.user_id)
-            .scalar_subquery(),
-        )
-    )
-    db_sess.commit()
-
-
 def handle_order_closed_event(event: Event, db_sess: Session) -> None:
     """
     Persists the order closed event. to be called when FUTURES order
@@ -270,7 +243,7 @@ def handle_order_closed_event(event: Event, db_sess: Session) -> None:
         select(Orders.filled_price).where(Orders.order_id == event.order_id)
     ).scalar_one()
 
-    order_price = db_sess.execute(
+    submission_price = db_sess.execute(
         select(func.coalesce(Orders.limit_price, Orders.price)).where(
             Orders.order_id == event.order_id
         )
@@ -280,7 +253,7 @@ def handle_order_closed_event(event: Event, db_sess: Session) -> None:
         select(Escrows).where(Escrows.order_id == event.order_id)
     ).scalar()
 
-    escrow_balance = order_price * event.quantity
+    escrow_balance = submission_price * event.quantity
     direction = -1 if order_side == Side.ASK else 1
     pnl = (event.price - filled_price) * event.quantity * direction
     owed_balance = escrow_balance + pnl
@@ -315,17 +288,10 @@ def log_event(event: EventDict):
     with get_db_session_sync() as sess:
         parsed_event = Event(**event)
 
-        if parsed_event.event_type in (
-            EventType.ORDER_PARTIALLY_FILLED,
-            EventType.ORDER_FILLED,
-        ):
-            handle_order_filled_event(parsed_event, sess)
-        elif parsed_event.event_type == EventType.ORDER_CANCELLED:
+        if parsed_event.event_type == EventType.ORDER_CANCELLED:
             handle_order_cancelled_event(parsed_event, sess)
         elif parsed_event.event_type == EventType.ORDER_MODIFIED:
             handle_order_modified_event(parsed_event, sess)
-        elif parsed_event.event_type == EventType.ORDER_REJECTED:
-            handle_order_rejected_event(parsed_event, sess)
         elif parsed_event.event_type == EventType.ORDER_NEW_REJECTED:
             handle_order_new_rejected_event(parsed_event, sess)
         elif parsed_event.event_type in (

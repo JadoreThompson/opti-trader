@@ -1,7 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel
 from sqlalchemy import insert, update
-from typing import Union
+from typing import TypeAlias, Union
 
 
 class PusherPayloadTopic(Enum):
@@ -15,4 +15,4 @@ class PusherPayload(BaseModel):
     data: dict
 
 
-MutationFunc = Union[insert, update]
+MutationFunc: TypeAlias = Union[insert, update]

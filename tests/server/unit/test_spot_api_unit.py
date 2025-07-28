@@ -9,7 +9,7 @@ from enums import MarketType, OrderType, Side
 from tests.utils import get_db_sess_async
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_spot_bid_market_order(http_client_authenticated):
     instrument = "test-ticker"
 
@@ -59,7 +59,7 @@ async def test_create_spot_bid_market_order(http_client_authenticated):
     assert user_balance == get_default_user_balance() - 1000.0
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_spot_bid_limit_order(http_client_authenticated):
     instrument = "test-ticker"
 
@@ -112,7 +112,7 @@ async def test_create_spot_bid_limit_order(http_client_authenticated):
     assert user_balance == get_default_user_balance() - 1000.0
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_spot_bid_order_insufficient_balance(http_client_authenticated):
     body = {
         "order_type": OrderType.LIMIT,
@@ -128,7 +128,7 @@ async def test_create_spot_bid_order_insufficient_balance(http_client_authentica
     assert "error" in rsp.json()
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_spot_ask_limit_order(http_client_authenticated):
     body = {
         "order_type": OrderType.LIMIT,
@@ -180,7 +180,7 @@ async def test_create_spot_ask_limit_order(http_client_authenticated):
     assert "order_id" in data, data
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_spot_ask_insufficient_asset_balance(
     http_client_authenticated,
 ) -> None:
@@ -199,7 +199,7 @@ async def test_create_spot_ask_insufficient_asset_balance(
     assert "error" in data
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_order_non_existent_instrument(http_client_authenticated):
     body = {
         "order_type": OrderType.LIMIT,
@@ -216,7 +216,7 @@ async def test_create_order_non_existent_instrument(http_client_authenticated):
     assert "error" in data
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_spot_limit_bid(http_client_authenticated):
     body = {
         "order_type": OrderType.LIMIT,
@@ -235,7 +235,7 @@ async def test_modify_spot_limit_bid(http_client_authenticated):
     assert rsp.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_spot_market_oco_bid(http_client_authenticated):
     body = {
         "order_type": OrderType.MARKET_OCO,
@@ -249,14 +249,14 @@ async def test_modify_spot_market_oco_bid(http_client_authenticated):
 
     body = {"take_profit": 50.0}
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
-    assert rsp.status_code == 201
+    assert rsp.status_code == 400, rsp.json()
 
     body = {"stop_loss": 50.0}
     rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
-    assert rsp.status_code == 201
+    assert rsp.status_code == 201, rsp.json()
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_spot_market_bid_returns_400(http_client_authenticated):
     body = {
         "order_type": OrderType.MARKET,
@@ -281,7 +281,7 @@ async def test_modify_spot_market_bid_returns_400(http_client_authenticated):
     assert rsp.status_code == 400
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_success(http_client_authenticated):
     # Create an order to cancel
     await REDIS_CLIENT.set("BTC", 100.0)
@@ -303,7 +303,7 @@ async def test_cancel_order_success(http_client_authenticated):
     assert rsp_cancel.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_not_found(http_client_authenticated):
     non_existent_order_id = str(uuid4())
     cancel_body = {"quantity": 1}
@@ -315,7 +315,7 @@ async def test_cancel_order_not_found(http_client_authenticated):
     assert rsp.json() == {"error": "Order doesn't exist."}
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_unauthorized(http_client_authenticated):
     other_user_id = str(uuid4())
     async with get_db_sess_async() as sess:
@@ -354,7 +354,7 @@ async def test_cancel_order_unauthorized(http_client_authenticated):
     assert rsp.json() == {"error": "Order doesn't exist."}
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_insufficient_quantity(http_client_authenticated):
     await REDIS_CLIENT.set("BTC", 100.0)
     create_body = {

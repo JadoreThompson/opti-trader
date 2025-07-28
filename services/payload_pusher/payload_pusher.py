@@ -39,7 +39,10 @@ class PayloadPusher:
 
     async def start(self) -> None:
         if asyncio.get_event_loop().is_running():
-            await asyncio.gather(self._listen(), self._push())
+            try:
+                await asyncio.gather(self._listen(), self._push())
+            except RuntimeError as e:
+                logger.error(f"{type(e) - str(e)}")
 
     async def _listen(self) -> None:
         """Continuously listen to the Redis pub/sub channel and queue payloads."""
@@ -97,7 +100,7 @@ class PayloadPusher:
         """
         table_annotations = table_cls.__annotations__.items()
 
-        for rec in records:            
+        for rec in records:
             for field, field_typ in table_annotations:
                 val = rec.get(field)
                 if val is None:
@@ -115,7 +118,7 @@ class PayloadPusher:
                         rec[field] = datetime.fromisoformat(val)
                     else:
                         rec[field] = typ(val)
-                
+
         try:
             async with get_db_session() as sess:
                 await sess.execute(mfunc(table_cls), records)

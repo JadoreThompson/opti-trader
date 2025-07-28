@@ -125,10 +125,10 @@ class FuturesEngine(BaseEngine[Order]):
                         if result.outcome == MatchOutcome.SUCCESS
                         else EventType.ORDER_PARTIALLY_FILLED
                     ),
-                    quantity=result.quantity,
-                    price=result.price,
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
+                    quantity=result.quantity,
+                    price=result.price,
                     asset_balance=payload["open_quantity"],
                     metadata={"market_type": MarketType.FUTURES},
                 ).model_dump()
@@ -168,13 +168,13 @@ class FuturesEngine(BaseEngine[Order]):
         pos = self._positions.get(request.order_id)
 
         if pos is None:
-            logger.warn("Position not found for order ID: {request.order_id}")
+            logger.warning("Position not found for order ID: {request.order_id}")
             return
 
         ob = self._orderbooks[pos.instrument]
 
         if pos.status == OrderStatus.PENDING:
-            log_event.delay(
+            return log_event.delay(
                 Event(
                     event_type=EventType.ORDER_REJECTED,
                     order_id=pos.id,
@@ -182,7 +182,6 @@ class FuturesEngine(BaseEngine[Order]):
                     asset_balance=pos.payload["open_quantity"],
                 ).model_dump()
             )
-            return
 
         requested_qty = self._validate_close_req_quantity(
             request.quantity, pos.open_quantity
@@ -194,7 +193,7 @@ class FuturesEngine(BaseEngine[Order]):
             Side.BID if pos.payload["side"] == Side.ASK else Side.ASK,
             requested_qty,
         )
-                
+
         result: MatchResult = self._match(dummy, ob)
 
         if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
@@ -237,7 +236,7 @@ class FuturesEngine(BaseEngine[Order]):
         """
         pos = self._positions.get(request.order_id)
         if pos is None:
-            logger.warn(f"Position not found for order ID: {request.order_id}")
+            logger.warning(f"Position not found for order ID: {request.order_id}")
             return
 
         if pos.status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
@@ -298,7 +297,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         pos = self._positions.get(request.order_id)
         if pos is None:
-            logger.warn(f"Position not found for order ID: {request.order_id}")
+            logger.warning(f"Position not found for order ID: {request.order_id}")
             return
 
         payload = pos.payload
@@ -493,7 +492,7 @@ class FuturesEngine(BaseEngine[Order]):
         """
         pos = self._positions.get(order.id)
         if pos is None:
-            logger.warn(f"Position not found for order ID: {order.id}")
+            logger.warning(f"Position not found for order ID: {order.id}")
             return
 
         event_type = EventType.ORDER_FILLED
@@ -544,7 +543,7 @@ class FuturesEngine(BaseEngine[Order]):
         """
         pos = self._positions.get(order.id)
         if pos is None:
-            logger.warn(f"Position not found for order ID: {order.id}")
+            logger.warning(f"Position not found for order ID: {order.id}")
             return
 
         if order.tag == Tag.ENTRY:

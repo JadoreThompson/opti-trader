@@ -8,7 +8,6 @@ from sqlalchemy.orm import (
     Mapped,
     mapped_column,
     relationship,
-    validates,
 )
 from enums import OrderStatus
 
@@ -18,7 +17,7 @@ def get_datetime() -> datetime:
 
 
 def get_default_user_balance() -> float:
-    return 10_000
+    return 10_000.00
 
 
 class Base(DeclarativeBase):

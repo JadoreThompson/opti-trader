@@ -1,13 +1,12 @@
-import asyncio
 from contextlib import asynccontextmanager, contextmanager
-from typing import AsyncGenerator, Generator
-from uuid import uuid4
 from datetime import datetime
-from config import TEST_DB_ENGINE, TEST_DB_ENGINE_ASYNC
-from engine import SpotEngine
-from enums import OrderStatus, OrderType, Side
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import AsyncGenerator, Generator
+from uuid import uuid4
+
+from config import TEST_DB_ENGINE, TEST_DB_ENGINE_ASYNC
+from enums import OrderStatus, OrderType, Side
 
 smaker = sessionmaker(bind=TEST_DB_ENGINE, class_=Session, expire_on_commit=False)
 smaker_async = sessionmaker(
@@ -24,6 +23,7 @@ def create_order_simple(
     open_quantity: int = 0,
     standing_quantity: int = None,
     limit_price: float | None = None,
+    price: float | None = None,
     tp_price: float | None = None,
     sl_price: float | None = None,
 ) -> dict:
@@ -40,6 +40,7 @@ def create_order_simple(
         ),
         "status": OrderStatus.PENDING,
         "limit_price": limit_price,
+        "price": price,
         "take_profit": tp_price,
         "stop_loss": sl_price,
         "filled_price": None,
@@ -107,5 +108,6 @@ def get_db_sess() -> Generator[Session, None, None]:
 async def test_depends_db_session() -> AsyncGenerator[AsyncSession, None]:
     async with smaker_async.begin() as sess:
         yield sess
+
 
 get_db_sess_async = asynccontextmanager(test_depends_db_session)

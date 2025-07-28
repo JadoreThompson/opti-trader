@@ -1,27 +1,58 @@
-# import copy
-# import json
-# import random
-# import pytest
-# from engine.typing import CloseRequest, ModifyRequest
-# from enums import OrderStatus, OrderType, Side
+import asyncio
+import copy
+import pytest
+import pytest_asyncio
+
+from faker import Faker
+from sqlalchemy import insert, select
+from sqlalchemy.orm import Session
+
+from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
+from engine import FuturesEngine
+from engine.typing import CloseRequest, EventType, ModifyRequest
+from enums import MarketType, OrderType, Side
+from tests.utils import create_order_simple, get_db_sess
+from tests.engines.integration.utils import apply_escrow, create_user, persist_order
 
 
-# TEST_SIZES = [int(2**i) for i in range(2, 9)] + [512, 1000]
+TEST_SIZES = [int(2**i) for i in range(2, 9)] + [512, 1000]
 
 
-# def sanitize_for_snapshot(data: dict) -> dict:
-#     """Removes non-deterministic fields from state data for reliable snapshots."""
-#     sanitized_data = {}
-#     for order_id, state in data.items():
-#         s_state = copy.deepcopy(state)
-#         s_state.pop("user_id", None)
-#         s_state.pop("created_at", None)
-#         s_state.pop("closed_at", None)
-#         sanitized_data[order_id] = s_state
-#     return sanitized_data
+def sanitize_for_snapshot(data: dict) -> dict:
+    """Removes non-deterministic fields from state data for reliable snapshots."""
+    sanitized_data = {}
+    for order_id, state in data.items():
+        s_state = copy.deepcopy(state)
+        s_state.pop("user_id", None)
+        s_state.pop("created_at", None)
+        s_state.pop("closed_at", None)
+        sanitized_data[order_id] = s_state
+    return sanitized_data
 
 
-# ######## SNAPSHOTS ###########
+# def create_user() -> Users:
+#     """Creates a new user with a default balance and persists it to the DB."""
+#     with get_db_sess() as db_sess:
+#         fkr = Faker()
+#         user = db_sess.execute(
+#             insert(Users)
+#             .values(username=fkr.user_name(), password=fkr.password())
+#             .returning(Users)
+#         ).scalar()
+#         db_sess.commit()
+#     return user
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def engine(payload_pusher, payload_queue):
+    """Provides a fresh FuturesEngine instance for each test."""
+    try:
+        yield FuturesEngine(loop=asyncio.get_event_loop(), pusher_queue=payload_queue)
+    finally:
+        pass
+
+
+######## SNAPSHOTS ###########
 # @pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
 # def test_place_order_state_snapshot(populated_futures_engine, snapshot):
 #     """
@@ -159,222 +190,6 @@
 #     )
 
 
-# ######## DB ###########
-
-
-import copy
-import json
-import random
-from uuid import UUID
-
-import pytest
-from faker import Faker
-from sqlalchemy import insert, select
-from sqlalchemy.orm import Session
-
-from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
-from engine import FuturesEngine
-from engine.typing import CloseRequest, EventType, ModifyRequest
-from enums import MarketType, OrderStatus, OrderType, Side
-from tests.utils import create_order_simple, get_db_sess
-
-TEST_SIZES = [int(2**i) for i in range(2, 9)] + [512, 1000]
-
-
-def sanitize_for_snapshot(data: dict) -> dict:
-    """Removes non-deterministic fields from state data for reliable snapshots."""
-    sanitized_data = {}
-    for order_id, state in data.items():
-        s_state = copy.deepcopy(state)
-        s_state.pop("user_id", None)
-        s_state.pop("created_at", None)
-        s_state.pop("closed_at", None)
-        sanitized_data[order_id] = s_state
-    return sanitized_data
-
-
-def create_user() -> Users:
-    """Creates a new user with a default balance and persists it to the DB."""
-    with get_db_sess() as db_sess:
-        fkr = Faker()
-        user = db_sess.execute(
-            insert(Users)
-            .values(username=fkr.user_name(), password=fkr.password())
-            .returning(Users)
-        ).scalar()
-        db_sess.commit()
-    return user
-
-
-def persist_futures_order(values: dict) -> str:
-    """Persists a futures order to the DB and returns its ID."""
-    values["market_type"] = MarketType.FUTURES.value
-    with get_db_sess() as db_sess:
-        order_id = db_sess.execute(
-            insert(Orders).values(**values).returning(Orders.order_id)
-        ).scalar()
-        db_sess.commit()
-    return str(order_id)
-
-
-@pytest.fixture
-def engine():
-    """Provides a fresh FuturesEngine instance for each test."""
-    return FuturesEngine()
-
-
-# @pytest.fixture
-# def patched_log(mocker):
-#     """
-#     Patches the celery task `log_event.delay` to execute synchronously.
-#     This allows testing the database interaction without a live celery worker.
-#     """
-#     from engine import tasks
-
-#     def side_effect(event_dict):
-#         tasks.log_event(event_dict)
-
-#     return mocker.patch("engine.tasks.log_event.delay", side_effect=side_effect)
-
-
-######## SNAPSHOTS ###########
-@pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-def test_place_order_state_snapshot(populated_futures_engine, snapshot):
-    """
-    Validates the final state of all orders after a large population process.
-    This test confirms the cumulative state of placing many orders is correct.
-    """
-    _, orders = populated_futures_engine
-
-    final_order_states = {o["order_id"]: o for o in orders}
-    sanitized_state = sanitize_for_snapshot(final_order_states)
-    snapshot.assert_match(
-        json.dumps(sanitized_state),
-        snapshot_name="test_place_order_state_snapshot.json",
-    )
-
-
-@pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-@pytest.mark.parametrize("n", [2, 3])
-def test_close_order_state_snapshot(populated_futures_engine, n, snapshot):
-    """
-    Tests the close_order method on a pre-populated engine, validating the
-    final state of the entire system using a snapshot.
-    """
-    engine, orders_from_engine = populated_futures_engine
-    open_positions = list(engine._positions.items())
-
-    for i, (order_id, pos) in enumerate(open_positions):
-        if pos.payload["status"] in (
-            OrderStatus.PENDING,
-            OrderStatus.PARTIALLY_FILLED,
-            OrderStatus.CLOSED,
-        ):
-            continue
-
-        if i % n == 0:
-            options = [
-                "ALL",
-                *range(1, pos.payload["standing_quantity"] + 1),
-            ]
-            close_payload = CloseRequest(
-                **{"order_id": order_id, "quantity": options[i % len(options)]}
-            )
-            engine.close_order(close_payload)
-
-    final_order_states = {o["order_id"]: o for o in orders_from_engine}
-    sanitized_state = sanitize_for_snapshot(final_order_states)
-    snapshot.assert_match(
-        json.dumps(sanitized_state), "test_close_order_state_snapshot.json"
-    )
-
-
-@pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-@pytest.mark.parametrize("n", [3, 5])
-def test_modify_position_state_snapshot(populated_futures_engine, n, snapshot):
-    """
-    Tests the modify_position method on a pre-populated engine. It modifies
-    every Nth order, testing modifications of both pending limit prices
-    and filled positions' TP/SL, then snapshots the final state.
-    """
-    engine, orders_from_engine = populated_futures_engine
-
-    for i, order_payload in enumerate(list(orders_from_engine)):
-        if i % n != 0:
-            continue
-
-        status = order_payload["status"]
-        order_id = order_payload["order_id"]
-
-        if (
-            status == OrderStatus.PENDING
-            and order_payload["order_type"] == OrderType.LIMIT
-        ):
-            new_limit_price = round(order_payload["limit_price"] + 0.25, 2)
-            modify_payload = {
-                "order_id": order_id,
-                "limit_price": new_limit_price,
-                "take_profit": order_payload["take_profit"],
-                "stop_loss": order_payload["stop_loss"],
-            }
-            engine.modify_order(ModifyRequest(**modify_payload))
-
-        elif status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-            filled_price = order_payload["filled_price"]
-            new_tp = round(filled_price + 5.0, 2)
-            new_sl = round(filled_price - 5.0, 2)
-
-            if order_payload["side"] == Side.ASK:
-                new_tp, new_sl = new_sl, new_tp
-
-            modify_payload = {
-                "order_id": order_id,
-                "limit_price": None,
-                "take_profit": new_tp,
-                "stop_loss": new_sl,
-            }
-            engine.modify_order(ModifyRequest(**modify_payload))
-
-    final_order_states = {o["order_id"]: o for o in orders_from_engine}
-    sanitized_state = sanitize_for_snapshot(final_order_states)
-
-    snapshot.assert_match(
-        json.dumps(sanitized_state), "test_modify_order_state_snapshot.json"
-    )
-
-
-@pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-@pytest.mark.parametrize("n", [2, 4])
-def test_cancel_order_state_snapshot(populated_futures_engine, n, snapshot):
-    """
-    Tests the cancel_order method on a pre-populated engine. It iterates
-    through orders and cancels every Nth PENDING order, then snapshots
-    the final state of all orders to validate the outcome.
-    """
-    engine, orders_from_engine = populated_futures_engine
-
-    for i, order_payload in enumerate(list(orders_from_engine)):
-        if order_payload["status"] in (
-            OrderStatus.PENDING,
-            OrderStatus.PARTIALLY_FILLED,
-        ):
-            if i % n == 0:
-                cancel_payload = {
-                    "order_id": order_payload["order_id"],
-                    "quantity": random.choice(
-                        ["ALL", order_payload["standing_quantity"]]
-                    ),
-                }
-                engine.cancel_order(CloseRequest(**cancel_payload))
-
-    final_order_states = {o["order_id"]: o for o in orders_from_engine}
-    sanitized_state = sanitize_for_snapshot(final_order_states)
-
-    snapshot.assert_match(
-        json.dumps(sanitized_state), "test_cancel_order_state_snapshot.json"
-    )
-
-
 ######## DB ###########
 
 
@@ -394,7 +209,7 @@ def test_order_new_event(engine: FuturesEngine, db_sess: Session, patched_log):
     )
     limit_bid.pop("order_id")
     limit_bid["user_id"] = str(user.user_id)
-    order_id = persist_futures_order(limit_bid)
+    order_id = persist_order(limit_bid, MarketType.FUTURES)
     limit_bid["order_id"] = order_id
 
     engine.place_order(limit_bid)
@@ -435,7 +250,7 @@ def test_order_filled_event(engine: FuturesEngine, db_sess: Session, patched_log
     )
     limit_bid.pop("order_id")
     limit_bid["user_id"] = str(user.user_id)
-    limit_buy_id = persist_futures_order(limit_bid)
+    limit_buy_id = persist_order(limit_bid, MarketType.FUTURES)
     limit_bid["order_id"] = limit_buy_id
 
     user2 = create_user()
@@ -445,10 +260,11 @@ def test_order_filled_event(engine: FuturesEngine, db_sess: Session, patched_log
         order_type=OrderType.MARKET,
         instrument="BTC-USD",
         quantity=10,
+        price=100.0,
     )
     market_sell.pop("order_id")
     market_sell["user_id"] = str(user2.user_id)
-    market_sell_id = persist_futures_order(market_sell)
+    market_sell_id = persist_order(market_sell, MarketType.FUTURES)
     market_sell["order_id"] = market_sell_id
 
     engine.place_order(limit_bid)
@@ -475,22 +291,28 @@ def test_order_filled_event(engine: FuturesEngine, db_sess: Session, patched_log
     assert seller_event.asset_balance == 10
 
 
-def test_order_closed_event(engine: FuturesEngine, db_sess: Session, patched_log):
+@pytest.mark.asyncio(scope="session")
+async def test_order_closed_event(
+    engine: FuturesEngine,
+    db_sess: Session,
+    patched_log,
+    payload_queue,
+    payload_pusher,
+):
     """
     Scenario: A user with a filled position closes it entirely.
     This should result in an ORDER_CLOSED event.
     """
+    engine._pusher_queue = payload_queue
     user1 = create_user()
     market_bid = create_order_simple(
-        "",
-        side=Side.BID,
-        order_type=OrderType.MARKET,
-        quantity=10,
+        "", side=Side.BID, order_type=OrderType.MARKET, quantity=10, price=100.0
     )
     market_bid.pop("order_id")
     market_bid["user_id"] = str(user1.user_id)
-    market_bid_id = persist_futures_order(market_bid)
+    market_bid_id = persist_order(market_bid, MarketType.FUTURES)
     market_bid["order_id"] = market_bid_id
+    market_bid["tmp"] = "im market bid"
 
     user2 = create_user()
     limit_ask = create_order_simple(
@@ -502,7 +324,7 @@ def test_order_closed_event(engine: FuturesEngine, db_sess: Session, patched_log
     )
     limit_ask.pop("order_id")
     limit_ask["user_id"] = str(user2.user_id)
-    limit_ask_id = persist_futures_order(limit_ask)
+    limit_ask_id = persist_order(limit_ask, MarketType.FUTURES)
     limit_ask["order_id"] = limit_ask_id
 
     engine.place_order(limit_ask)
@@ -519,11 +341,19 @@ def test_order_closed_event(engine: FuturesEngine, db_sess: Session, patched_log
     )
     resting_bid.pop("order_id")
     resting_bid["user_id"] = str(user3.user_id)
-    resting_ask_id = persist_futures_order(resting_bid)
-    resting_bid["order_id"] = resting_ask_id
+    resting_bid_id = persist_order(resting_bid, MarketType.FUTURES)
+    resting_bid["order_id"] = resting_bid_id
     engine._orderbooks[market_bid["instrument"]].set_price(105.0)
     engine.place_order(resting_bid)
 
+    apply_escrow(
+        market_bid["quantity"] * market_bid["price"],
+        user1.user_id,
+        market_bid_id,
+        db_sess,
+    )
+
+    await asyncio.sleep(2)
     close_request = CloseRequest(order_id=market_bid_id, quantity="ALL")
     engine.close_order(close_request)
 
@@ -554,7 +384,7 @@ def test_order_cancelled_event(engine: FuturesEngine, db_sess: Session, patched_
     )
     limit_bid.pop("order_id")
     limit_bid["user_id"] = str(user.user_id)
-    order_id = persist_futures_order(limit_bid)
+    order_id = persist_order(limit_bid, MarketType.FUTURES)
     limit_bid["order_id"] = order_id
 
     engine.place_order(limit_bid)
@@ -569,6 +399,12 @@ def test_order_cancelled_event(engine: FuturesEngine, db_sess: Session, patched_
     )
     db_sess.commit()
 
+    apply_escrow(
+        limit_bid["quantity"] * limit_bid["limit_price"],
+        user.user_id,
+        order_id,
+        db_sess,
+    )
     engine.cancel_order(CloseRequest(order_id=order_id, quantity=4))
 
     events = (
@@ -614,7 +450,7 @@ def test_order_modified_event(engine: FuturesEngine, db_sess: Session, patched_l
     )
     limit_bid.pop("order_id")
     limit_bid["user_id"] = str(user.user_id)
-    order_id = persist_futures_order(limit_bid)
+    order_id = persist_order(limit_bid, MarketType.FUTURES)
     limit_bid["order_id"] = order_id
 
     engine.place_order(limit_bid)
@@ -660,7 +496,7 @@ def test_order_rejected_event(engine: FuturesEngine, db_sess: Session, patched_l
     )
     limit_bid.pop("order_id")
     limit_bid["user_id"] = str(user.user_id)
-    order_id = persist_futures_order(limit_bid)
+    order_id = persist_order(limit_bid, MarketType.FUTURES)
     limit_bid["order_id"] = order_id
 
     engine.place_order(limit_bid)

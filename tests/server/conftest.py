@@ -1,4 +1,5 @@
 import asyncio
+from typing import AsyncGenerator
 import pytest
 import pytest_asyncio
 
@@ -8,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from config import REDIS_CLIENT, TEST_BASE_URL
 from engine import FuturesEngine
 from enums import OrderType, Side
-from tests.utils import test_depends_db_session, get_db_sess_async
+from tests.utils import test_depends_db_session, get_db_sess_async, smaker_async
 from server.app import app
 from server.utils.db import depends_db_session
 
@@ -19,18 +20,23 @@ app.dependency_overrides[depends_db_session] = test_depends_db_session
 @pytest.fixture
 def patched_db_session(monkeypatch):
     monkeypatch.setattr("server.utils.auth.get_db_session", get_db_sess_async)
+    monkeypatch.setattr("server.utils.db.smaker", smaker_async)
+    monkeypatch.setattr("server.utils.db.depends_db_session", get_db_sess_async)
+    ...
 
 
-@pytest_asyncio.fixture(loop_scope="module")
-async def http_client(db, patched_db_session):
+@pytest_asyncio.fixture(loop_scope="session")
+async def http_client(db, patched_db_session) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url=TEST_BASE_URL
     ) as client:
         yield client
 
 
-@pytest_asyncio.fixture(loop_scope="module")
-async def http_client_authenticated(db, patched_db_session):
+@pytest_asyncio.fixture(loop_scope="session")
+async def http_client_authenticated(
+    db, patched_db_session
+) -> AsyncGenerator[AsyncClient, None]:
     fkr = Faker()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url=TEST_BASE_URL
@@ -43,8 +49,10 @@ async def http_client_authenticated(db, patched_db_session):
         yield client
 
 
-@pytest_asyncio.fixture(loop_scope="module")
-async def futures_engine(patched_log, payload_queue, payload_pusher):
+@pytest_asyncio.fixture(loop_scope="session")
+async def futures_engine(
+    patched_log, payload_queue, payload_pusher
+) -> AsyncGenerator[FuturesEngine, None]:
     loop = asyncio.get_event_loop()
     engine = FuturesEngine(loop, payload_queue)
     task = loop.create_task(engine.run())
@@ -55,15 +63,15 @@ async def futures_engine(patched_log, payload_queue, payload_pusher):
         task.cancel()
 
 
-@pytest_asyncio.fixture(loop_scope="module")
-async def instrument():
+@pytest_asyncio.fixture(loop_scope="session")
+async def instrument() -> str:
     instr = "TEST-BTC-USD-FUTURES"
     await REDIS_CLIENT.set(instr, 100.0)
     return instr
 
 
-@pytest_asyncio.fixture(loop_scope="module")
-async def persisted_futures_order_id(http_client_authenticated, instrument):
+@pytest_asyncio.fixture(loop_scope="session")
+async def persisted_futures_order_id(http_client_authenticated, instrument) -> str:
     """Creates a new futures limit order and returns its ID."""
     await REDIS_CLIENT.set(instrument, 100.0)
     limit_bid = {
@@ -71,8 +79,8 @@ async def persisted_futures_order_id(http_client_authenticated, instrument):
         "order_type": OrderType.LIMIT,
         "limit_price": 90.0,
         "quantity": 10,
-        "instrument": instrument,''
-        "take_profit": 110.0,
+        "instrument": instrument,
+        "" "take_profit": 110.0,
         "stop_loss": 80.0,
     }
     rsp = await http_client_authenticated.post("/order/futures", json=limit_bid)

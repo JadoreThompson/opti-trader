@@ -1,6 +1,5 @@
 import asyncio
 import pytest
-import pytest_asyncio
 
 from faker import Faker
 from sqlalchemy import insert, update
@@ -8,12 +7,11 @@ from uuid import uuid4
 
 from config import REDIS_CLIENT
 from db_models import Orders, OrderStatus, Users
-from engine import FuturesEngine
 from enums import OrderType, Side
 from tests.utils import get_db_sess
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_market_order(http_client_authenticated, instrument):
     market_bid = {
         "side": Side.BID,
@@ -27,7 +25,7 @@ async def test_create_market_order(http_client_authenticated, instrument):
     assert (rsp.json() or {}).get("order_id") is not None
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_market_order_limit_price_error(
     http_client_authenticated, instrument
 ):
@@ -44,7 +42,7 @@ async def test_create_market_order_limit_price_error(
     assert (rsp.json() or {}).get("order_id") is None
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_limit_order(http_client_authenticated, instrument):
     limit_bid = {
         "side": Side.BID,
@@ -59,7 +57,7 @@ async def test_create_limit_order(http_client_authenticated, instrument):
     assert (rsp.json() or {}).get("order_id") is not None
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_limit_order_no_limit_price_error(
     http_client_authenticated, instrument
 ):
@@ -75,7 +73,7 @@ async def test_create_limit_order_no_limit_price_error(
     assert (rsp.json() or {}).get("order_id") is None
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_order_no_side_error(http_client_authenticated, instrument):
     limit_bid = {
         "order_type": OrderType.LIMIT,
@@ -88,7 +86,7 @@ async def test_create_order_no_side_error(http_client_authenticated, instrument)
     assert (rsp.json() or {}).get("order_id") is None
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_order_no_order_type_error(http_client_authenticated, instrument):
     order = {
         "side": Side.BID,
@@ -101,7 +99,7 @@ async def test_create_order_no_order_type_error(http_client_authenticated, instr
     assert (rsp.json() or {}).get("order_id") is None
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_create_order_insufficient_balance(http_client_authenticated, instrument):
     order = {
         "side": Side.BID,
@@ -119,7 +117,7 @@ async def test_create_order_insufficient_balance(http_client_authenticated, inst
 ############### MODIFY ORDER TESTS ###############
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_success(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -135,7 +133,7 @@ async def test_modify_order_success(
     assert rsp.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_not_found(http_client_authenticated):
     """Error Path: Attempt to modify an order that does not exist."""
     fake_order_id = uuid4()
@@ -147,7 +145,7 @@ async def test_modify_order_not_found(http_client_authenticated):
     assert "Order doesn't exist" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_already_closed(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -168,7 +166,7 @@ async def test_modify_order_already_closed(
     assert "Cannot modify closed order" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_wrong_user(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -201,7 +199,7 @@ async def test_modify_order_wrong_user(
     assert "Order doesn't exist" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_invalid_payload(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -213,7 +211,7 @@ async def test_modify_order_invalid_payload(
     assert rsp.status_code == 422
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_negative_value(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -225,7 +223,7 @@ async def test_modify_order_negative_value(
     assert rsp.status_code == 422
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_unauthenticated(http_client, persisted_futures_order_id):
     """Error Path: Attempt to modify an order without being authenticated."""
     modify_payload = {"limit_price": 100.0}
@@ -235,7 +233,7 @@ async def test_modify_order_unauthenticated(http_client, persisted_futures_order
     assert rsp.status_code == 403
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order_null_limit_price_fails(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -253,7 +251,7 @@ async def test_modify_order_null_limit_price_fails(
 ############### CANCEL ORDER TESTS ###############
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_partial_success(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -265,7 +263,7 @@ async def test_cancel_order_partial_success(
     assert rsp.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_full_success(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -277,7 +275,7 @@ async def test_cancel_order_full_success(
     assert rsp.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_not_found(http_client_authenticated):
     """Error Path: Attempt to cancel an order that does not exist."""
     fake_order_id = uuid4()
@@ -289,7 +287,7 @@ async def test_cancel_order_not_found(http_client_authenticated):
     assert "Order doesn't exist" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_wrong_user(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -314,7 +312,7 @@ async def test_cancel_order_wrong_user(
     assert "Order doesn't exist" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_insufficient_quantity(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -327,7 +325,7 @@ async def test_cancel_order_insufficient_quantity(
     assert "Insufficient standing quantity" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_invalid_payload(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -339,7 +337,7 @@ async def test_cancel_order_invalid_payload(
     assert rsp.status_code == 422
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_cancel_order_unauthenticated(http_client, persisted_futures_order_id):
     """Error Path: Attempt to cancel an order without being authenticated."""
     cancel_payload = {"quantity": 5}
@@ -352,7 +350,7 @@ async def test_cancel_order_unauthenticated(http_client, persisted_futures_order
 ############### CLOSE ORDER TESTS ###############
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order(
     futures_engine,
     http_client_authenticated,
@@ -381,7 +379,7 @@ async def test_close_order(
     assert rsp.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order(
     futures_engine,
     http_client_authenticated,
@@ -410,7 +408,7 @@ async def test_close_order(
     assert rsp.status_code == 201
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order_non_existent(http_client_authenticated):
     """Error Path: Attempt to close an order that does not exist."""
     fake_order_id = uuid4()
@@ -421,7 +419,7 @@ async def test_close_order_non_existent(http_client_authenticated):
     assert "Order doesn't exist" in rsp.json()["error"]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order_sub_zero(
     http_client_authenticated, persisted_futures_order_id
 ):
@@ -434,7 +432,7 @@ async def test_close_order_sub_zero(
     assert rsp.status_code == 422
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order_invalid_string(
     http_client_authenticated, persisted_futures_order_id
 ):

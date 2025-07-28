@@ -16,6 +16,7 @@ from .controller import (
     handle_prepare_futures_order,
     handle_prepare_spot_ask_order,
     handle_prepare_spot_bid_order,
+    validate_modify_order,
 )
 from .models import (
     MODIFY_ORDER_SENTINEL,
@@ -136,10 +137,6 @@ async def modify_order(
     jwt_payload: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    if body.limit_price is None:
-        return JSONResponse(
-            status_code=400, content={"error": "Limit price cannot be set to null."}
-        )
 
     res = await db_sess.execute(
         select(Orders).where(
@@ -154,6 +151,49 @@ async def modify_order(
     if order.status == OrderStatus.CLOSED:
         return JSONResponse(
             status_code=400, content={"error": "Cannot modify closed order."}
+        )
+
+    if body.limit_price is None:
+        return JSONResponse(
+            status_code=400, content={"error": "Limit price cannot be set to null."}
+        )
+
+    if order.market_type == MarketType.SPOT:
+        if (
+            order.order_type not in (OrderType.LIMIT, OrderType.LIMIT_OCO)
+            and body.limit_price != MODIFY_ORDER_SENTINEL
+        ):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Can only modify order limit price on limit orders."},
+            )
+
+        if order.order_type not in (OrderType.LIMIT_OCO, OrderType.MARKET_OCO) and (
+            body.take_profit != MODIFY_ORDER_SENTINEL
+            or body.stop_loss != MODIFY_ORDER_SENTINEL
+        ):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Cannot modify take profit or stop loss on non OCO order."
+                },
+            )
+
+    cur_price = await REDIS_CLIENT.get(order.instrument)
+    if not validate_modify_order(
+        cur_price,
+        order.order_type,
+        order.status,
+        order.side,
+        order.limit_price,
+        body.limit_price,
+        order.stop_loss,
+        body.stop_loss,
+        order.take_profit,
+        body.take_profit,
+    ):
+        return JSONResponse(
+            status_code=400, content={"error": "Invalid modify request"}
         )
 
     await REDIS_CLIENT.publish(
@@ -197,6 +237,9 @@ async def cancel_order(
     order = res.scalar_one_or_none()
     if order is None:
         return JSONResponse(status_code=400, content={"error": "Order doesn't exist."})
+
+    if order.status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
+        return JSONResponse(status_code=400, content={"error": "Invalid order status."})
 
     if body.quantity != "ALL" and order.standing_quantity < body.quantity:
         return JSONResponse(

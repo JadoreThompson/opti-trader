@@ -1,53 +1,17 @@
 import pytest
 
-from faker import Faker
-from sqlalchemy import insert, select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
+from db_models import Escrows, OrderEvents, Users, get_default_user_balance
 from engine.balance_manager import BalanceManager
 from engine.orderbook import OrderBook
 from enums import MarketType, OrderType, Side
 from engine import SpotEngine
 from engine.typing import CloseRequest, EventType, ModifyRequest
-from tests.utils import create_order_simple, get_db_sess
-
-
-def create_user() -> Users:
-    with get_db_sess() as db_sess:
-        fkr = Faker()
-        user = db_sess.execute(
-            insert(Users)
-            .values(username=fkr.user_name(), password=fkr.password())
-            .returning(Users)
-        ).scalar()
-        db_sess.commit()
-    return user
-
-
-def persist_order(values: dict) -> str:
-    values["market_type"] = MarketType.SPOT.value
-    with get_db_sess() as db_sess:
-        order_id = db_sess.execute(
-            insert(Orders).values(**values).returning(Orders.order_id)
-        ).scalar()
-        db_sess.commit()
-    return str(order_id)
-
-
-def apply_escrow(amount: float, user_id: str | UUID, order_id: str | UUID):
-    with get_db_sess() as sess:
-        sess.execute(
-            update(Users)
-            .values(balance=Users.balance - amount)
-            .where(Users.user_id == user_id)
-        )
-        sess.execute(
-            insert(Escrows).values(user_id=user_id, order_id=order_id, balance=amount)
-        )
-        sess.commit()
-
+from tests.utils import create_order_simple
+from tests.engines.integration.utils import apply_escrow, create_user, persist_order
 
 @pytest.fixture
 def engine():
@@ -65,13 +29,14 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
     )
     user = create_user()
     user_id = user.user_id
-    buy_order["user_id"] = user_id
+    buy_order["user_id"] = str(user_id)
     buy_order.pop("order_id")
-    buy_order["order_id"] = persist_order(buy_order)
+    buy_order["order_id"] = persist_order(buy_order, MarketType.SPOT)
     apply_escrow(
         buy_order["limit_price"] * buy_order["quantity"],
         buy_order["user_id"],
         buy_order["order_id"],
+        db_sess
     )
 
     engine.place_order(buy_order)
@@ -103,13 +68,14 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     )
     user = create_user()
     user_id = user.user_id
-    limit_buy["user_id"] = user_id
+    limit_buy["user_id"] = str(user_id)
     limit_buy.pop("order_id")
-    limit_buy["order_id"] = persist_order(limit_buy)
+    limit_buy["order_id"] = persist_order(limit_buy, MarketType.SPOT)
     apply_escrow(
         limit_buy["limit_price"] * limit_buy["quantity"],
         limit_buy["user_id"],
         limit_buy["order_id"],
+        db_sess
     )
 
     market_sell = create_order_simple(
@@ -117,12 +83,13 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
         Side.ASK,
         OrderType.MARKET,
         quantity=10,
+        price=100.0
     )
     user = create_user()
     user_id = user.user_id
-    market_sell["user_id"] = user_id
+    market_sell["user_id"] = str(user_id)
     market_sell.pop("order_id")
-    market_sell["order_id"] = persist_order(market_sell)
+    market_sell["order_id"] = persist_order(market_sell, MarketType.SPOT)
     _, balance_manager = engine._orderbooks.setdefault(
         market_sell["instrument"], (OrderBook(), BalanceManager())
     )
@@ -166,15 +133,16 @@ def test_order_partially_filled_event(
         limit_price=100.0,
     )
     user = create_user()
-    user_id = user.user_id
+    user_id = str(user.user_id)
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
-    limit_buy["order_id"] = persist_order(limit_buy)
+    limit_buy["order_id"] = persist_order(limit_buy, MarketType.SPOT)
 
     apply_escrow(
         limit_buy["limit_price"] * limit_buy["quantity"],
         limit_buy["user_id"],
         limit_buy["order_id"],
+        db_sess
     )
 
     market_sell = create_order_simple(
@@ -182,12 +150,13 @@ def test_order_partially_filled_event(
         Side.ASK,
         OrderType.MARKET,
         quantity=5,
+        price=100.0
     )
     user = create_user()
-    user_id = user.user_id
+    user_id = str(user.user_id)
     market_sell["user_id"] = user_id
     market_sell.pop("order_id")
-    market_sell["order_id"] = persist_order(market_sell)
+    market_sell["order_id"] = persist_order(market_sell, MarketType.SPOT)
     _, balance_manager = engine._orderbooks.setdefault(
         market_sell["instrument"], (OrderBook(), BalanceManager())
     )
@@ -232,14 +201,15 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
         limit_price=100.0,
     )
     user = create_user()
-    user_id = user.user_id
+    user_id = str(user.user_id)
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
-    limit_buy["order_id"] = persist_order(limit_buy)
+    limit_buy["order_id"] = persist_order(limit_buy, MarketType.SPOT)
     apply_escrow(
         limit_buy["quantity"] * limit_buy["limit_price"],
         limit_buy["user_id"],
         limit_buy["order_id"],
+        db_sess
     )
     engine.place_order(limit_buy)
 
@@ -311,14 +281,15 @@ def test_order_modified_event(engine: SpotEngine, db_sess: Session, patched_log)
         limit_price=100.0,
     )
     user = create_user()
-    user_id = user.user_id
+    user_id = str(user.user_id)
     limit_buy["user_id"] = user_id
     limit_buy.pop("order_id")
-    limit_buy["order_id"] = persist_order(limit_buy)
+    limit_buy["order_id"] = persist_order(limit_buy, MarketType.SPOT)
     apply_escrow(
         limit_buy["quantity"] * limit_buy["limit_price"],
         limit_buy["user_id"],
         limit_buy["order_id"],
+        db_sess
     )
 
     engine.place_order(limit_buy)
@@ -358,12 +329,13 @@ def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log)
         Side.ASK,
         OrderType.MARKET,
         quantity=10,
+        price=100.0
     )
     user = create_user()
-    user_id = user.user_id
+    user_id = str(user.user_id)
     sell_order["user_id"] = user_id
     sell_order.pop("order_id")
-    sell_order["order_id"] = persist_order(sell_order)
+    sell_order["order_id"] = persist_order(sell_order, MarketType.SPOT)
 
     engine.place_order(sell_order)
 

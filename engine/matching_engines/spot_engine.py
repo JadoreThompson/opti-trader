@@ -1,12 +1,11 @@
-from asyncio import AbstractEventLoop
 import logging
 
+from asyncio import AbstractEventLoop
 from json import loads
 from pydantic import ValidationError
 
 from config import REDIS_CLIENT, SPOT_QUEUE_KEY
-from enums import OrderStatus, OrderType, Side
-from services.payload_pusher.typing import PusherPayload, PusherPayloadTopic
+from enums import MarketType, OrderStatus, OrderType, Side
 from utils.utils import get_exc_line
 from .base_engine import BaseEngine
 from ..balance_manager import BalanceManager
@@ -26,7 +25,6 @@ from ..typing import (
     Event,
     EventType,
     SupportsAppend,
-    Queue,
 )
 from ..tasks import log_event
 
@@ -68,7 +66,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     logger.error(
                         f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"
                     )
-                    pass
 
     def place_order(self, payload: dict) -> None:
         """
@@ -82,7 +79,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
         if payload["side"] == Side.ASK:
             cur_balance = balance_manager.get_balance(payload["user_id"])
             if cur_balance is None or cur_balance < payload["quantity"]:
-                log_event.delay(
+                return log_event.delay(
                     Event(
                         event_type=EventType.ORDER_REJECTED,
                         order_id=payload["order_id"],
@@ -90,7 +87,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
                         asset_balance=cur_balance or 0,
                     ).model_dump()
                 )
-                return
 
         self._order_payloads[payload["order_id"]] = payload
         balance_manager.append(payload["user_id"])
@@ -118,7 +114,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
             order.price = payload["limit_price"]
             ob.append(order, order.price)
             self._order_manager.append(order)
-            log_event.delay(
+            return log_event.delay(
                 Event(
                     event_type=EventType.ORDER_NEW,
                     user_id=payload["user_id"],
@@ -129,7 +125,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     metadata={"tag": order.tag},
                 ).model_dump()
             )
-            return
 
         result: MatchResult = self._match(order, ob)
 
@@ -160,7 +155,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     asset_balance=balance_manager.get_balance(payload["user_id"]),
-                    metadata={"tag": order.tag},
+                    metadata={"tag": order.tag, "market_type": MarketType.SPOT},
                 ).model_dump()
             )
 
@@ -244,6 +239,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     asset_balance=asset_balance,
+                    metadata={"market_type": MarketType.SPOT},
                 ).model_dump()
             )
         self._push_to_queue(payload)
@@ -303,16 +299,6 @@ class SpotEngine(BaseEngine[SpotOrder]):
         asset_balance = balance_manager.get_balance(payload["user_id"])
         ob_price: float | None = ob.price
 
-        # tmp_sl_price = (
-        #     updated_sl_price
-        #     if updated_sl_price != sentinel
-        #     else (
-        #         payload["stop_loss"]
-        #         if payload["stop_loss"] is not None
-        #         else float("-inf") if payload["side"] == Side.BID else float("inf")
-        #     )
-        # )
-
         tmp_sl_price = float("-inf") if payload["side"] == Side.BID else float("inf")
         if updated_sl_price != sentinel:
             if updated_sl_price is not None:
@@ -320,31 +306,12 @@ class SpotEngine(BaseEngine[SpotOrder]):
         elif payload["stop_loss"] is not None:
             tmp_sl_price = payload["stop_loss"]
 
-        # tmp_tp_price = (
-        #     updated_tp_price
-        #     if updated_tp_price != sentinel
-        #     else (
-        #         payload["take_profit"]
-        #         if payload["take_profit"] is not None
-        #         else float("inf") if payload["side"] == Side.BID else float("-inf")
-        #     )
-        # )
-
         tmp_tp_price = float("inf") if payload["side"] == Side.BID else float("-inf")
         if updated_tp_price != sentinel:
             if updated_tp_price is not None:
                 tmp_tp_price = updated_tp_price
         elif payload["take_profit"] is not None:
             tmp_tp_price = payload["take_profit"]
-
-        # if is_limit_order:
-        #     tmp_limit_price = (
-        #         updated_limit_price
-        #         if updated_limit_price != sentinel
-        #         else (payload["limit_price"] if not is_filled else (ob_price or 0) - 1)
-        #     )
-        # else:
-        #     tmp_limit_price = sentinel
 
         tmp_limit_price = sentinel
         if is_limit_order:
@@ -569,7 +536,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     user_id=payload["user_id"],
                     order_id=payload["order_id"],
                     asset_balance=balance_manager.get_balance(payload["user_id"]),
-                    metadata={"tag": order.tag},
+                    metadata={"tag": order.tag, "market_type": MarketType.SPOT},
                 ).model_dump()
             )
 
@@ -659,7 +626,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 quantity=filled_quantity,
                 price=price,
                 asset_balance=asset_balance,
-                metadata={"tag": order.tag},
+                metadata={"tag": order.tag, "market_type": MarketType.SPOT},
             ).model_dump()
         )
         self._push_to_queue(payload)
@@ -698,7 +665,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 quantity=touched_quantity,
                 price=price,
                 asset_balance=balance_manager.get_balance(payload["user_id"]),
-                metadata={"tag": order.tag.value},
+                metadata={"tag": order.tag.value, "market_type": MarketType.SPOT},
             ).model_dump()
         )
         self._push_to_queue(payload)

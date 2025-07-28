@@ -5,8 +5,9 @@ from typing import Union
 
 from db_models import Escrows, OrderEvents, Orders, Users
 from engine.typing import EventType
-from enums import MarketType, OrderType, Side
+from enums import MarketType, OrderStatus, OrderType, Side
 from .models import (
+    MODIFY_ORDER_SENTINEL,
     FuturesLimitOrder,
     FuturesMarketOrder,
     SpotLimitOCOOrder,
@@ -69,7 +70,7 @@ async def handle_prepare_spot_bid_order(
             **order.model_dump(),
             user_id=user_id,
             market_type=MarketType.SPOT.value,
-            standing_quantity=order.quantity
+            standing_quantity=order.quantity,
         )
         .returning(Orders)
     )
@@ -158,7 +159,7 @@ async def handle_prepare_spot_ask_order(
             user_id=user_id,
             market_type=MarketType.SPOT,
             standing_quantity=order.quantity,
-            **order.model_dump()
+            **order.model_dump(),
         )
         .returning(Orders)
     )
@@ -255,3 +256,117 @@ async def handle_prepare_futures_order(
 
     await db_sess.commit()
     return db_order.dump()
+
+
+def validate_modify_order(
+    cur_price: float,
+    order_type: OrderType,
+    order_status: OrderStatus,
+    side: Side,
+    limit_price: float | None = None,
+    new_limit_price: float = MODIFY_ORDER_SENTINEL,
+    stop_loss: float | None = None,
+    new_stop_loss: float = MODIFY_ORDER_SENTINEL,
+    take_profit: float | None = None,
+    new_take_profit: float = MODIFY_ORDER_SENTINEL,
+) -> bool:
+    """
+    Validates whether a requested order modification is logically and structurally valid,
+
+    Args:
+        cur_price (float): The current market price of the asset.
+        order_type (OrderType): The type of the order.
+        order_status (OrderStatus): The current status of the order.
+        side (Side): The side of the order.
+        limit_price (float | None, optional): The existing limit price, if any.
+        new_limit_price (float, optional): The proposed new limit price. Use `MODIFY_ORDER_SENTINEL` if unchanged.
+        stop_loss (float | None, optional): The existing stop loss price, if any.
+        new_stop_loss (float, optional): The proposed new stop loss price. Use `MODIFY_ORDER_SENTINEL` if unchanged.
+        take_profit (float | None, optional): The existing take profit price, if any.
+        new_take_profit (float, optional): The proposed new take profit price. Use `MODIFY_ORDER_SENTINEL` if unchanged.
+
+    Returns:
+        bool: False if validation failed, True if valid.
+    """
+    is_limit_order: bool = order_type == OrderType.LIMIT
+    is_filled: bool = order_status == OrderStatus.FILLED
+
+    sentinel = float("inf")
+    updated_limit_price = sentinel
+    updated_tp_price = sentinel
+    updated_sl_price = sentinel
+
+    if (
+        is_limit_order
+        and not is_filled
+        and new_limit_price not in (MODIFY_ORDER_SENTINEL, None)
+    ):
+        updated_limit_price = new_limit_price
+    if new_take_profit != MODIFY_ORDER_SENTINEL:
+        updated_tp_price = new_take_profit
+    if new_stop_loss != MODIFY_ORDER_SENTINEL:
+        updated_sl_price = new_stop_loss
+
+    tmp_stop_loss = float("-inf") if side == Side.BID else float("inf")
+    if updated_sl_price != sentinel:
+        if updated_sl_price is not None:
+            tmp_stop_loss = updated_sl_price
+    elif stop_loss is not None:
+        tmp_stop_loss = stop_loss
+
+    tmp_take_profit = float("inf") if side == Side.BID else float("-inf")
+    if updated_tp_price != sentinel:
+        if updated_tp_price is not None:
+            tmp_take_profit = updated_tp_price
+    elif take_profit is not None:
+        tmp_take_profit = take_profit
+
+    tmp_limit_price = sentinel
+    if is_limit_order:
+        if updated_limit_price != sentinel:
+            tmp_limit_price = updated_limit_price
+        else:
+            tmp_limit_price = limit_price
+
+    if is_limit_order:
+        if is_filled and side == Side.BID and not (tmp_stop_loss < tmp_take_profit):
+            return False
+
+        if is_filled and side == Side.ASK and not (tmp_stop_loss > tmp_take_profit):
+            return False
+
+        if (
+            not is_filled
+            and side == Side.BID
+            and not (tmp_stop_loss < tmp_limit_price <= cur_price < tmp_take_profit)
+        ):
+            return False
+
+        if (
+            not is_filled
+            and side == Side.ASK
+            and not (tmp_stop_loss > tmp_limit_price >= cur_price > tmp_take_profit)
+        ):
+            return False
+
+    if is_filled and side == Side.BID and not (tmp_stop_loss < tmp_take_profit):
+        return False
+
+    if is_filled and side == Side.ASK and not (tmp_stop_loss > tmp_take_profit):
+        return False
+
+    if (
+        not is_filled
+        and side == Side.BID
+        and not (tmp_stop_loss < cur_price < tmp_take_profit)
+    ):
+        return False
+
+    if (
+        not is_filled
+        and side == Side.ASK
+        and not (tmp_stop_loss > cur_price > tmp_take_profit)
+    ):
+        return False
+
+    return True

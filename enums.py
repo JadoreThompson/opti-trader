@@ -6,18 +6,18 @@ class MarketType(str, Enum):
     FUTURES = "futures"
 
 
-class OrderType(str, Enum):
-    LIMIT = "limit"
-    LIMIT_OCO = 'limit_oco'
-    MARKET = "market"
-    MARKET_OCO = 'market_oco'
-    TAKE_PROFIT = "take_profit"
-    STOP_LOSS = "stop_loss"
-
-
 class Side(str, Enum):
     BID = "bid"
     ASK = "ask"
+
+
+class OrderType(str, Enum):
+    LIMIT = "limit"
+    LIMIT_OCO = "limit_oco"
+    MARKET = "market"
+    MARKET_OCO = "market_oco"
+    TAKE_PROFIT = "take_profit"
+    STOP_LOSS = "stop_loss"
 
 
 class OrderStatus(str, Enum):
@@ -26,4 +26,4 @@ class OrderStatus(str, Enum):
     PARTIALLY_FILLED = "partially_filled"
     CLOSED = "closed"
     PARTIALLY_CLOSED = "partially_closed"
-    CANCELLED = 'cancelled'
+    CANCELLED = "cancelled"

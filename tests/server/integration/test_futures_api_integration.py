@@ -2,6 +2,7 @@ import asyncio
 import pytest
 
 from sqlalchemy import select
+
 from config import REDIS_CLIENT
 from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_balance
 from engine.typing import EventType
@@ -9,10 +10,8 @@ from enums import OrderStatus
 from tests.utils import get_db_sess
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_place_order(futures_engine, http_client_authenticated):
-    await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 100.0)
-
     body = {
         "instrument": "TEST-BTC-USD-FUTURES",
         "side": "bid",
@@ -30,6 +29,7 @@ async def test_place_order(futures_engine, http_client_authenticated):
         "order_type": "market",
         "quantity": 10,
     }
+    await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 100.0)
     rsp = await http_client_authenticated.post("/order/futures", json=body)
     counter_ask_order_id = rsp.json()["order_id"]
 
@@ -90,7 +90,7 @@ async def test_place_order(futures_engine, http_client_authenticated):
     assert ask_events[1].balance == get_default_user_balance() - 2000.0
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_modify_order(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
@@ -98,6 +98,7 @@ async def test_modify_order(
     rsp = await http_client_authenticated.patch(
         f"/order/modify/{persisted_futures_order_id}", json={"limit_price": 95.0}
     )
+    print(rsp.json())
 
     with get_db_sess() as sess:
         escrow = sess.execute(
@@ -143,7 +144,7 @@ async def test_modify_order(
     assert order.limit_price == 95.0
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_fully_cancel_order(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
@@ -201,7 +202,7 @@ async def test_fully_cancel_order(
     assert order.standing_quantity == 0
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order_no_profit(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
@@ -279,7 +280,7 @@ async def test_close_order_no_profit(
     assert len(events) == 5, [e.event_type for e in events]
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order_profit(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
@@ -357,7 +358,7 @@ async def test_close_order_profit(
     assert len(events) == 5
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(scope="session")
 async def test_close_order_loss(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):

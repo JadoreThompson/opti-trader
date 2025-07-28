@@ -61,7 +61,6 @@ JWT_ALGO = os.getenv("JWT_ALGO", "HS256")
 JWT_EXPIRY = timedelta(days=1000)
 
 
-TEST_BASE_URL = os.getenv("TEST_BASE_URL", "http://localhost:80")
 
 # Logging
 logging.basicConfig(
@@ -74,3 +73,6 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter("%(levelname)s: %(name)s - %(message)s"))
 logging.getLogger().addHandler(console)
+
+
+TEST_BASE_URL = os.getenv("TEST_BASE_URL", "http://localhost:80")
