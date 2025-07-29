@@ -1,17 +1,24 @@
-from datetime import datetime
-from fastapi import APIRouter, Depends
+import asyncio
+
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, WebSocket
 from fastapi.responses import JSONResponse
+from fastapi.websockets import WebSocketState
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
-from db_models import Orders
+from db_models import Orders, get_datetime
 from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
+from server.exc import JWTError
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
+from server.utils.auth import decode_jwt, generate_jwt
 from server.utils.db import depends_db_session
-from sqlalchemy.ext.asyncio import AsyncSession
+from .client_manager import ClientManger
 from .controller import (
     handle_prepare_futures_order,
     handle_prepare_spot_ask_order,
@@ -34,6 +41,7 @@ from .models import (
 
 
 route = APIRouter(prefix="/order", tags=["order"])
+client_manager = ClientManger()
 
 
 @route.post("/futures", status_code=201)
@@ -291,3 +299,43 @@ async def close_order(
             data={"order_id": order.order_id, "quantity": body.quantity},
         ).model_dump_json(),
     )
+
+
+@route.get("/access-token")
+async def get_ws_access_token(jwt_payload: JWTPayload = Depends(verify_jwt)):
+    return {
+        "token": generate_jwt(
+            sub=jwt_payload.sub, exp=get_datetime() + timedelta(minutes=15)
+        )
+    }
+
+
+@route.websocket("/ws")
+async def ws_live_updates(ws: WebSocket):
+    await ws.accept()
+    timeout = 5
+
+    try:
+        token = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
+    except asyncio.TimeoutError:
+        if ws.client_state != WebSocketState.DISCONNECTED:
+            await ws.close()
+
+    payload = decode_jwt(token)
+
+    if not client_manager.is_running:
+        asyncio.create_task(client_manager.run())
+
+    try:
+        await client_manager.append(payload.sub, ws)
+        await ws.send_text("connected")
+
+        while True:
+            await asyncio.wait_for(ws.receive_text(), timeout)
+
+    except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect):
+        pass
+    finally:
+        client_manager.remove(payload.sub)
+        if ws.client_state != WebSocketState.DISCONNECTED:
+            await ws.close()

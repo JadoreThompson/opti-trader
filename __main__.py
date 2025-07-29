@@ -1,5 +1,6 @@
 import asyncio
 import uvicorn
+
 from multiprocessing import Process
 from typing import Type
 from engine import BaseEngine, FuturesEngine, SpotEngine
@@ -15,7 +16,7 @@ def run_server() -> None:
 
 async def main() -> None:
     ps_args = (
-        # (run_engine, (FuturesEngine,)),
+        (run_engine, (FuturesEngine,)),
         (run_server, ()),
     )
     ps = [Process(target=target, args=args) for target, args in ps_args]

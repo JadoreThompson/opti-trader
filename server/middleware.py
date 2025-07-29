@@ -1,5 +1,6 @@
 from typing import Callable, Type, TypeVar
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 from config import COOKIE_ALIAS
 from .exc import JWTError
 from .typing import JWTPayload
@@ -49,6 +50,6 @@ def convert_csv(
         try:
             return [target_type(item.strip()) for item in value.strip().split(",")]
         except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail=f"Invalid {param_name}")
+            raise JSONResponse(status_code=400, error={'error': f"Invalid {param_name}"})
 
     return wrapper

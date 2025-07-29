@@ -79,9 +79,9 @@ class EventType(str, Enum):
 
 
 class Event(BaseModel):
-    user_id: str | None = None
-    order_id: str | None = None
-    event_type: str | None = None
+    event_type: EventType
+    user_id: str
+    order_id: str
     quantity: int | None = None
     price: float | None = None
     stop_loss: float | None = None

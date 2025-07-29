@@ -1,7 +1,7 @@
 from asyncio import AbstractEventLoop
 from json import loads
 
-from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, REDIS_CLIENT_SYNC
 from enums import MarketType, OrderStatus, OrderType, Side
 from logging import getLogger
 
@@ -43,7 +43,7 @@ class FuturesEngine(BaseEngine[Order]):
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
-
+                # print(m)
                 try:
                     payload = Payload(**loads(m["data"]))
                     if payload.topic == PayloadTopic.CREATE:

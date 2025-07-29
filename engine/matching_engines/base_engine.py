@@ -2,7 +2,7 @@ from abc import abstractmethod
 from asyncio import AbstractEventLoop
 from typing import Generic, TypeVar
 
-from config import REDIS_CLIENT
+from config import REDIS_CLIENT, REDIS_CLIENT_SYNC
 from enums import Side
 from services.payload_pusher import PusherPayload, PusherPayloadTopic
 from ..enums import MatchOutcome
@@ -198,3 +198,4 @@ class BaseEngine(Generic[O]):
                 action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=payload
             ).model_dump()
         )
+        

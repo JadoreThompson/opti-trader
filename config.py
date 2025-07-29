@@ -5,7 +5,8 @@ from celery import Celery
 from datetime import timedelta
 from dotenv import load_dotenv
 from json import loads
-from redis.asyncio import Redis
+from redis import Redis
+from redis.asyncio import Redis as AsyncRedis
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 from urllib.parse import quote
@@ -32,7 +33,7 @@ TEST_DB_ENGINE_ASYNC = create_async_engine(TEST_DB_URL)
 
 
 # Redis
-class CustomRedis(Redis):
+class CustomRedisAsync(AsyncRedis):
     async def get(self, name: str):
         val = await super().get(name)
         if val is not None:
@@ -40,13 +41,23 @@ class CustomRedis(Redis):
         return val
 
 
-REDIS_CLIENT = CustomRedis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", "6379")),
-    password=os.getenv("REDIS_PASSWORD"),
-    db=int(os.getenv("REDIS_DB", "0")),
-    decode_responses=True,
-)
+class CustomRedis(Redis):
+    def get(self, name: str):
+        val = super().get(name)
+        if val is not None:
+            return loads(val)
+        return val
+
+
+redis_kwargs = {
+    "host": os.getenv("REDIS_HOST", "localhost"),
+    "port": int(os.getenv("REDIS_PORT", "6379")),
+    "password": os.getenv("REDIS_PASSWORD"),
+    "db": int(os.getenv("REDIS_DB", "0")),
+}
+
+REDIS_CLIENT = CustomRedisAsync(**redis_kwargs)
+REDIS_CLIENT_SYNC = CustomRedis(**redis_kwargs)
 FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY")
 SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY")
 ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
@@ -59,7 +70,6 @@ COOKIE_ALIAS = "cookie-order-matcher"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET", "my-secret")
 JWT_ALGO = os.getenv("JWT_ALGO", "HS256")
 JWT_EXPIRY = timedelta(days=1000)
-
 
 
 # Logging

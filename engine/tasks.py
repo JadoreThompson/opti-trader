@@ -1,7 +1,8 @@
+from json import dumps
 from sqlalchemy import insert, select, update, func
 from sqlalchemy.orm import Session
 
-from config import CELERY
+from config import CELERY, REDIS_CLIENT_SYNC
 from db_models import Escrows, OrderEvents, Orders, Users
 from enums import MarketType, Side
 from utils.db import get_db_session_sync
@@ -287,6 +288,7 @@ def handle_order_closed_event(event: Event, db_sess: Session) -> None:
 def log_event(event: EventDict):
     with get_db_session_sync() as sess:
         parsed_event = Event(**event)
+        print(parsed_event)
 
         if parsed_event.event_type == EventType.ORDER_CANCELLED:
             handle_order_cancelled_event(parsed_event, sess)
@@ -301,3 +303,14 @@ def log_event(event: EventDict):
             handle_order_closed_event(parsed_event, sess)
         else:
             record_order_event(parsed_event, sess)
+
+    REDIS_CLIENT_SYNC.publish(
+        "live-updates",
+        dumps(
+            {
+                "event_type": parsed_event.event_type.value,
+                "order_id": parsed_event.order_id,
+                "user_id": parsed_event.user_id,
+            }
+        ),
+    )
