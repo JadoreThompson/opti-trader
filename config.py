@@ -58,11 +58,12 @@ redis_kwargs = {
 
 REDIS_CLIENT = CustomRedisAsync(**redis_kwargs)
 REDIS_CLIENT_SYNC = CustomRedis(**redis_kwargs)
-FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY")
-SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY")
-ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX")
-INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX")
-PAYLOAD_PUSHER_QUEUE = os.getenv("PAYLOAD_PUSHER_QUEUE")
+FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY", "channel1")
+SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY", 'channel2')
+ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX", 'channel3')
+INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX", 'channel4')
+PAYLOAD_PUSHER_QUEUE = os.getenv("PAYLOAD_PUSHER_QUEUE", 'channel5')
+CLIENT_UPDATE_CHANNEL = os.getenv("CLIENT_UPDATE_CHANNEL", "channel6")
 
 
 # Server Security

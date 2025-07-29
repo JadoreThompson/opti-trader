@@ -1,8 +1,8 @@
 from abc import abstractmethod
-from asyncio import AbstractEventLoop
+from asyncio import AbstractEventLoop, get_event_loop
 from typing import Generic, TypeVar
 
-from config import REDIS_CLIENT, REDIS_CLIENT_SYNC
+from config import REDIS_CLIENT
 from enums import Side
 from services.payload_pusher import PusherPayload, PusherPayloadTopic
 from ..enums import MatchOutcome
@@ -26,7 +26,7 @@ class BaseEngine(Generic[O]):
         loop: AbstractEventLoop | None = None,
         pusher_queue: SupportsAppend | None = None,
     ) -> None:
-        self._loop = loop
+        self._loop = loop or get_event_loop()
         self._pusher_queue = pusher_queue or Queue()
 
     @abstractmethod

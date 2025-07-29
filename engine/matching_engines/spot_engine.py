@@ -5,7 +5,7 @@ from json import loads
 from pydantic import ValidationError
 
 from config import REDIS_CLIENT, SPOT_QUEUE_KEY
-from enums import MarketType, OrderStatus, OrderType, Side
+from enums import EventType, MarketType, OrderStatus, OrderType, Side
 from utils.utils import get_exc_line
 from .base_engine import BaseEngine
 from ..balance_manager import BalanceManager
@@ -22,8 +22,7 @@ from ..typing import (
     CloseRequest,
     Payload,
     PayloadTopic,
-    Event,
-    EventType,
+    Event,    
     SupportsAppend,
 )
 from ..tasks import log_event

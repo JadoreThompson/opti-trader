@@ -10,10 +10,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 from enums import OrderStatus
-
-
-def get_datetime() -> datetime:
-    return datetime.now(UTC)
+from utils.utils import get_datetime
 
 
 def get_default_user_balance() -> float:

@@ -1,8 +1,8 @@
 from asyncio import AbstractEventLoop
 from json import loads
 
-from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, REDIS_CLIENT_SYNC
-from enums import MarketType, OrderStatus, OrderType, Side
+from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
+from enums import EventType, MarketType, OrderStatus, OrderType, Side
 from logging import getLogger
 
 from utils.utils import get_exc_line
@@ -18,7 +18,6 @@ from ..typing import (
     MatchResult,
     ModifyRequest,
     Event,
-    EventType,
     Payload,
     PayloadTopic,
     SupportsAppend,
@@ -98,7 +97,7 @@ class FuturesEngine(BaseEngine[Order]):
             order.price = entry_price
             ob.append(order, order.price)
             pos.entry_order = order
-
+            self._push_to_queue(payload)
             return log_event.delay(
                 Event(
                     event_type=EventType.ORDER_NEW,

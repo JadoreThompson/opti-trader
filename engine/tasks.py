@@ -2,9 +2,10 @@ from json import dumps
 from sqlalchemy import insert, select, update, func
 from sqlalchemy.orm import Session
 
-from config import CELERY, REDIS_CLIENT_SYNC
+from config import CELERY, CLIENT_UPDATE_CHANNEL, REDIS_CLIENT_SYNC
 from db_models import Escrows, OrderEvents, Orders, Users
 from enums import MarketType, Side
+from models import ClientEvent
 from utils.db import get_db_session_sync
 from .typing import EventDict, Event, EventType
 from .enums import Tag
@@ -12,21 +13,6 @@ from .enums import Tag
 
 def record_order_event(event: Event, db_sess: Session) -> None:
     """Record a generic order-related event with the user's current balance."""
-    values = event.model_dump(exclude_unset=True, exclude_none=True)
-    values.pop("metadata", None)
-
-    db_sess.execute(
-        insert(OrderEvents).values(
-            **values,
-            balance=select(Users.balance)
-            .where(Users.user_id == event.user_id)
-            .scalar_subquery(),
-        )
-    )
-    db_sess.commit()
-
-
-def handle_futures_order_filled_event(event: Event, db_sess: Session) -> None:
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
 
@@ -111,25 +97,8 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
         db_sess (Session): _description_
     """
     if event.metadata["market_type"] == MarketType.FUTURES:
-        return handle_futures_order_filled_event(event, db_sess)
+        return record_order_event(event, db_sess)
     return handle_spot_order_filled_event(event, db_sess)
-
-
-def handle_order_placed_event(event: Event, db_sess: Session) -> None:
-    values = event.model_dump(exclude_unset=True, exclude_none=True)
-    values.pop("metadata", None)
-
-    db_sess.execute(
-        insert(OrderEvents).values(
-            **values,
-            balance=(
-                select(Users.balance)
-                .where(Users.user_id == event.user_id)
-                .scalar_subquery()
-            ),
-        )
-    )
-    db_sess.commit()
 
 
 def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
@@ -305,12 +274,10 @@ def log_event(event: EventDict):
             record_order_event(parsed_event, sess)
 
     REDIS_CLIENT_SYNC.publish(
-        "live-updates",
-        dumps(
-            {
-                "event_type": parsed_event.event_type.value,
-                "order_id": parsed_event.order_id,
-                "user_id": parsed_event.user_id,
-            }
-        ),
+        CLIENT_UPDATE_CHANNEL,
+        ClientEvent(
+            event_type=parsed_event.event_type.value,
+            order_id=parsed_event.order_id,
+            user_id=parsed_event.user_id,
+        ).model_dump_json(),
     )

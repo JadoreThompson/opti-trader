@@ -4,6 +4,7 @@ from ..orders import Order
 
 T = TypeVar("T", bound=Order)
 
+
 class PriceLevel(Generic[T]):
     """
     Houses doubly linked list to manage orders at a single

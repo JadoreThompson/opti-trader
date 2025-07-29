@@ -9,7 +9,9 @@ from typing import Type, get_args, get_origin
 from types import UnionType
 
 import db_models
-from config import PAYLOAD_PUSHER_QUEUE, REDIS_CLIENT
+from config import CLIENT_UPDATE_CHANNEL, PAYLOAD_PUSHER_QUEUE, REDIS_CLIENT
+from enums import ClientEventType
+from models import ClientEvent
 from utils.db import get_db_session
 from utils.utils import get_exc_line
 from .typing import PusherPayload, PusherPayloadTopic, MutationFunc
@@ -51,11 +53,20 @@ class PayloadPusher:
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
-
                 try:
                     msg = PusherPayload(**json.loads(m["data"]))
                     async with self._lock:
                         self._queue[msg.table_cls][msg.action].append(msg.data)
+
+                    if msg.table_cls == "Orders":
+                        await REDIS_CLIENT.publish(
+                            CLIENT_UPDATE_CHANNEL,
+                            ClientEvent(
+                                event_type=ClientEventType.PAYLOAD_UPDATE.value,
+                                user_id=msg.data["user_id"],
+                                order_id=msg.data["order_id"],
+                            ).model_dump_json(),
+                        )
                 except Exception as e:
                     logger.error(
                         f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"

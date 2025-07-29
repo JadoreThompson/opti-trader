@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
-from db_models import Orders, get_datetime
+from db_models import Orders
 from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
 from server.exc import JWTError
@@ -18,6 +18,7 @@ from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils.auth import decode_jwt, generate_jwt
 from server.utils.db import depends_db_session
+from utils.utils import get_datetime
 from .client_manager import ClientManger
 from .controller import (
     handle_prepare_futures_order,
@@ -320,8 +321,11 @@ async def ws_live_updates(ws: WebSocket):
     except asyncio.TimeoutError:
         if ws.client_state != WebSocketState.DISCONNECTED:
             await ws.close()
-
-    payload = decode_jwt(token)
+    try:
+        payload = decode_jwt(token)
+    except JWTError as e:
+        await ws.send_json({"error": str(e)})
+        await ws.close()
 
     if not client_manager.is_running:
         asyncio.create_task(client_manager.run())

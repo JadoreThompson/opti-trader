@@ -1,12 +1,12 @@
 from collections import namedtuple
-from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from multiprocessing import Queue as MPQueue
 from typing import Literal, Protocol, TypedDict, Union, get_type_hints
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
-from db_models import get_datetime
+from enums import EventType
+from utils.utils import get_datetime
 
 
 MatchResult = namedtuple(
@@ -14,19 +14,16 @@ MatchResult = namedtuple(
     ("outcome", "price", "quantity"),
 )
 Book = Literal["bids", "asks"]
-
 CloseRequestQuantity = Union[Literal["ALL"], int]
 MODIFY_SENTINEL = "*"
 
 
-@dataclass
-class CloseRequest:
+class CloseRequest(BaseModel):
     order_id: str
     quantity: CloseRequestQuantity
 
 
-@dataclass
-class CancelRequest:
+class CancelRequest(BaseModel):
     order_id: str
     quantity: CloseRequestQuantity
 
@@ -59,25 +56,6 @@ class Payload(BaseModel):
     data: dict
 
 
-class EventType(str, Enum):
-    ASK_SUBMITTED = "ask_submitted"
-    BID_SUBMITTED = "bid_submitted"
-    ORDER_NEW = "order_new"
-    ORDER_CANCELLED = "order_cancelled"
-    ORDER_MODIFIED = "order_modified"
-    ORDER_PARTIALLY_FILLED = "order_partially_filled"
-    ORDER_FILLED = "order_filled"
-    ORDER_PARTIALLY_CLOSED = "order_partially_closed"
-    ORDER_CLOSED = "order_closed"
-    ORDER_REJECTED = (
-        "order_rejected"  # Backwards compatibility, use ORDER_NEW_REJECTED instead
-    )
-    ORDER_NEW_REJECTED = "order_new_rejected"
-    ORDER_PARTIALLY_CANCELLED = "order_partially_cancelled"
-    ORDER_CANCEL_REJECTED = "order_cancel_rejected"
-    ORDER_MODIFY_REJECTED = "order_modify_rejected"
-
-
 class Event(BaseModel):
     event_type: EventType
     user_id: str
@@ -90,9 +68,11 @@ class Event(BaseModel):
     balance: float | None = None
     asset_balance: int | None = None
     created_at: datetime = Field(default_factory=get_datetime)
-    metadata: dict | None = (
-        None  # Tag for an order etc. Helps with understanding cash balance direction
-    )
+
+    # metadata to help distinguish the order when ahandlign the event
+    # for example {'tag': Tag.STOP_LOSS} for handling stop loss orders
+    # from the spot matching engine.
+    metadata: dict | None = None
 
     def model_dump(self, *args, **kwargs) -> dict:
         d = super().model_dump(*args, **kwargs)
