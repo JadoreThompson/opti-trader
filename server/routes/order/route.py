@@ -1,28 +1,25 @@
 import asyncio
 
 from datetime import datetime, timedelta
-from typing import Annotated
-from fastapi import APIRouter, Depends, Query, WebSocket
+from fastapi import APIRouter, Depends, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
-from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from config import (
-    FUTURES_BOOKS_CHANNEL,
-    FUTURES_QUEUE_KEY,
+    FUTURES_BOOKS_KEY,
+    FUTURES_QUEUE_CHANNEL,
     REDIS_CLIENT,
-    SPOT_QUEUE_KEY,
+    SPOT_QUEUE_CHANNEL,
 )
 from db_models import Orders
 from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
 from server.exc import JWTError
-from server.middleware import convert_csv, verify_jwt
-from server.models import PaginatedResponse
+from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils.auth import decode_jwt, generate_jwt
 from server.utils.db import depends_db_session
@@ -67,7 +64,7 @@ async def create_futures_order(
     else:
         raise ValueError("Invlaid order type.")
 
-    cur_price = await REDIS_CLIENT.hget(FUTURES_BOOKS_CHANNEL, parsed_body.instrument)
+    cur_price = await REDIS_CLIENT.hget(FUTURES_BOOKS_KEY, parsed_body.instrument)
     if cur_price is None:
         return JSONResponse(
             status_code=400, content={"error": "Instrument doesn't exist."}
@@ -85,7 +82,7 @@ async def create_futures_order(
     }
 
     await REDIS_CLIENT.publish(
-        FUTURES_QUEUE_KEY,
+        FUTURES_QUEUE_CHANNEL,
         Payload(
             topic=PayloadTopic.CREATE,
             data=payload_data,
@@ -131,7 +128,7 @@ async def create_spot_order(
         return res
 
     await REDIS_CLIENT.publish(
-        SPOT_QUEUE_KEY,
+        SPOT_QUEUE_CHANNEL,
         Payload(
             topic=PayloadTopic.CREATE,
             data={
@@ -211,7 +208,11 @@ async def modify_order(
         )
 
     await REDIS_CLIENT.publish(
-        SPOT_QUEUE_KEY if order.market_type == MarketType.SPOT else FUTURES_QUEUE_KEY,
+        (
+            SPOT_QUEUE_CHANNEL
+            if order.market_type == MarketType.SPOT
+            else FUTURES_QUEUE_CHANNEL
+        ),
         Payload(
             topic=PayloadTopic.MODIFY,
             data={
@@ -261,7 +262,11 @@ async def cancel_order(
         )
 
     await REDIS_CLIENT.publish(
-        SPOT_QUEUE_KEY if order.market_type == MarketType.SPOT else FUTURES_QUEUE_KEY,
+        (
+            SPOT_QUEUE_CHANNEL
+            if order.market_type == MarketType.SPOT
+            else FUTURES_QUEUE_CHANNEL
+        ),
         Payload(
             topic=PayloadTopic.CANCEL,
             data={"order_id": order.order_id, "quantity": body.quantity},
@@ -299,7 +304,11 @@ async def close_order(
         )
 
     await REDIS_CLIENT.publish(
-        (SPOT_QUEUE_KEY if order.market_type == MarketType.SPOT else FUTURES_QUEUE_KEY),
+        (
+            SPOT_QUEUE_CHANNEL
+            if order.market_type == MarketType.SPOT
+            else FUTURES_QUEUE_CHANNEL
+        ),
         Payload(
             topic=PayloadTopic.CLOSE,
             data={"order_id": order.order_id, "quantity": body.quantity},

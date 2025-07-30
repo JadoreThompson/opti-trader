@@ -9,7 +9,7 @@ from typing import Type, get_args, get_origin
 from types import UnionType
 
 import db_models
-from config import CLIENT_UPDATE_CHANNEL, PAYLOAD_PUSHER_QUEUE, REDIS_CLIENT
+from config import CLIENT_UPDATE_CHANNEL, PAYLOAD_PUSHER_CHANNEL, REDIS_CLIENT
 from enums import ClientEventType
 from models import ClientEvent
 from utils.db import get_db_session
@@ -49,7 +49,7 @@ class PayloadPusher:
     async def _listen(self) -> None:
         """Continuously listen to the Redis pub/sub channel and queue payloads."""
         async with REDIS_CLIENT.pubsub() as ps:
-            await ps.subscribe(PAYLOAD_PUSHER_QUEUE)
+            await ps.subscribe(PAYLOAD_PUSHER_CHANNEL)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
@@ -65,7 +65,7 @@ class PayloadPusher:
                                 event_type=ClientEventType.PAYLOAD_UPDATE.value,
                                 user_id=msg.data["user_id"],
                                 order_id=msg.data["order_id"],
-                                data=msg.data
+                                data=msg.data,
                             ).model_dump_json(),
                         )
                 except Exception as e:

@@ -5,7 +5,7 @@ from enum import Enum
 from json import dumps
 from uuid import UUID, uuid4
 
-from config import PAYLOAD_PUSHER_QUEUE, REDIS_CLIENT
+from config import PAYLOAD_PUSHER_CHANNEL, REDIS_CLIENT
 from engine.orders import OCOOrder
 
 
@@ -52,7 +52,7 @@ class MockQueue(asyncio.Queue):
 
     def append(self, obj: object):
         self._loop.create_task(
-            REDIS_CLIENT.publish(PAYLOAD_PUSHER_QUEUE, dumps(self._dump_dict(obj)))
+            REDIS_CLIENT.publish(PAYLOAD_PUSHER_CHANNEL, dumps(self._dump_dict(obj)))
         )
         return self.put_nowait(obj)
 

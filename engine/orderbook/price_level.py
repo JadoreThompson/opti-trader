@@ -55,8 +55,6 @@ class PriceLevel(Generic[T]):
         if self._tail == orders_node:
             self._tail = orders_node.prev
 
-        orders_node.prev = None
-        orders_node.next = None
         self._tracker.pop(order.id)
 
     def __bool__(self) -> bool:

@@ -3,7 +3,6 @@ import copy
 import pytest
 import pytest_asyncio
 
-from faker import Faker
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
@@ -11,7 +10,7 @@ from db_models import Escrows, OrderEvents, Orders, Users, get_default_user_bala
 from engine import FuturesEngine
 from engine.typing import CloseRequest, EventType, ModifyRequest
 from enums import MarketType, OrderType, Side
-from tests.utils import create_order_simple, get_db_sess
+from tests.utils import create_order_simple
 from tests.engines.integration.utils import apply_escrow, create_user, persist_order
 
 
@@ -30,19 +29,6 @@ def sanitize_for_snapshot(data: dict) -> dict:
     return sanitized_data
 
 
-# def create_user() -> Users:
-#     """Creates a new user with a default balance and persists it to the DB."""
-#     with get_db_sess() as db_sess:
-#         fkr = Faker()
-#         user = db_sess.execute(
-#             insert(Users)
-#             .values(username=fkr.user_name(), password=fkr.password())
-#             .returning(Users)
-#         ).scalar()
-#         db_sess.commit()
-#     return user
-
-
 @pytest_asyncio.fixture(loop_scope="session")
 async def engine(payload_pusher, payload_queue):
     """Provides a fresh FuturesEngine instance for each test."""
@@ -51,146 +37,6 @@ async def engine(payload_pusher, payload_queue):
     finally:
         pass
 
-
-######## SNAPSHOTS ###########
-# @pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-# def test_place_order_state_snapshot(populated_futures_engine, snapshot):
-#     """
-#     Validates the final state of all orders after a large population process.
-#     This test confirms the cumulative state of placing many orders is correct.
-#     """
-#     _, orders = populated_futures_engine
-
-#     final_order_states = {o["order_id"]: o for o in orders}
-#     sanitized_state = sanitize_for_snapshot(final_order_states)
-#     snapshot.assert_match(
-#         json.dumps(sanitized_state),
-#         snapshot_name="test_place_order_state_snapshot.json",
-#     )
-
-
-# @pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-# @pytest.mark.parametrize("n", [2, 3])
-# def test_close_order_state_snapshot(populated_futures_engine, n, snapshot):
-#     """
-#     Tests the close_order method on a pre-populated engine, validating the
-#     final state of the entire system using a snapshot.
-#     """
-#     engine, orders_from_engine = populated_futures_engine
-#     open_positions = list(engine._positions.items())
-
-#     for i, (order_id, pos) in enumerate(open_positions):
-#         if pos.payload["status"] in (
-#             OrderStatus.PENDING,
-#             OrderStatus.PARTIALLY_FILLED,
-#             OrderStatus.CLOSED,
-#         ):
-#             continue
-
-#         if i % n == 0:
-#             options = [
-#                 "ALL",
-#                 *range(1, pos.payload["standing_quantity"] + 1),
-#             ]
-#             close_payload = CloseRequest(
-#                 **{"order_id": order_id, "quantity": options[i % len(options)]}
-#             )
-#             engine.close_order(close_payload)
-
-#     final_order_states = {o["order_id"]: o for o in orders_from_engine}
-#     sanitized_state = sanitize_for_snapshot(final_order_states)
-#     snapshot.assert_match(
-#         json.dumps(sanitized_state), "test_close_order_state_snapshot.json"
-#     )
-
-
-# @pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-# @pytest.mark.parametrize("n", [3, 5])
-# def test_modify_position_state_snapshot(populated_futures_engine, n, snapshot):
-#     """
-#     Tests the modify_position method on a pre-populated engine. It modifies
-#     every Nth order, testing modifications of both pending limit prices
-#     and filled positions' TP/SL, then snapshots the final state.
-#     """
-#     engine, orders_from_engine = populated_futures_engine
-
-#     for i, order_payload in enumerate(list(orders_from_engine)):
-#         if i % n != 0:
-#             continue
-
-#         status = order_payload["status"]
-#         order_id = order_payload["order_id"]
-
-#         if (
-#             status == OrderStatus.PENDING
-#             and order_payload["order_type"] == OrderType.LIMIT
-#         ):
-#             new_limit_price = round(order_payload["limit_price"] + 0.25, 2)
-#             modify_payload = {
-#                 "order_id": order_id,
-#                 "limit_price": new_limit_price,
-#                 "take_profit": order_payload["take_profit"],
-#                 "stop_loss": order_payload["stop_loss"],
-#             }
-#             engine.modify_order(ModifyRequest(**modify_payload))
-
-#         elif status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-#             filled_price = order_payload["filled_price"]
-#             new_tp = round(filled_price + 5.0, 2)
-#             new_sl = round(filled_price - 5.0, 2)
-
-#             if order_payload["side"] == Side.ASK:
-#                 new_tp, new_sl = new_sl, new_tp
-
-#             modify_payload = {
-#                 "order_id": order_id,
-#                 "limit_price": None,
-#                 "take_profit": new_tp,
-#                 "stop_loss": new_sl,
-#             }
-#             engine.modify_order(ModifyRequest(**modify_payload))
-
-#     final_order_states = {o["order_id"]: o for o in orders_from_engine}
-#     sanitized_state = sanitize_for_snapshot(final_order_states)
-
-#     snapshot.assert_match(
-#         json.dumps(sanitized_state), "test_modify_order_state_snapshot.json"
-#     )
-
-
-# @pytest.mark.parametrize("populated_futures_engine", TEST_SIZES, indirect=True)
-# @pytest.mark.parametrize("n", [2, 4])
-# def test_cancel_order_state_snapshot(populated_futures_engine, n, snapshot):
-#     """
-#     Tests the cancel_order method on a pre-populated engine. It iterates
-#     through orders and cancels every Nth PENDING order, then snapshots
-#     the final state of all orders to validate the outcome.
-#     """
-#     engine, orders_from_engine = populated_futures_engine
-
-#     for i, order_payload in enumerate(list(orders_from_engine)):
-#         if order_payload["status"] in (
-#             OrderStatus.PENDING,
-#             OrderStatus.PARTIALLY_FILLED,
-#         ):
-#             if i % n == 0:
-#                 cancel_payload = {
-#                     "order_id": order_payload["order_id"],
-#                     "quantity": random.choice(
-#                         ["ALL", order_payload["standing_quantity"]]
-#                     ),
-#                 }
-#                 engine.cancel_order(CloseRequest(**cancel_payload))
-
-#     final_order_states = {o["order_id"]: o for o in orders_from_engine}
-#     sanitized_state = sanitize_for_snapshot(final_order_states)
-
-#     snapshot.assert_match(
-#         json.dumps(sanitized_state), "test_cancel_order_state_snapshot.json"
-#     )
-
-
-######## DB ###########
 
 
 def test_order_new_event(engine: FuturesEngine, db_sess: Session, patched_log):

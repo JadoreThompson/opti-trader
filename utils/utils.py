@@ -9,3 +9,6 @@ def get_exc_line():
 
 def get_datetime() -> datetime:
     return datetime.now(UTC)
+
+def get_timestamp():
+    return int(get_datetime().timestamp())

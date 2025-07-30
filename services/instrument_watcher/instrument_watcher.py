@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import ValidationError
-from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
+from config import FUTURES_QUEUE_CHANNEL, REDIS_CLIENT, SPOT_QUEUE_CHANNEL
 from .typing import _Instrument
 
 
@@ -28,7 +28,7 @@ class InstrumentsWatcher:
 
                 try:
                     data = _Instrument(**message["data"])
-                    await REDIS_CLIENT.publish(FUTURES_QUEUE_KEY, data.model_dump())
-                    await REDIS_CLIENT.publish(SPOT_QUEUE_KEY, data.model_dump())
+                    await REDIS_CLIENT.publish(FUTURES_QUEUE_CHANNEL, data.model_dump())
+                    await REDIS_CLIENT.publish(SPOT_QUEUE_CHANNEL, data.model_dump())
                 except ValidationError:
                     continue

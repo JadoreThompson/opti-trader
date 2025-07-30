@@ -10,7 +10,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 from enums import OrderStatus
-from utils.utils import get_datetime
+from utils.utils import get_datetime, get_timestamp
 
 
 def get_default_user_balance() -> float:
@@ -119,7 +119,7 @@ class MarketData(Base):
         ForeignKey("instruments.instrument_id"),
         nullable=False,
     )
-    time: Mapped[int] = mapped_column(Integer, nullable=False, default=datetime.now)
+    time: Mapped[int] = mapped_column(Integer, nullable=False, default=get_timestamp)
     price: Mapped[float] = mapped_column(Float, nullable=False)
 
     # Relationship

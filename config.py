@@ -46,6 +46,7 @@ class CustomRedisAsync(AsyncRedis):
             return loads(val)
         return val
 
+
 class CustomRedis(Redis):
     def get(self, name: str):
         val = super().get(name)
@@ -66,17 +67,27 @@ redis_kwargs = {
     "password": os.getenv("REDIS_PASSWORD"),
     "db": int(os.getenv("REDIS_DB", "0")),
 }
-
 REDIS_CLIENT = CustomRedisAsync(**redis_kwargs)
 REDIS_CLIENT_SYNC = CustomRedis(**redis_kwargs)
-FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY", "channel1")
-SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY", "channel2")
-ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX", "channel3")
-INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX", "channel4")
-PAYLOAD_PUSHER_QUEUE = os.getenv("PAYLOAD_PUSHER_QUEUE", "channel5")
+
+# All requests to the engines transport via these channels
+FUTURES_QUEUE_CHANNEL = os.getenv("FUTURES_QUEUE_KEY", "channel1")
+SPOT_QUEUE_CHANNEL = os.getenv("SPOT_QUEUE_KEY", "channel2")
+
+# Sends the dictionary representation of an Order to be throttled
+# and relayed to the client.
+PAYLOAD_PUSHER_CHANNEL = os.getenv("PAYLOAD_PUSHER_QUEUE", "channel5")
+
+# Receives and relays events to the respective client. For example
+# an ORDER_FILLED event and the necessary information.
 CLIENT_UPDATE_CHANNEL = os.getenv("CLIENT_UPDATE_CHANNEL", "channel6")
-FUTURES_BOOKS_CHANNEL = os.getenv("FUTURES_BOOKS_CHANNEL", "futures-books")
-SPOT_BOOKS_CHANNEL = os.getenv("SPOT_BOOKS_CHANNEL", "spot-books")
+
+# Receives and relays price update payloads to the client
+PRICE_UPDATE_CHANNEL = os.getenv("PRICE_UPDATE_CHANNEL", "price-updates")
+
+# Used by each matching engine to set the price.
+FUTURES_BOOKS_KEY = os.getenv("FUTURES_BOOKS_CHANNEL", "futures-books")
+SPOT_BOOKS_KEY = os.getenv("SPOT_BOOKS_CHANNEL", "spot-books")
 
 
 # Server Security
@@ -90,8 +101,8 @@ JWT_EXPIRY = timedelta(minutes=10_000)
 logging.basicConfig(
     level=logging.INFO,
     filename="app.log",
-    filemode="w",
-    format="%(asctime)s %(levelname)s: %(message)s",
+    filemode="a",
+    format="%(levelname)s: %(name)s - %(message)s",
 )
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)

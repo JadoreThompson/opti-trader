@@ -1,19 +1,17 @@
 import asyncio
 import uvicorn
 
-from json import dumps, loads
+from json import dumps
 from logging import getLogger
 from multiprocessing import Process
-from typing import Type
 
 from config import (
-    FUTURES_BOOKS_CHANNEL,
-    PAYLOAD_PUSHER_QUEUE,
+    FUTURES_BOOKS_KEY,
+    PAYLOAD_PUSHER_CHANNEL,
     REDIS_CLIENT,
     REDIS_CLIENT_SYNC,
-    SPOT_BOOKS_CHANNEL,
 )
-from engine import BaseEngine, FuturesEngine, SpotEngine, OrderBook
+from engine import FuturesEngine, OrderBook
 from engine.typing import Queue, SupportsAppend
 from services import PayloadPusher
 from utils.utils import get_exc_line
@@ -25,7 +23,7 @@ def run_payload_queue(queue: Queue) -> None:
     while True:
         try:
             item = queue.get()
-            REDIS_CLIENT_SYNC.publish(PAYLOAD_PUSHER_QUEUE, dumps(item))
+            REDIS_CLIENT_SYNC.publish(PAYLOAD_PUSHER_CHANNEL, dumps(item))
         except Exception as e:
             logger.error(f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}")
 
@@ -37,12 +35,12 @@ def run_payload_pusher() -> None:
 async def handle_run_futures_engine(queue: SupportsAppend) -> None:
     book_prices: list[tuple[str, float]] = []
 
-    keys: list[bytes] = await REDIS_CLIENT.hkeys(FUTURES_BOOKS_CHANNEL)
+    keys: list[bytes] = await REDIS_CLIENT.hkeys(FUTURES_BOOKS_KEY)
     for book in keys:
         book_prices.append(
             (
                 book.decode(),
-                await REDIS_CLIENT.hget(FUTURES_BOOKS_CHANNEL, book),
+                await REDIS_CLIENT.hget(FUTURES_BOOKS_KEY, book),
             )
         )
 
@@ -58,52 +56,12 @@ def run_server() -> None:
     uvicorn.run("server.app:app", port=80)
 
 
-# async def fetch_orderbooks() -> dict[str, list[tuple[str, float]]]:
-#     """
-#     Returns the name for the book (instrument) and it's last
-#     known price. To be called when initialising either of
-#     the matching engines.
-
-#     Returns:
-#         dict[str, list[tuple[str, float]]]: Example output:
-#             {"futures": [("BTCUSD-FUTURES", 100.0)]
-#              "spot": [("BTCUSD-SPOT", 100.0)]}
-#     """
-#     res = {}
-
-#     future_books: list[bytes] = await REDIS_CLIENT.hkeys(FUTURES_BOOKS_CHANNEL)
-#     if future_books:
-#         books = []
-#         for book in future_books:
-#             books.append(
-#                 (
-#                     book.decode(),
-#                     loads(await REDIS_CLIENT.hget(FUTURES_BOOKS_CHANNEL, book)),
-#                 )
-#             )
-#         res["futures"] = books
-
-#     spot_books: list[bytes] = await REDIS_CLIENT.hkeys(SPOT_BOOKS_CHANNEL)
-#     if spot_books:
-#         books = []
-#         for book in spot_books:
-#             books.append(
-#                 (
-#                     book.decode(),
-#                     loads(await REDIS_CLIENT.hget(SPOT_BOOKS_CHANNEL, book)),
-#                 )
-#             )
-#             res["spot"] = books
-
-#     return res
-
-
 async def main() -> None:
     queue = Queue()
 
     ps_args = (
-        (run_futures_engine, (queue,)),
         (run_server, ()),
+        (run_futures_engine, (queue,)),
         (run_payload_pusher, ()),
         (run_payload_queue, (queue,)),
     )

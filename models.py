@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from enums import ClientEventType, EventType
+from enums import ClientEventType, EventType, MarketType
 
 
 class ClientEvent(BaseModel):
@@ -7,3 +7,8 @@ class ClientEvent(BaseModel):
     user_id: str
     order_id: str
     data: dict
+
+class PriceUpdate(BaseModel):
+    instrument: str
+    price: float
+    market_type: MarketType

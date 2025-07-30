@@ -4,7 +4,7 @@ from asyncio import AbstractEventLoop
 from json import loads
 from pydantic import ValidationError
 
-from config import REDIS_CLIENT, SPOT_BOOKS_CHANNEL, SPOT_QUEUE_KEY
+from config import REDIS_CLIENT, SPOT_BOOKS_KEY, SPOT_QUEUE_CHANNEL
 from enums import EventType, MarketType, OrderStatus, OrderType, Side
 from utils.utils import get_exc_line
 from .base_engine import BaseEngine
@@ -22,7 +22,7 @@ from ..typing import (
     CloseRequest,
     Payload,
     PayloadTopic,
-    Event,    
+    Event,
     SupportsAppend,
 )
 from ..tasks import log_event
@@ -46,7 +46,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
     async def run(self) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
-            await ps.subscribe(SPOT_QUEUE_KEY)
+            await ps.subscribe(SPOT_QUEUE_CHANNEL)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
@@ -57,7 +57,11 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     if payload.topic == PayloadTopic.CREATE:
                         new_price = self.place_order(payload.data)
                         if new_price is not None:
-                            await REDIS_CLIENT.hset(SPOT_BOOKS_CHANNEL, payload.data['instrument'], new_price)
+                            await REDIS_CLIENT.hset(
+                                SPOT_BOOKS_KEY,
+                                payload.data["instrument"],
+                                new_price,
+                            )
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
                     elif payload.topic == PayloadTopic.MODIFY:
