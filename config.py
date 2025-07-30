@@ -40,10 +40,21 @@ class CustomRedisAsync(AsyncRedis):
             return loads(val)
         return val
 
+    async def hget(self, name, key):
+        val = await super().hget(name, key)
+        if val is not None:
+            return loads(val)
+        return val
 
 class CustomRedis(Redis):
     def get(self, name: str):
         val = super().get(name)
+        if val is not None:
+            return loads(val)
+        return val
+
+    def hget(self, name, key):
+        val = super().hget(name, key)
         if val is not None:
             return loads(val)
         return val
@@ -59,11 +70,13 @@ redis_kwargs = {
 REDIS_CLIENT = CustomRedisAsync(**redis_kwargs)
 REDIS_CLIENT_SYNC = CustomRedis(**redis_kwargs)
 FUTURES_QUEUE_KEY = os.getenv("FUTURES_QUEUE_KEY", "channel1")
-SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY", 'channel2')
-ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX", 'channel3')
-INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX", 'channel4')
-PAYLOAD_PUSHER_QUEUE = os.getenv("PAYLOAD_PUSHER_QUEUE", 'channel5')
+SPOT_QUEUE_KEY = os.getenv("SPOT_QUEUE_KEY", "channel2")
+ORDER_LOCK_PREFIX = os.getenv("ORDER_LOCK_PREFIX", "channel3")
+INSTRUMENT_LOCK_PREFIX = os.getenv("INSTRUMENT_LOCK_PREFIX", "channel4")
+PAYLOAD_PUSHER_QUEUE = os.getenv("PAYLOAD_PUSHER_QUEUE", "channel5")
 CLIENT_UPDATE_CHANNEL = os.getenv("CLIENT_UPDATE_CHANNEL", "channel6")
+FUTURES_BOOKS_CHANNEL = os.getenv("FUTURES_BOOKS_CHANNEL", "futures-books")
+SPOT_BOOKS_CHANNEL = os.getenv("SPOT_BOOKS_CHANNEL", "spot-books")
 
 
 # Server Security

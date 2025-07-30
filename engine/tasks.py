@@ -279,5 +279,6 @@ def log_event(event: EventDict):
             event_type=parsed_event.event_type.value,
             order_id=parsed_event.order_id,
             user_id=parsed_event.user_id,
+            data=parsed_event.model_dump(exclude={"event_type"})
         ).model_dump_json(),
     )

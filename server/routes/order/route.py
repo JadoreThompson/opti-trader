@@ -9,7 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
-from config import FUTURES_QUEUE_KEY, REDIS_CLIENT, SPOT_QUEUE_KEY
+from config import (
+    FUTURES_BOOKS_CHANNEL,
+    FUTURES_QUEUE_KEY,
+    REDIS_CLIENT,
+    SPOT_QUEUE_KEY,
+)
 from db_models import Orders
 from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
@@ -59,7 +64,7 @@ async def create_futures_order(
     else:
         raise ValueError("Invlaid order type.")
 
-    cur_price: float | None = await REDIS_CLIENT.get(parsed_body.instrument)
+    cur_price = await REDIS_CLIENT.hget(FUTURES_BOOKS_CHANNEL, parsed_body.instrument)    
     if cur_price is None:
         return JSONResponse(
             status_code=400, content={"error": "Instrument doesn't exist."}

@@ -65,6 +65,7 @@ class PayloadPusher:
                                 event_type=ClientEventType.PAYLOAD_UPDATE.value,
                                 user_id=msg.data["user_id"],
                                 order_id=msg.data["order_id"],
+                                data=msg.data
                             ).model_dump_json(),
                         )
                 except Exception as e:

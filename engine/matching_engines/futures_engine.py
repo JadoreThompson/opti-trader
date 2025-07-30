@@ -1,7 +1,7 @@
 from asyncio import AbstractEventLoop
 from json import loads
 
-from config import FUTURES_QUEUE_KEY, REDIS_CLIENT
+from config import FUTURES_BOOKS_CHANNEL, FUTURES_QUEUE_KEY, REDIS_CLIENT, REDIS_CLIENT_SYNC
 from enums import EventType, MarketType, OrderStatus, OrderType, Side
 from logging import getLogger
 
@@ -31,10 +31,11 @@ class FuturesEngine(BaseEngine[Order]):
         self,
         loop: AbstractEventLoop | None = None,
         pusher_queue: SupportsAppend | None = None,
+        orderbooks: dict[str, OrderBook[Order]] | None = None
     ) -> None:
         super().__init__(loop, pusher_queue)
         self._positions: dict[str, Position] = {}
-        self._orderbooks: dict[str, OrderBook[Order]] = {}
+        self._orderbooks: dict[str, OrderBook[Order]] = orderbooks or {}
 
     async def run(self) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
@@ -42,11 +43,13 @@ class FuturesEngine(BaseEngine[Order]):
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     continue
-                # print(m)
+                
                 try:
                     payload = Payload(**loads(m["data"]))
                     if payload.topic == PayloadTopic.CREATE:
-                        self.place_order(payload.data)
+                        new_price = self.place_order(payload.data)
+                        if new_price is not None:
+                            await REDIS_CLIENT.hset(FUTURES_BOOKS_CHANNEL, payload.data['instrument'], new_price)
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
                     elif payload.topic == PayloadTopic.MODIFY:
@@ -82,7 +85,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         entry_price = payload["limit_price"] or payload["price"]
 
-        if not (
+        if payload['order_type'] == OrderType.LIMIT and not (
             (  # Checking if not crossable
                 order.side == Side.BID
                 and ob.best_ask is not None
@@ -98,7 +101,7 @@ class FuturesEngine(BaseEngine[Order]):
             ob.append(order, order.price)
             pos.entry_order = order
             self._push_to_queue(payload)
-            return log_event.delay(
+            log_event.delay(
                 Event(
                     event_type=EventType.ORDER_NEW,
                     user_id=payload["user_id"],
@@ -108,6 +111,7 @@ class FuturesEngine(BaseEngine[Order]):
                     asset_balance=payload["open_quantity"],
                 ).model_dump()
             )
+            return
 
         result: MatchResult = self._match(order, ob)
         order.filled_quantity = result.quantity
@@ -134,9 +138,10 @@ class FuturesEngine(BaseEngine[Order]):
             )
 
             if result.outcome == MatchOutcome.SUCCESS:
-                return self._push_to_queue(payload)
+                self._push_to_queue(payload)
+                return result.price
 
-        price = payload["limit_price"] or result.price or ob.price
+        price = entry_price or result.price or ob.price # TODO: Check ob fallback
         order.price = price
         ob.append(order, price)
         pos.entry_order = order
@@ -152,6 +157,7 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
         self._push_to_queue(payload)
+        return result.price
 
     def close_order(self, request: CloseRequest) -> None:
         """
@@ -634,3 +640,6 @@ class FuturesEngine(BaseEngine[Order]):
         if pos.stop_loss_order is not None:
             ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
             pos.stop_loss_order = None
+
+    # async def _send_price_update(self, instrument: str, price: float) -> None:
+    #     await REDIS_CLIENT_SYNC.hset(FUTURES_BOOKS_CHANNEL, instrument, price)

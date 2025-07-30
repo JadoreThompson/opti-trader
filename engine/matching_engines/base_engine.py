@@ -189,9 +189,6 @@ class BaseEngine(Generic[O]):
         if self._loop and self._loop.is_running():
             self._loop.create_task(self._send_price_update(instrument, price))
 
-    async def _send_price_update(self, instrument: str, price: float) -> None:
-        await REDIS_CLIENT.set(instrument, price)
-
     def _push_to_queue(self, payload: dict) -> None:
         self._pusher_queue.append(
             PusherPayload(
