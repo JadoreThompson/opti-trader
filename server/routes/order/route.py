@@ -76,9 +76,6 @@ async def create_futures_order(
         k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in res.items()
     }
 
-    if body.order_type == OrderType.MARKET:
-        payload_data["tmp_price"] = cur_price
-
     await REDIS_CLIENT.publish(
         FUTURES_QUEUE_KEY,
         Payload(

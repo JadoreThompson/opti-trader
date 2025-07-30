@@ -70,7 +70,7 @@ CLIENT_UPDATE_CHANNEL = os.getenv("CLIENT_UPDATE_CHANNEL", "channel6")
 COOKIE_ALIAS = "cookie-order-matcher"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET", "my-secret")
 JWT_ALGO = os.getenv("JWT_ALGO", "HS256")
-JWT_EXPIRY = timedelta(days=1000)
+JWT_EXPIRY = timedelta(minutes=10_000)
 
 
 # Logging

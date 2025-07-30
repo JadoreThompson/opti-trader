@@ -209,6 +209,34 @@ async def handle_prepare_futures_order(
     if order_value > balance:
         return JSONResponse(status_code=400, content={"error": "Insufficient balance."})
 
+    tmp_stop_loss = order.stop_loss or (
+        float("-inf") if order.side == Side.BID else float("inf")
+    )
+    tmp_take_profit = order.take_profit or (
+        float("inf") if order.side == Side.BID else float("-inf")
+    )
+
+    if (
+        order.side == Side.BID and not (tmp_stop_loss < current_price < tmp_take_profit)
+    ) or (
+        order.side == Side.ASK and not (tmp_stop_loss > current_price > tmp_take_profit)
+    ):
+        return JSONResponse(status_code=400, content={"error": "Invalid TP/SL"})
+
+    if order.order_type == OrderType.LIMIT:
+        if (
+            order.side == Side.BID
+            and not (
+                tmp_stop_loss < order.limit_price <= current_price < tmp_take_profit
+            )
+        ) or (
+            order.side == Side.ASK
+            and not (
+                tmp_stop_loss > order.limit_price >= current_price > tmp_take_profit
+            )
+        ):
+            return JSONResponse(status_code=400, content={"error": "Invalid TP/SL"})
+
     res = await db_sess.execute(
         insert(Orders)
         .values(
