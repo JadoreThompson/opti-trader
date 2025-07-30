@@ -7,11 +7,11 @@ from config import (
     PRICE_UPDATE_CHANNEL,
     REDIS_CLIENT,
 )
-from enums import EventType, MarketType, OrderStatus, OrderType, Side
+from enums import EventType, MarketType, OrderStatus, OrderType, Side, StreamEventType
 from logging import getLogger
 
 from models import PriceUpdate
-from utils.utils import get_exc_line
+from utils.utils import get_datetime, get_exc_line
 from .base_engine import BaseEngine
 from ..enums import MatchOutcome, Tag
 from ..orderbook import OrderBook
@@ -54,20 +54,30 @@ class FuturesEngine(BaseEngine[Order]):
                     payload = Payload(**loads(m["data"]))
                     if payload.topic == PayloadTopic.CREATE:
                         new_price = self.place_order(payload.data)
-                        if new_price is not None:
-                            await REDIS_CLIENT.hset(
-                                FUTURES_BOOKS_KEY,
-                                payload.data["instrument"],
-                                new_price,
+                        # if new_price is not None:
+                        #     await REDIS_CLIENT.hset(
+                        #         FUTURES_BOOKS_KEY,
+                        #         payload.data["instrument"],
+                        #         new_price,
+                        #     )
+                        #     await REDIS_CLIENT.publish(
+                        #         PRICE_UPDATE_CHANNEL,
+                        #         PriceUpdate(
+                        #             instrument=payload.data["instrument"],
+                        #             price=new_price,
+                        #             market_type=MarketType.FUTURES.value,
+                        #         ).model_dump_json(),
+                        #     )
+                        if new_price:
+                            self._push(
+                                {
+                                    "instrument": payload.data["instrument"],
+                                    "price": new_price,
+                                    "market_type": MarketType.FUTURES,
+                                },
+                                StreamEventType.PRICE,
                             )
-                            await REDIS_CLIENT.publish(
-                                PRICE_UPDATE_CHANNEL,
-                                PriceUpdate(
-                                    instrument=payload.data["instrument"],
-                                    price=new_price,
-                                    market_type=MarketType.FUTURES.value,
-                                ).model_dump_json(),
-                            )
+
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
                     elif payload.topic == PayloadTopic.MODIFY:
@@ -80,7 +90,7 @@ class FuturesEngine(BaseEngine[Order]):
                         f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"
                     )
 
-    def place_order(self, payload: dict) -> None:
+    def place_order(self, payload: dict) -> float | None:
         """
         Places a new order in the futures engine.
 
@@ -91,6 +101,9 @@ class FuturesEngine(BaseEngine[Order]):
         Args:
             payload (dict): Order details including instrument, side, quantity,
                 type, and limit price.
+        
+        Returns:
+            float | None: Price matched or partially matched at.
         """
         ob = self._orderbooks.setdefault(payload["instrument"], OrderBook())
         if payload["order_id"] in self._positions:
@@ -118,7 +131,7 @@ class FuturesEngine(BaseEngine[Order]):
             order.price = entry_price
             ob.append(order, order.price)
             pos.entry_order = order
-            self._push_to_queue(payload)
+            self._push(payload)
             log_event.delay(
                 Event(
                     event_type=EventType.ORDER_NEW,
@@ -155,8 +168,12 @@ class FuturesEngine(BaseEngine[Order]):
                 ).model_dump()
             )
 
+            self._push(
+                {"quantity": result.quantity, "price": result.price, "time": get_datetime()},
+                StreamEventType.RECENT_TRADE,
+            )
             if result.outcome == MatchOutcome.SUCCESS:
-                self._push_to_queue(payload)
+                self._push(payload)
                 return result.price
 
         price = entry_price or result.price or ob.price  # TODO: Check ob fallback
@@ -174,7 +191,7 @@ class FuturesEngine(BaseEngine[Order]):
                 asset_balance=payload["open_quantity"],
             ).model_dump()
         )
-        self._push_to_queue(payload)
+        self._push(payload)
         return result.price
 
     def close_order(self, request: CloseRequest) -> None:
@@ -245,7 +262,15 @@ class FuturesEngine(BaseEngine[Order]):
                     asset_balance=pos.open_quantity,
                 ).model_dump()
             )
-            self._push_to_queue(pos.payload)
+            self._push(pos.payload)
+            self._push(
+                {
+                    "quantity": result.quantity,
+                    "price": result.price,
+                    "time": get_datetime(),
+                },
+                StreamEventType.RECENT_TRADE,
+            )
 
     def cancel_order(self, request: CloseRequest) -> None:
         """
@@ -296,7 +321,7 @@ class FuturesEngine(BaseEngine[Order]):
                 asset_balance=pos.payload["open_quantity"],
             ).model_dump()
         )
-        self._push_to_queue(pos.payload)
+        self._push(pos.payload)
 
     def modify_order(self, request: ModifyRequest) -> None:
         """
@@ -494,7 +519,7 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
 
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def _handle_filled_order(
         self,
@@ -546,7 +571,11 @@ class FuturesEngine(BaseEngine[Order]):
                 metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
-        self._push_to_queue(pos.payload)
+        self._push(pos.payload)
+        self._push(
+            {"quantity": filled_quantity, "price": price, "time": get_datetime()},
+            StreamEventType.RECENT_TRADE,
+        )
 
     def _handle_touched_order(
         self,
@@ -595,7 +624,11 @@ class FuturesEngine(BaseEngine[Order]):
                 metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
-        self._push_to_queue(pos.payload)
+        self._push(pos.payload)
+        self._push(
+            {"quantity": touched_quantity, "price": price, "time": get_datetime()},
+            StreamEventType.RECENT_TRADE,
+        )
 
     def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
         """

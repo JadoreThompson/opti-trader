@@ -1,8 +1,10 @@
-from asyncio import create_task
+from asyncio import create_task, wait_for
 from datetime import UTC, datetime, timedelta
+from json import loads
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketState
+from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,7 @@ from typing import List
 
 from db_models import Instruments, MarketData, OrderEvents, Orders
 from enums import EventType
+from models import StreamRequest
 from server.utils.db import depends_db_session
 from utils.utils import get_datetime, get_timestamp
 from .client_manager import ClientManager
@@ -18,6 +21,42 @@ from .models import Candle, InstrumentSummary, TimeFrame
 
 route = APIRouter(prefix="/instrument", tags=["instrument"])
 client_manager = ClientManager()
+
+
+@route.websocket("/{instrument}/ws")
+async def instrument_ws(instrument: str, ws: WebSocket):
+    async def handle_message() -> None:
+        message = await ws.receive_text()
+        if message == "ping":
+            return
+        
+        try:
+            req = StreamRequest(**loads(message))
+        except ValidationError:
+            pass
+
+        if req.subscribe is not None:
+            ...
+
+    await ws.accept()
+    timeout = 5
+
+    if not client_manager.is_running:
+        create_task(client_manager.run())
+
+
+    try:
+        client_manager.append(instrument, ws)
+        await ws.send_text("connected")
+
+        while True:
+            await wait_for(ws.receive_text(), timeout)
+    except (RuntimeError, WebSocketDisconnect):
+        pass
+    finally:
+        client_manager.remove(instrument, ws)
+        if ws.client_state != WebSocketState.DISCONNECTED:
+            await ws.close()
 
 
 @route.get("/{instrument}/candles", response_model=List[Candle])
@@ -105,26 +144,6 @@ async def get_instrument(
         )
 
     return candles
-
-
-@route.websocket("/{instrument}/ws")
-async def instrument_ws(instrument: str, ws: WebSocket):
-    await ws.accept()
-
-    if not client_manager.is_running:
-        create_task(client_manager.run())
-
-    client_manager.append(instrument, ws)
-
-    try:
-        while True:
-            await ws.receive()
-    except (RuntimeError, WebSocketDisconnect):
-        pass
-    finally:
-        client_manager.remove(instrument, ws)
-        if ws.client_state != WebSocketState.DISCONNECTED:
-            await ws.close()
 
 
 @route.get("/{instrument}/summary")

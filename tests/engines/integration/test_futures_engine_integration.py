@@ -38,7 +38,6 @@ async def engine(payload_pusher, payload_queue):
         pass
 
 
-
 def test_order_new_event(engine: FuturesEngine, db_sess: Session, patched_log):
     """
     Scenario: A new limit order is placed but not filled.
@@ -149,7 +148,7 @@ async def test_order_closed_event(
     Scenario: A user with a filled position closes it entirely.
     This should result in an ORDER_CLOSED event.
     """
-    engine._pusher_queue = payload_queue
+    engine._queue = payload_queue
     user1 = create_user()
     market_bid = create_order_simple(
         "", side=Side.BID, order_type=OrderType.MARKET, quantity=10, price=100.0

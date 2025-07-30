@@ -7,12 +7,17 @@ from multiprocessing import Process
 
 from config import (
     FUTURES_BOOKS_KEY,
+    INSTRUMENT_CHANNEL,
     PAYLOAD_PUSHER_CHANNEL,
     REDIS_CLIENT,
     REDIS_CLIENT_SYNC,
+    SPOT_BOOKS_KEY,
 )
 from engine import FuturesEngine, OrderBook
+from engine.orders import SpotOrder, Order
 from engine.typing import Queue, SupportsAppend
+from enums import ClientEventType, MarketType, StreamEventType
+from models import OrderBookSnapshot
 from services import PayloadPusher
 from utils.utils import get_exc_line
 
@@ -23,13 +28,52 @@ def run_payload_queue(queue: Queue) -> None:
     while True:
         try:
             item = queue.get()
-            REDIS_CLIENT_SYNC.publish(PAYLOAD_PUSHER_CHANNEL, dumps(item))
+
+            if item['topic'] == ClientEventType.PAYLOAD_UPDATE:
+                REDIS_CLIENT_SYNC.publish(PAYLOAD_PUSHER_CHANNEL, dumps(item))
+            elif isinstance(item['topic'], StreamEventType):
+                if item['topic'] == StreamEventType.PRICE:
+                    key = FUTURES_BOOKS_KEY if item['data']['market_type'] == MarketType.FUTURES else SPOT_BOOKS_KEY
+                    REDIS_CLIENT_SYNC.hset(key, item['data']['instrument'], item['data'])
+                    REDIS_CLIENT_SYNC.publish(INSTRUMENT_CHANNEL, item['data'])
+            
+                REDIS_CLIENT_SYNC.publish(INSTRUMENT_CHANNEL, item['data'])
+
         except Exception as e:
             logger.error(f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}")
 
 
 def run_payload_pusher() -> None:
     asyncio.run(PayloadPusher().start())
+
+
+async def publish_orderbooks(orderbooks: dict[str, OrderBook[Order | SpotOrder]]):
+    while True:
+        await asyncio.sleep(2)
+
+        snapshots = []
+        for instrument, ob in orderbooks.items():
+            bids, asks = {}, {}
+
+            bid_levels = [*ob.bid_levels][-5:]
+            ask_levels = [*ob.ask_levels][:5]
+
+            for levels, d in ((bid_levels, bids), (ask_levels, asks)):
+                for price in levels:
+                    quantity = 0
+                    cur = ob.bids[price].head
+
+                    while cur:
+                        quantity += cur.order.quantity - cur.order.filled_quantity
+                        cur = cur.next
+
+                    d[price] = quantity
+
+            snapshot = OrderBookSnapshot(instrument=instrument, bids=bids, asks=asks)
+            snapshots.append(snapshot)
+
+        for snapshot in snapshots:
+            await REDIS_CLIENT.publish(INSTRUMENT_CHANNEL, snapshot.model_dump())
 
 
 async def handle_run_futures_engine(queue: SupportsAppend) -> None:
@@ -45,7 +89,11 @@ async def handle_run_futures_engine(queue: SupportsAppend) -> None:
         )
 
     orderbooks = {instrument: OrderBook(price) for instrument, price in book_prices}
-    await FuturesEngine(pusher_queue=queue, orderbooks=orderbooks).run()
+    # await FuturesEngine(pusher_queue=queue, orderbooks=orderbooks).run()
+    await asyncio.gather(
+        FuturesEngine(pusher_queue=queue, orderbooks=orderbooks).run(),
+        publish_orderbooks(orderbooks),
+    )
 
 
 def run_futures_engine(queue: SupportsAppend) -> None:

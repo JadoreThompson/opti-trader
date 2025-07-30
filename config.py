@@ -76,18 +76,22 @@ SPOT_QUEUE_CHANNEL = os.getenv("SPOT_QUEUE_KEY", "channel2")
 
 # Sends the dictionary representation of an Order to be throttled
 # and relayed to the client.
-PAYLOAD_PUSHER_CHANNEL = os.getenv("PAYLOAD_PUSHER_QUEUE", "channel5")
+PAYLOAD_PUSHER_CHANNEL = os.getenv("PAYLOAD_PUSHER_QUEUE", "channel3")
 
 # Receives and relays events to the respective client. For example
 # an ORDER_FILLED event and the necessary information.
-CLIENT_UPDATE_CHANNEL = os.getenv("CLIENT_UPDATE_CHANNEL", "channel6")
+CLIENT_UPDATE_CHANNEL = os.getenv("CLIENT_UPDATE_CHANNEL", "channel4")
 
 # Receives and relays price update payloads to the client
-PRICE_UPDATE_CHANNEL = os.getenv("PRICE_UPDATE_CHANNEL", "price-updates")
+PRICE_UPDATE_CHANNEL = os.getenv("PRICE_UPDATE_CHANNEL", "channel5")
+
+# All events related to instruments that are to be relayed to
+# the client
+INSTRUMENT_CHANNEL = os.getenv("INSTRUMENT_CHANNEL", "channel6")
 
 # Used by each matching engine to set the price.
-FUTURES_BOOKS_KEY = os.getenv("FUTURES_BOOKS_CHANNEL", "futures-books")
-SPOT_BOOKS_KEY = os.getenv("SPOT_BOOKS_CHANNEL", "spot-books")
+FUTURES_BOOKS_KEY = os.getenv("FUTURES_BOOKS_CHANNEL", "channel7")
+SPOT_BOOKS_KEY = os.getenv("SPOT_BOOKS_CHANNEL", "channel8")
 
 
 # Server Security

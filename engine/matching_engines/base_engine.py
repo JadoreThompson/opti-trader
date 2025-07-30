@@ -3,7 +3,8 @@ from asyncio import AbstractEventLoop, get_event_loop
 from typing import Generic, TypeVar
 
 from config import REDIS_CLIENT
-from enums import Side
+from enums import ClientEventType, EventType, Side, StreamEventType
+from models import RecentTrade
 from services.payload_pusher import PusherPayload, PusherPayloadTopic
 from ..enums import MatchOutcome
 from ..orderbook import OrderBook
@@ -24,10 +25,10 @@ class BaseEngine(Generic[O]):
     def __init__(
         self,
         loop: AbstractEventLoop | None = None,
-        pusher_queue: SupportsAppend | None = None,
+        queue: SupportsAppend | None = None,
     ) -> None:
         self._loop = loop or get_event_loop()
-        self._pusher_queue = pusher_queue or Queue()
+        self._queue = queue or Queue()
 
     @abstractmethod
     async def run(self) -> None:
@@ -189,10 +190,31 @@ class BaseEngine(Generic[O]):
         if self._loop and self._loop.is_running():
             self._loop.create_task(self._send_price_update(instrument, price))
 
-    def _push_to_queue(self, payload: dict) -> None:
-        self._pusher_queue.append(
-            PusherPayload(
-                action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=payload
+    def _push(
+        self,
+        value: dict | float,
+        topic: (
+            EventType | ClientEventType | StreamEventType
+        ) = ClientEventType.PAYLOAD_UPDATE,
+    ) -> None:
+        if topic is None:
+            topic = [ClientEventType.PAYLOAD_UPDATE]
+
+        payload: dict = {}
+
+        if topic == ClientEventType.PAYLOAD_UPDATE:
+            payload = PusherPayload(
+                action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
             ).model_dump()
-        )
-        
+        elif topic == StreamEventType.PRICE:
+            payload = value
+        elif topic == StreamEventType.RECENT_TRADE:
+            payload = RecentTrade(**value).model_dump()
+
+        payload["topic"] = topic
+
+        # self._queue.append(
+        #     PusherPayload(
+        #         action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
+        #     ).model_dump()
+        # )

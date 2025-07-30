@@ -183,7 +183,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 ).model_dump()
             )
 
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def cancel_order(self, request: CloseRequest) -> None:
         """Cancel or reduce an existing order."""
@@ -247,7 +247,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                     metadata={"market_type": MarketType.SPOT},
                 ).model_dump()
             )
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def modify_order(self, request: ModifyRequest) -> None:
         """
@@ -456,7 +456,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
             ).model_dump()
         )
 
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def _update_or_remove_leg(
         self, price: float | None, order: SpotOrder, ob: OrderBook[SpotOrder]
@@ -552,7 +552,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
             place_order_event(balance_manager.get_balance(payload["user_id"]))
 
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def _update_payload_quantities(
         self,
@@ -634,7 +634,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 metadata={"tag": order.tag, "market_type": MarketType.SPOT},
             ).model_dump()
         )
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def _handle_touched_order(
         self,
@@ -673,7 +673,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 metadata={"tag": order.tag.value, "market_type": MarketType.SPOT},
             ).model_dump()
         )
-        self._push_to_queue(payload)
+        self._push(payload)
 
     def _place_tp_sl(self, oco_order: OCOOrder, ob: OrderBook[SpotOrder]) -> None:
         """

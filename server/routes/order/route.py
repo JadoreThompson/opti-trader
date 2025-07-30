@@ -50,6 +50,41 @@ route = APIRouter(prefix="/order", tags=["order"])
 client_manager = ClientManger()
 
 
+@route.websocket("/ws")
+async def ws_live_updates(ws: WebSocket):
+    await ws.accept()
+    timeout = 5
+
+    try:
+        token = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
+    except asyncio.TimeoutError:
+        if ws.client_state != WebSocketState.DISCONNECTED:
+            await ws.close()
+            
+    try:
+        payload = decode_jwt(token)
+    except JWTError as e:
+        await ws.send_json({"error": str(e)})
+        await ws.close()
+
+    if not client_manager.is_running:
+        asyncio.create_task(client_manager.run())
+
+    try:
+        await client_manager.append(payload.sub, ws)
+        await ws.send_text("connected")
+
+        while True:
+            await asyncio.wait_for(ws.receive_text(), timeout)
+
+    except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect):
+        pass
+    finally:
+        client_manager.remove(payload.sub)
+        if ws.client_state != WebSocketState.DISCONNECTED:
+            await ws.close()
+
+
 @route.post("/futures", status_code=201)
 async def create_futures_order(
     body: BaseOrder,
@@ -323,37 +358,3 @@ async def get_ws_access_token(jwt_payload: JWTPayload = Depends(verify_jwt)):
             sub=jwt_payload.sub, exp=get_datetime() + timedelta(minutes=15)
         )
     }
-
-
-@route.websocket("/ws")
-async def ws_live_updates(ws: WebSocket):
-    await ws.accept()
-    timeout = 5
-
-    try:
-        token = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
-    except asyncio.TimeoutError:
-        if ws.client_state != WebSocketState.DISCONNECTED:
-            await ws.close()
-    try:
-        payload = decode_jwt(token)
-    except JWTError as e:
-        await ws.send_json({"error": str(e)})
-        await ws.close()
-
-    if not client_manager.is_running:
-        asyncio.create_task(client_manager.run())
-
-    try:
-        await client_manager.append(payload.sub, ws)
-        await ws.send_text("connected")
-
-        while True:
-            await asyncio.wait_for(ws.receive_text(), timeout)
-
-    except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect):
-        pass
-    finally:
-        client_manager.remove(payload.sub)
-        if ws.client_state != WebSocketState.DISCONNECTED:
-            await ws.close()
