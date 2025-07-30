@@ -15,7 +15,7 @@ from .models import OrderQueryParams, OrderResponse
 route = APIRouter(prefix="/user", tags=["user"])
 
 
-@route.get("/orders")
+@route.get("/orders", response_model=PaginatedResponse[OrderResponse])
 async def get_orders(
     params: Annotated[OrderQueryParams, Query()],
     jwt_payload: JWTPayload = Depends(verify_jwt),
@@ -46,7 +46,7 @@ async def get_orders(
     )
 
 
-@route.get("/orders/{order_id}")
+@route.get("/orders/{order_id}", response_model=OrderResponse)
 async def get_order(
     order_id: str,
     jwt_payload: JWTPayload = Depends(verify_jwt),

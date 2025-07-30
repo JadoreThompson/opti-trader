@@ -1,22 +1,26 @@
 from asyncio import create_task
+from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketState
 from starlette.websockets import WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
 
-from db_models import MarketData
+from db_models import Instruments, MarketData, OrderEvents, Orders
+from enums import EventType
 from server.utils.db import depends_db_session
-from utils.utils import get_timestamp
+from utils.utils import get_datetime, get_timestamp
 from .client_manager import ClientManager
-from .models import Candle, TimeFrame
+from .models import Candle, InstrumentSummary, TimeFrame
 
 
 route = APIRouter(prefix="/instrument", tags=["instrument"])
 client_manager = ClientManager()
 
 
-@route.get("/{instrument}/candles")
+@route.get("/{instrument}/candles", response_model=List[Candle])
 async def get_instrument(
     instrument: str,
     time_frame: TimeFrame = Query(),
@@ -121,3 +125,95 @@ async def instrument_ws(instrument: str, ws: WebSocket):
         client_manager.remove(instrument, ws)
         if ws.client_state != WebSocketState.DISCONNECTED:
             await ws.close()
+
+
+@route.get("/{instrument}/summary")
+async def get_instrument_summary(
+    instrument: str, db_sess: AsyncSession = Depends(depends_db_session)
+):
+    res = await db_sess.execute(
+        select(Instruments.instrument_id).where(Instruments.instrument == instrument)
+    )
+    instrument_id = res.scalar_one_or_none()
+
+    if instrument_id is None:
+        return JSONResponse(
+            status_code=404, content={"error": "Instrument doesn't exist."}
+        )
+
+    cur_timestamp = get_datetime().timestamp()
+    prior_24h = int((get_datetime() - timedelta(hours=24)).timestamp())
+
+    res = await db_sess.execute(
+        select(MarketData)
+        .where(MarketData.time >= prior_24h)
+        .order_by(MarketData.time.asc())
+        .limit(1)
+    )
+    start = res.scalar_one_or_none()
+    start_time = start.time if start is not None else 0
+
+    res = await db_sess.execute(
+        select(MarketData)
+        .where(MarketData.time <= cur_timestamp)
+        .order_by(MarketData.time.desc())
+        .limit(1)
+    )
+    end = res.scalar_one_or_none()
+    end_time = end.time if end is not None else int(cur_timestamp) * 1000
+
+    res = await db_sess.execute(
+        select(OrderEvents.price)
+        .where(
+            OrderEvents.event_type.in_(
+                [
+                    EventType.ORDER_PARTIALLY_FILLED,
+                    EventType.ORDER_FILLED,
+                    EventType.ORDER_PARTIALLY_CLOSED,
+                    EventType.ORDER_CLOSED,
+                ]
+            )
+        )
+        .order_by(OrderEvents.created_at.desc())
+        .limit(1)
+    )
+    cur_price = res.scalar_one_or_none()
+
+    if start is None and end is None:
+        return InstrumentSummary(
+            price=cur_price,
+            high_24h=None,
+            low_24h=None,
+            volume_24h=None,
+            change_24h=None,
+        )
+
+    res = await db_sess.execute(
+        select(func.min(MarketData.price), func.max(MarketData.price)).where(
+            MarketData.time >= start_time, MarketData.time <= end_time
+        )
+    )
+    min_price, max_price = res.first()
+
+    stmt = select(func.sum(Orders.quantity), func.sum(Orders.standing_quantity)).where(
+        Orders.created_at >= datetime.fromtimestamp(start_time, UTC),
+        Orders.created_at <= datetime.fromtimestamp(end_time, UTC),
+    )
+    if start_time:
+        stmt = stmt.where(Orders.created_at >= datetime.fromtimestamp(start_time))
+
+    res = await db_sess.execute(stmt)
+    quantity, standing_quantity = res.first()
+    volume = (quantity - standing_quantity) // 2
+
+    start_price = start.price if start is not None else 0
+    change24h_nominal = end.price - start_price
+    change_24h = change24h_nominal / start_price
+
+    return InstrumentSummary(
+        price=cur_price,
+        high_24h=max_price,
+        low_24h=min_price,
+        volume_24h=volume,
+        change_24h=change_24h * 100,
+    )
