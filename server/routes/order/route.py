@@ -1,9 +1,11 @@
 import asyncio
 
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, WebSocket
+from typing import Annotated
+from fastapi import APIRouter, Depends, Query, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
+from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +21,8 @@ from db_models import Orders
 from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
 from server.exc import JWTError
-from server.middleware import verify_jwt
+from server.middleware import convert_csv, verify_jwt
+from server.models import PaginatedResponse
 from server.typing import JWTPayload
 from server.utils.auth import decode_jwt, generate_jwt
 from server.utils.db import depends_db_session
@@ -64,7 +67,7 @@ async def create_futures_order(
     else:
         raise ValueError("Invlaid order type.")
 
-    cur_price = await REDIS_CLIENT.hget(FUTURES_BOOKS_CHANNEL, parsed_body.instrument)    
+    cur_price = await REDIS_CLIENT.hget(FUTURES_BOOKS_CHANNEL, parsed_body.instrument)
     if cur_price is None:
         return JSONResponse(
             status_code=400, content={"error": "Instrument doesn't exist."}

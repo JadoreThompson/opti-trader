@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from .exc import JWTError
-from .routes import auth_route, order_route
+from .routes import auth_route, user_route, order_route
 
 app = FastAPI()
 
@@ -16,6 +16,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_route)
+app.include_router(user_route)
 app.include_router(order_route)
 
 

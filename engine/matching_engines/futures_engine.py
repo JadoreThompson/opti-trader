@@ -82,6 +82,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         pos = self._positions.setdefault(payload["order_id"], Position(payload))
         order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
+        ob.print_order_book()
 
         entry_price = payload["limit_price"] or payload["price"]
 

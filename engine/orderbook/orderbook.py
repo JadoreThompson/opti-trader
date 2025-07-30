@@ -160,3 +160,31 @@ class OrderBook(Generic[T]):
         while cur:
             yield cur.order
             cur = cur.next
+    
+    def print_order_book(self, depth: int = 5) -> None:
+        """
+        Nicely prints the top `depth` levels of the order book.
+
+        Args:
+            depth (int): Number of price levels to display from each side.
+        """
+        print(f"\n{'Bid':>20} | {'Ask':<20}")
+        print(f"{'Price':>10} {'Qty':>10} | {'Price':<10} {'Qty':<10}")
+        print("-" * 45)
+
+        bid_levels = list(reversed(self._bids.items()))[:depth]
+        ask_levels = list(self._asks.items())[:depth]
+
+        for i in range(max(len(bid_levels), len(ask_levels))):
+            bid_price, bid_qty = ("", "")
+            ask_price, ask_qty = ("", "")
+
+            if i < len(bid_levels):
+                bid_price = f"{bid_levels[i][0]:.2f}"
+                bid_qty = sum(o.order.quantity for o in bid_levels[i][1].tracker.values())
+
+            if i < len(ask_levels):
+                ask_price = f"{ask_levels[i][0]:.2f}"
+                ask_qty = sum(o.order.quantity for o in ask_levels[i][1].tracker.values())
+
+            print(f"{bid_price:>10} {bid_qty:>10} | {ask_price:<10} {ask_qty:<10}")
