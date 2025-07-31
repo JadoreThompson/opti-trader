@@ -1,5 +1,5 @@
-from datetime import UTC, datetime
 import sys
+from datetime import UTC, datetime
 
 
 def get_exc_line():

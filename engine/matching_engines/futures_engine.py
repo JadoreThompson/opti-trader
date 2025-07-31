@@ -2,9 +2,7 @@ from asyncio import AbstractEventLoop
 from json import loads
 
 from config import (
-    FUTURES_BOOKS_KEY,
     FUTURES_QUEUE_CHANNEL,
-    PRICE_UPDATE_CHANNEL,
     REDIS_CLIENT,
 )
 from enums import (
@@ -13,12 +11,10 @@ from enums import (
     OrderStatus,
     OrderType,
     Side,
-    InstrumentEventType,
 )
 from logging import getLogger
 
-from models import PriceUpdate
-from utils.utils import get_datetime, get_exc_line
+from utils.utils import get_exc_line
 from .base_engine import BaseEngine
 from ..enums import MatchOutcome, Tag
 from ..orderbook import OrderBook
@@ -61,30 +57,6 @@ class FuturesEngine(BaseEngine[Order]):
                     payload = Payload(**loads(m["data"]))
                     if payload.topic == PayloadTopic.CREATE:
                         self.place_order(payload.data)
-                        # new_price = self.place_order(payload.data)
-                        # if new_price is not None:
-                        #     await REDIS_CLIENT.hset(
-                        #         FUTURES_BOOKS_KEY,
-                        #         payload.data["instrument"],
-                        #         new_price,
-                        #     )
-                        #     await REDIS_CLIENT.publish(
-                        #         PRICE_UPDATE_CHANNEL,
-                        #         PriceUpdate(
-                        #             instrument=payload.data["instrument"],
-                        #             price=new_price,
-                        #             market_type=MarketType.FUTURES.value,
-                        #         ).model_dump_json(),
-                        #     )
-                        # if new_price:
-                        #     self._push(
-                        #         {
-                        #             "instrument": payload.data["instrument"],
-                        #             "price": new_price,
-                        #             "market_type": MarketType.FUTURES,
-                        #         },
-                        #         InstrumentEventType.PRICE,
-                        #     )
 
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
@@ -176,17 +148,8 @@ class FuturesEngine(BaseEngine[Order]):
                 ).model_dump()
             )
 
-            # self._push_order_payload(
-            #     {
-            #         "quantity": result.quantity,
-            #         "price": result.price,
-            #         "time": get_datetime(),
-            #     },
-            #     InstrumentEventType.RECENT_TRADE,
-            # )
             if result.outcome == MatchOutcome.SUCCESS:
                 return self._push_order_payload(payload)
-                # return result.price
 
         price = entry_price or result.price or ob.price  # TODO: Check ob fallback
         order.price = price
@@ -204,7 +167,6 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
         self._push_order_payload(payload)
-        # return result.price
 
     def close_order(self, request: CloseRequest) -> None:
         """
@@ -275,14 +237,6 @@ class FuturesEngine(BaseEngine[Order]):
                 ).model_dump()
             )
             self._push_order_payload(pos.payload)
-            # self._push(
-            #     {
-            #         "quantity": result.quantity,
-            #         "price": result.price,
-            #         "time": get_datetime(),
-            #     },
-            #     InstrumentEventType.RECENT_TRADE,
-            # )
 
     def cancel_order(self, request: CloseRequest) -> None:
         """
@@ -584,10 +538,6 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
         self._push_order_payload(pos.payload)
-        # self._push(
-        #     {"quantity": filled_quantity, "price": price, "time": get_datetime()},
-        #     InstrumentEventType.RECENT_TRADE,
-        # )
 
     def _handle_touched_order(
         self,
@@ -637,10 +587,6 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
         self._push_order_payload(pos.payload)
-        # self._push(
-        #     {"quantity": touched_quantity, "price": price, "time": get_datetime()},
-        #     InstrumentEventType.RECENT_TRADE,
-        # )
 
     def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
         """

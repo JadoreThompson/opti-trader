@@ -11,12 +11,12 @@ from config import (
     PAYLOAD_PUSHER_CHANNEL,
     REDIS_CLIENT,
     REDIS_CLIENT_SYNC,
-    SPOT_BOOKS_KEY,
+
 )
 from engine import FuturesEngine, OrderBook
 from engine.orders import SpotOrder, Order
 from engine.typing import Queue, SupportsAppend
-from enums import ClientEventType, MarketType, InstrumentEventType
+from enums import  InstrumentEventType
 from models import InstrumentEvent, OrderBookSnapshot
 from services import PayloadPusher
 from utils.utils import get_exc_line
@@ -30,22 +30,6 @@ def run_payload_queue(queue: Queue) -> None:
         try:
             item = queue.get()
             REDIS_CLIENT_SYNC.publish(PAYLOAD_PUSHER_CHANNEL, dumps(item))
-
-            # if item["topic"] == ClientEventType.PAYLOAD_UPDATE:
-            #     REDIS_CLIENT_SYNC.publish(PAYLOAD_PUSHER_CHANNEL, dumps(item))
-            # elif isinstance(item["topic"], InstrumentEventType):
-            #     if item["topic"] == InstrumentEventType.PRICE:
-            #         key = (
-            #             FUTURES_BOOKS_KEY
-            #             if item["data"]["market_type"] == MarketType.FUTURES
-            #             else SPOT_BOOKS_KEY
-            #         )
-            #         REDIS_CLIENT_SYNC.hset(
-            #             key, item["data"]["instrument"], item["data"]
-            #         )
-            #         REDIS_CLIENT_SYNC.publish(INSTRUMENT_CHANNEL, item["data"])
-
-            #     REDIS_CLIENT_SYNC.publish(INSTRUMENT_CHANNEL, item["data"])
 
         except Exception as e:
             logger.error(f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}")
@@ -63,14 +47,8 @@ async def publish_orderbooks(orderbooks: dict[str, OrderBook[Order | SpotOrder]]
         for instrument, ob in orderbooks.items():
             bids, asks = {}, {}
 
-            bid_levels = [*ob.bid_levels][-5:]
-            ask_levels = [*ob.ask_levels][:5]
-            
-            # print("Ask levels")
-            # print(ask_levels)
-            # print("")
-            # print("Bid levels")
-            # print(bid_levels)
+            bid_levels = [*ob.bid_levels][-10:]
+            ask_levels = [*ob.ask_levels][:10]
 
             for levels, book, d in ((bid_levels, ob.bids, bids), (ask_levels, ob.asks, asks)):
                 for price in levels:
@@ -80,11 +58,10 @@ async def publish_orderbooks(orderbooks: dict[str, OrderBook[Order | SpotOrder]]
                         quantity = 0
 
                         while cur:
-                            # print(cur.order)
                             quantity += cur.order.quantity - cur.order.filled_quantity
                             cur = cur.next
-
-                        d[price] = quantity
+                        if quantity:
+                            d[price] = quantity
 
             event = InstrumentEvent[OrderBookSnapshot](
                 event_type=InstrumentEventType.ORDERBOOK_UPDATE,

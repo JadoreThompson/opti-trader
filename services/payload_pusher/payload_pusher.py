@@ -9,12 +9,13 @@ from typing import Type, get_args, get_origin
 from types import UnionType
 
 import db_models
-from config import CLIENT_UPDATE_CHANNEL, PAYLOAD_PUSHER_CHANNEL, REDIS_CLIENT
+from config import CLIENT_UPDATE_CHANNEL, ORDER_EVENTS_CHANNEL, PAYLOAD_PUSHER_CHANNEL, REDIS_CLIENT
 from enums import ClientEventType
 from models import ClientEvent
 from utils.db import get_db_session
 from utils.utils import get_exc_line
 from .typing import PusherPayload, PusherPayloadTopic, MutationFunc
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,8 @@ class PayloadPusher:
 
                     if msg.table_cls == "Orders":
                         await REDIS_CLIENT.publish(
-                            CLIENT_UPDATE_CHANNEL,
+                            # CLIENT_UPDATE_CHANNEL,
+                            ORDER_EVENTS_CHANNEL,
                             ClientEvent(
                                 event_type=ClientEventType.PAYLOAD_UPDATE.value,
                                 user_id=msg.data["user_id"],

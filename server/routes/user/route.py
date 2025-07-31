@@ -4,12 +4,17 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db_models import Orders
+from db_models import OrderEvents, Orders
 from server.middleware import verify_jwt
 from server.models import PaginatedResponse
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
-from .models import OrderQueryParams, OrderResponse
+from .models import (
+    OrderEventSummary,
+    OrderQueryParams,
+    OrderEventQueryParams,
+    OrderResponse,
+)
 
 
 route = APIRouter(prefix="/user", tags=["user"])
@@ -62,3 +67,41 @@ async def get_order(
         return JSONResponse(status_code=400, content={"error": "Order doesn't exist."})
 
     return OrderResponse(**order.dump())
+
+
+@route.get("/events", response_model=PaginatedResponse[OrderEventSummary])
+async def get_events(
+    params: Annotated[OrderEventQueryParams, Query()],
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    limit = 10
+    offset = (params.page - 1) * 10
+    stmt = select(OrderEvents).where(OrderEvents.user_id == jwt_payload.sub)
+
+    if params.event_type is not None:
+        stmt = stmt.where(OrderEvents.event_type.in_(params.event_type))
+    if params.order_by:
+        stmt = stmt.order_by(
+            OrderEvents.created_at.desc()
+            if params.order_by == "desc"
+            else OrderEvents.created_at.asc()
+        )
+
+    res = await db_sess.execute(stmt.offset(offset).limit(limit + 1))
+    events = res.scalars().all()
+
+    return PaginatedResponse[OrderEventSummary](
+        page=params.page,
+        size=min(limit, len(events)),
+        has_next=len(events) > limit,
+        data=[
+            OrderEventSummary(
+                order_event_id=e.order_event_id,
+                order_id=e.order_id,
+                event_type=e.event_type,
+                created_at=e.created_at,
+            )
+            for e in events
+        ],
+    )

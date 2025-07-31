@@ -7,6 +7,7 @@ from config import (
     CLIENT_UPDATE_CHANNEL,
     FUTURES_BOOKS_KEY,
     INSTRUMENT_EVENTS_CHANNEL,
+    ORDER_EVENTS_CHANNEL,
     REDIS_CLIENT_SYNC,
     SPOT_BOOKS_KEY,
 )
@@ -315,16 +316,17 @@ def log_event(event: EventDict):
 
     # Instrument Update
     if parsed_event.event_type in fill_events:
-        # print("Event")
-        REDIS_CLIENT_SYNC.hset(
-            (
-                FUTURES_BOOKS_KEY
-                if parsed_event.event_type == MarketType.FUTURES
-                else SPOT_BOOKS_KEY
-            ),
-            instrument,
-            parsed_event.price,
-        )
+        market_type = parsed_event.metadata.get("market_type")
+        if market_type is not None:
+            REDIS_CLIENT_SYNC.hset(
+                (
+                    FUTURES_BOOKS_KEY
+                    if market_type == MarketType.FUTURES
+                    else SPOT_BOOKS_KEY
+                ),
+                instrument,
+                parsed_event.price,
+            )
 
         REDIS_CLIENT_SYNC.publish(
             INSTRUMENT_EVENTS_CHANNEL,
@@ -345,14 +347,16 @@ def log_event(event: EventDict):
                         price=parsed_event.price,
                         quantity=parsed_event.quantity,
                         side=side,
-                        time=get_datetime().date(),
+                        # time=get_datetime(),
+                        time=get_datetime().strftime("%I:%M:%S"),
                     ),
                 ).model_dump_json(),
             )
 
     # Order Update
     REDIS_CLIENT_SYNC.publish(
-        CLIENT_UPDATE_CHANNEL,
+        # CLIENT_UPDATE_CHANNEL,
+        ORDER_EVENTS_CHANNEL,
         ClientEvent(
             event_type=parsed_event.event_type.value,
             order_id=parsed_event.order_id,

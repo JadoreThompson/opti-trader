@@ -75,7 +75,6 @@ class ClientManager:
                     continue
 
                 event: InstrumentEventUnion = InstrumentEvent(**loads(m["data"]))
-                # print("Client Manager",event)
 
                 if event.event_type == InstrumentEventType.ORDERBOOK_UPDATE:
                     self._orderbook_queue.put_nowait(event)
@@ -100,13 +99,13 @@ class ClientManager:
         self,
     ) -> None:
         while True:
-            item: InstrumentEvent[OrderBookSnapshot] = await self._price_queue.get()
+            item: InstrumentEvent[OrderBookSnapshot] = await self._orderbook_queue.get()
             snapshot = item.data
 
             for ws in self._channels[item.instrument][
                 InstrumentEventType.ORDERBOOK_UPDATE
             ]:
-                await ws.send_json(
+                await ws.send_text(
                     InstrumentStreamMessage(
                         event_type=InstrumentEventType.ORDERBOOK_UPDATE,
                         data=snapshot,
@@ -131,11 +130,11 @@ class ClientManager:
         self,
     ) -> None:
         while True:
-            item: InstrumentEvent[RecentTrade] = await self._price_queue.get()
+            item: InstrumentEvent[RecentTrade] = await self._recent_trades_queue.get()
             recent_trade = item.data
 
             for ws in self._channels[item.instrument][InstrumentEventType.RECENT_TRADE]:
-                await ws.send_json(
+                await ws.send_text(
                     InstrumentStreamMessage(
                         event_type=InstrumentEventType.RECENT_TRADE,
                         data=recent_trade,

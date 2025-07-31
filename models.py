@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Generic, TypeVar, Union
+from typing import Any, Generic, TypeVar, Union
 from pydantic import BaseModel, ValidationError, field_serializer, field_validator
-from enums import ClientEventType, EventType, MarketType, InstrumentEventType
+from enums import ClientEventType, EventType, MarketType, InstrumentEventType, Side
 
 T = TypeVar("T")
 
@@ -26,16 +26,8 @@ class OrderBookSnapshot(BaseModel):
 class RecentTrade(BaseModel):
     price: float
     quantity: int
-    time: date
-
-    @field_validator("time", mode="before")
-    def convert_time(cls, v) -> date:
-        if isinstance(v, datetime):
-            return datetime.date()
-        elif isinstance(v, date):
-            return v
-        raise ValidationError(f"Invalid type {type(v)} for time")
-
+    side: Side
+    time: str | datetime.time
 
 class SubscriptionRequest(BaseModel):
     subscribe: InstrumentEventType | None = None

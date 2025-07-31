@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
-from enums import MarketType, OrderStatus, OrderType, Side
+from enums import EventType, MarketType, OrderStatus, OrderType, Side
 
 
 class OrderResponse(BaseModel):
@@ -26,7 +27,7 @@ class OrderResponse(BaseModel):
     take_profit: float | None
     created_at: datetime
 
-    @field_validator("user_id", "order_id", mode='after')
+    @field_validator("user_id", "order_id", mode="after")
     def id_to_string(cls, v):
         return str(v)
 
@@ -36,3 +37,16 @@ class OrderQueryParams(BaseModel):
     market_type: list[MarketType] | None = None
     status: list[OrderStatus] | None = None
     order_type: list[OrderType] | None = None
+
+
+class OrderEventQueryParams(BaseModel):
+    page: int = Field(default=1, ge=1)
+    event_type: list[EventType] | None = None
+    order_by: Literal['asc','desc'] | None = None
+
+
+class OrderEventSummary(BaseModel):
+    order_event_id: UUID | str
+    order_id: UUID | str
+    event_type: EventType
+    created_at: datetime

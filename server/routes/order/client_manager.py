@@ -2,7 +2,7 @@ from json import loads
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
 
-from config import REDIS_CLIENT
+from config import ORDER_EVENTS_CHANNEL, REDIS_CLIENT
 from models import ClientEvent
 
 
@@ -21,15 +21,16 @@ class ClientManger:
 
     async def _listen(self) -> None:
         async with REDIS_CLIENT.pubsub() as ps:
-            await ps.subscribe("live-updates")
+            await ps.subscribe(ORDER_EVENTS_CHANNEL)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     self._is_running = True
                     continue
 
                 parsed_m = ClientEvent(**loads(m["data"]))
+
                 if parsed_m.user_id in self._listeners:
-                    await self._listeners[parsed_m.user_id].send_bytes(
+                    await self._listeners[parsed_m.user_id].send_text(
                         parsed_m.model_dump_json()
                     )
 

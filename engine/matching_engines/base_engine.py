@@ -196,24 +196,3 @@ class BaseEngine(Generic[O]):
         ).model_dump()
         self._queue.append(payload)
 
-        # if topic is None:
-        #     topic = [ClientEventType.PAYLOAD_UPDATE]
-
-        # payload: dict = {}
-
-        # if topic == ClientEventType.PAYLOAD_UPDATE:
-        #     payload = PusherPayload(
-        #         action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
-        #     ).model_dump()
-        # elif topic == InstrumentEventType.PRICE:
-        #     payload = value
-        # elif topic == InstrumentEventType.RECENT_TRADE:
-        #     payload = RecentTrade(**value).model_dump()
-
-        # payload["topic"] = topic
-
-        # self._queue.append(
-        #     PusherPayload(
-        #         action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
-        #     ).model_dump()
-        # )

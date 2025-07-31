@@ -59,14 +59,12 @@ async def ws_live_updates(ws: WebSocket):
         token = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
     except asyncio.TimeoutError:
         if ws.client_state != WebSocketState.DISCONNECTED:
-            print("Didnt receive token in time")
             await ws.close()
             
     try:
         payload = decode_jwt(token)
     except JWTError as e:
         await ws.send_json({"error": str(e)})
-        print("Error verifyign token")
         if ws.client_state != WebSocketState.DISCONNECTED:
             await ws.close()
 
@@ -78,16 +76,12 @@ async def ws_live_updates(ws: WebSocket):
         await ws.send_text("connected")
 
         while True:
-            await asyncio.wait_for(ws.receive_text(), timeout)
-
-    except Exception as e:
-        print(e)
-    # except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect) as e:
-    #     print(e)
+            m = await asyncio.wait_for(ws.receive_text(), timeout)
+    except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect) as e:
+        pass
     finally:
         client_manager.remove(payload.sub)
         if ws.client_state != WebSocketState.DISCONNECTED:
-            print("Finally closing")
             await ws.close()
 
 
@@ -118,8 +112,9 @@ async def create_futures_order(
     if isinstance(res, JSONResponse):
         return res
 
+    order, balance = res
     payload_data = {
-        k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in res.items()
+        k: (str(v) if isinstance(v, (UUID, datetime)) else v) for k, v in order.items()
     }
 
     await REDIS_CLIENT.publish(
@@ -130,7 +125,7 @@ async def create_futures_order(
         ).model_dump_json(),
     )
 
-    return {"order_id": res["order_id"]}
+    return {"order_id": order["order_id"], "balance": balance}
 
 
 @route.post("/spot", status_code=201)
