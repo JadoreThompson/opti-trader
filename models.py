@@ -1,6 +1,5 @@
-from datetime import date, datetime
-from typing import Any, Generic, TypeVar, Union
-from pydantic import BaseModel, ValidationError, field_serializer, field_validator
+from typing import Generic, TypeVar, Union
+from pydantic import BaseModel, field_serializer
 from enums import ClientEventType, EventType, MarketType, InstrumentEventType, Side
 
 T = TypeVar("T")
@@ -27,7 +26,7 @@ class RecentTrade(BaseModel):
     price: float
     quantity: int
     side: Side
-    time: str | datetime.time
+    time: str
 
 class SubscriptionRequest(BaseModel):
     subscribe: InstrumentEventType | None = None

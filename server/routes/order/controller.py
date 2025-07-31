@@ -184,7 +184,7 @@ async def handle_prepare_futures_order(
     user_id: str,
     current_price: float,
     db_sess: AsyncSession,
-) -> JSONResponse | tuple[dict, float]:
+) -> tuple[dict, float] | JSONResponse:
     """
     Validates futures order and creates the order record.
 
@@ -195,9 +195,12 @@ async def handle_prepare_futures_order(
         db_sess (AsyncSession): Active async database session.
 
     Returns:
-        tuple[dict, float]:
-            - dict: Dictionary representation of an Orders record.
-            - float: New balance after transaction.
+        tuple[dict, float] | JSONResponse:
+            tuple[dict, float]
+                - dict: Dictionary representation of an Orders record.
+                - float: New balance after transaction.
+            JSONResponse: Order request invalid
+        
     """
     res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
     balance = res.scalar()

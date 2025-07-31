@@ -50,3 +50,7 @@ class OrderEventSummary(BaseModel):
     order_id: UUID | str
     event_type: EventType
     created_at: datetime
+
+class UserSummary(BaseModel):
+    balance: float
+    pnl: float

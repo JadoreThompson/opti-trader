@@ -9,6 +9,7 @@ from server.middleware import verify_jwt
 from server.models import PaginatedResponse
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
+from .controller import fetch_user_summary
 from .models import (
     OrderEventSummary,
     OrderQueryParams,
@@ -105,3 +106,20 @@ async def get_events(
             for e in events
         ],
     )
+
+
+@route.get("/summary")
+async def get_current_user_summary(
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    return await fetch_user_summary(jwt_payload.sub, db_sess)
+
+
+@route.get("/{user_id}/summary")
+async def get_user_summary(
+    user_id: str,
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    return await fetch_user_summary(user_id, db_sess)
