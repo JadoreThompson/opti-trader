@@ -87,7 +87,7 @@ PRICE_UPDATE_CHANNEL = os.getenv("PRICE_UPDATE_CHANNEL", "channel5")
 
 # All events related to instruments that are to be relayed to
 # the client
-INSTRUMENT_CHANNEL = os.getenv("INSTRUMENT_CHANNEL", "channel6")
+INSTRUMENT_EVENTS_CHANNEL = os.getenv("INSTRUMENT_CHANNEL", "channel6")
 
 # Used by each matching engine to set the price.
 FUTURES_BOOKS_KEY = os.getenv("FUTURES_BOOKS_CHANNEL", "channel7")

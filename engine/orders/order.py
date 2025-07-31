@@ -40,4 +40,4 @@ class Order:
         raise TypeError(f"Cannot compare {type(value)} and {self.__class__}")
 
     def __repr__(self) -> str:
-        return f"Order(id={self._id}, tag={self._tag}, side={self._side})"
+        return f"Order(id={self._id}, tag={self._tag}, side={self._side}, quantity={self.quantity}, filled_quantity={self.filled_quantity})"

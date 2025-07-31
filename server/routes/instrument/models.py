@@ -1,6 +1,11 @@
+from typing import Generic, TypeVar
 from pydantic import BaseModel, field_validator
 from enum import Enum
 
+from enums import InstrumentEventType
+
+
+T = TypeVar("T")
 
 class TimeFrame(Enum):
     S5 = "5s"
@@ -30,3 +35,8 @@ class InstrumentSummary(BaseModel):
     def round_values(cls, v) -> float | None:
         if v is not None:
             return round(v, 2)
+
+
+class InstrumentStreamMessage(BaseModel, Generic[T]):
+    event_type: InstrumentEventType
+    data: T

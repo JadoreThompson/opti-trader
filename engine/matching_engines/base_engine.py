@@ -3,7 +3,7 @@ from asyncio import AbstractEventLoop, get_event_loop
 from typing import Generic, TypeVar
 
 from config import REDIS_CLIENT
-from enums import ClientEventType, EventType, Side, StreamEventType
+from enums import ClientEventType, EventType, Side, InstrumentEventType
 from models import RecentTrade
 from services.payload_pusher import PusherPayload, PusherPayloadTopic
 from ..enums import MatchOutcome
@@ -190,28 +190,27 @@ class BaseEngine(Generic[O]):
         if self._loop and self._loop.is_running():
             self._loop.create_task(self._send_price_update(instrument, price))
 
-    def _push(
-        self,
-        value: dict | float,
-        topic: (
-            EventType | ClientEventType | StreamEventType
-        ) = ClientEventType.PAYLOAD_UPDATE,
-    ) -> None:
-        if topic is None:
-            topic = [ClientEventType.PAYLOAD_UPDATE]
+    def _push_order_payload(self, value: dict) -> None:
+        payload = PusherPayload(
+            action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
+        ).model_dump()
+        self._queue.append(payload)
 
-        payload: dict = {}
+        # if topic is None:
+        #     topic = [ClientEventType.PAYLOAD_UPDATE]
 
-        if topic == ClientEventType.PAYLOAD_UPDATE:
-            payload = PusherPayload(
-                action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
-            ).model_dump()
-        elif topic == StreamEventType.PRICE:
-            payload = value
-        elif topic == StreamEventType.RECENT_TRADE:
-            payload = RecentTrade(**value).model_dump()
+        # payload: dict = {}
 
-        payload["topic"] = topic
+        # if topic == ClientEventType.PAYLOAD_UPDATE:
+        #     payload = PusherPayload(
+        #         action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
+        #     ).model_dump()
+        # elif topic == InstrumentEventType.PRICE:
+        #     payload = value
+        # elif topic == InstrumentEventType.RECENT_TRADE:
+        #     payload = RecentTrade(**value).model_dump()
+
+        # payload["topic"] = topic
 
         # self._queue.append(
         #     PusherPayload(

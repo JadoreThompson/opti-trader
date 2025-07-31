@@ -59,13 +59,16 @@ async def ws_live_updates(ws: WebSocket):
         token = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
     except asyncio.TimeoutError:
         if ws.client_state != WebSocketState.DISCONNECTED:
+            print("Didnt receive token in time")
             await ws.close()
             
     try:
         payload = decode_jwt(token)
     except JWTError as e:
         await ws.send_json({"error": str(e)})
-        await ws.close()
+        print("Error verifyign token")
+        if ws.client_state != WebSocketState.DISCONNECTED:
+            await ws.close()
 
     if not client_manager.is_running:
         asyncio.create_task(client_manager.run())
@@ -77,11 +80,14 @@ async def ws_live_updates(ws: WebSocket):
         while True:
             await asyncio.wait_for(ws.receive_text(), timeout)
 
-    except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect):
-        pass
+    except Exception as e:
+        print(e)
+    # except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect) as e:
+    #     print(e)
     finally:
         client_manager.remove(payload.sub)
         if ws.client_state != WebSocketState.DISCONNECTED:
+            print("Finally closing")
             await ws.close()
 
 

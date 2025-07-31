@@ -1,4 +1,5 @@
 from asyncio import create_task, wait_for
+import asyncio
 from datetime import UTC, datetime, timedelta
 from json import loads
 from fastapi import APIRouter, Depends, Query
@@ -11,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from db_models import Instruments, MarketData, OrderEvents, Orders
-from enums import EventType
-from models import StreamRequest
+from enums import EventType, InstrumentEventType
+from models import SubscriptionRequest
 from server.utils.db import depends_db_session
 from utils.utils import get_datetime, get_timestamp
 from .client_manager import ClientManager
@@ -29,14 +30,16 @@ async def instrument_ws(instrument: str, ws: WebSocket):
         message = await ws.receive_text()
         if message == "ping":
             return
-        
+
         try:
-            req = StreamRequest(**loads(message))
+            req = SubscriptionRequest(**loads(message))
         except ValidationError:
-            pass
+            return
 
         if req.subscribe is not None:
-            ...
+            client_manager.subscribe(instrument, req.subscribe, ws)
+        if req.unsubscribe is not None:
+            client_manager.unsubscribe(instrument, req.unsubscribe, ws)
 
     await ws.accept()
     timeout = 5
@@ -44,17 +47,19 @@ async def instrument_ws(instrument: str, ws: WebSocket):
     if not client_manager.is_running:
         create_task(client_manager.run())
 
-
     try:
-        client_manager.append(instrument, ws)
+        client_manager.subscribe(instrument, InstrumentEventType.PRICE_UPDATE, ws)
         await ws.send_text("connected")
 
         while True:
-            await wait_for(ws.receive_text(), timeout)
-    except (RuntimeError, WebSocketDisconnect):
+            await wait_for(handle_message(), timeout)
+    except (RuntimeError, WebSocketDisconnect, asyncio.TimeoutError) as e:
         pass
     finally:
-        client_manager.remove(instrument, ws)
+        client_manager.unsubscribe(instrument, InstrumentEventType.PRICE_UPDATE, ws)
+        client_manager.unsubscribe(instrument, InstrumentEventType.ORDERBOOK_UPDATE, ws)
+        client_manager.unsubscribe(instrument, InstrumentEventType.RECENT_TRADE, ws)
+
         if ws.client_state != WebSocketState.DISCONNECTED:
             await ws.close()
 

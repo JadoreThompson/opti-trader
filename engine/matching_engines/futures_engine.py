@@ -7,7 +7,14 @@ from config import (
     PRICE_UPDATE_CHANNEL,
     REDIS_CLIENT,
 )
-from enums import EventType, MarketType, OrderStatus, OrderType, Side, StreamEventType
+from enums import (
+    EventType,
+    MarketType,
+    OrderStatus,
+    OrderType,
+    Side,
+    InstrumentEventType,
+)
 from logging import getLogger
 
 from models import PriceUpdate
@@ -53,7 +60,8 @@ class FuturesEngine(BaseEngine[Order]):
                 try:
                     payload = Payload(**loads(m["data"]))
                     if payload.topic == PayloadTopic.CREATE:
-                        new_price = self.place_order(payload.data)
+                        self.place_order(payload.data)
+                        # new_price = self.place_order(payload.data)
                         # if new_price is not None:
                         #     await REDIS_CLIENT.hset(
                         #         FUTURES_BOOKS_KEY,
@@ -68,15 +76,15 @@ class FuturesEngine(BaseEngine[Order]):
                         #             market_type=MarketType.FUTURES.value,
                         #         ).model_dump_json(),
                         #     )
-                        if new_price:
-                            self._push(
-                                {
-                                    "instrument": payload.data["instrument"],
-                                    "price": new_price,
-                                    "market_type": MarketType.FUTURES,
-                                },
-                                StreamEventType.PRICE,
-                            )
+                        # if new_price:
+                        #     self._push(
+                        #         {
+                        #             "instrument": payload.data["instrument"],
+                        #             "price": new_price,
+                        #             "market_type": MarketType.FUTURES,
+                        #         },
+                        #         InstrumentEventType.PRICE,
+                        #     )
 
                     elif payload.topic == PayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
@@ -101,7 +109,7 @@ class FuturesEngine(BaseEngine[Order]):
         Args:
             payload (dict): Order details including instrument, side, quantity,
                 type, and limit price.
-        
+
         Returns:
             float | None: Price matched or partially matched at.
         """
@@ -131,7 +139,7 @@ class FuturesEngine(BaseEngine[Order]):
             order.price = entry_price
             ob.append(order, order.price)
             pos.entry_order = order
-            self._push(payload)
+            self._push_order_payload(payload)
             log_event.delay(
                 Event(
                     event_type=EventType.ORDER_NEW,
@@ -168,13 +176,17 @@ class FuturesEngine(BaseEngine[Order]):
                 ).model_dump()
             )
 
-            self._push(
-                {"quantity": result.quantity, "price": result.price, "time": get_datetime()},
-                StreamEventType.RECENT_TRADE,
-            )
+            # self._push_order_payload(
+            #     {
+            #         "quantity": result.quantity,
+            #         "price": result.price,
+            #         "time": get_datetime(),
+            #     },
+            #     InstrumentEventType.RECENT_TRADE,
+            # )
             if result.outcome == MatchOutcome.SUCCESS:
-                self._push(payload)
-                return result.price
+                return self._push_order_payload(payload)
+                # return result.price
 
         price = entry_price or result.price or ob.price  # TODO: Check ob fallback
         order.price = price
@@ -191,8 +203,8 @@ class FuturesEngine(BaseEngine[Order]):
                 asset_balance=payload["open_quantity"],
             ).model_dump()
         )
-        self._push(payload)
-        return result.price
+        self._push_order_payload(payload)
+        # return result.price
 
     def close_order(self, request: CloseRequest) -> None:
         """
@@ -262,15 +274,15 @@ class FuturesEngine(BaseEngine[Order]):
                     asset_balance=pos.open_quantity,
                 ).model_dump()
             )
-            self._push(pos.payload)
-            self._push(
-                {
-                    "quantity": result.quantity,
-                    "price": result.price,
-                    "time": get_datetime(),
-                },
-                StreamEventType.RECENT_TRADE,
-            )
+            self._push_order_payload(pos.payload)
+            # self._push(
+            #     {
+            #         "quantity": result.quantity,
+            #         "price": result.price,
+            #         "time": get_datetime(),
+            #     },
+            #     InstrumentEventType.RECENT_TRADE,
+            # )
 
     def cancel_order(self, request: CloseRequest) -> None:
         """
@@ -321,7 +333,7 @@ class FuturesEngine(BaseEngine[Order]):
                 asset_balance=pos.payload["open_quantity"],
             ).model_dump()
         )
-        self._push(pos.payload)
+        self._push_order_payload(pos.payload)
 
     def modify_order(self, request: ModifyRequest) -> None:
         """
@@ -519,7 +531,7 @@ class FuturesEngine(BaseEngine[Order]):
             ).model_dump()
         )
 
-        self._push(payload)
+        self._push_order_payload(payload)
 
     def _handle_filled_order(
         self,
@@ -571,11 +583,11 @@ class FuturesEngine(BaseEngine[Order]):
                 metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
-        self._push(pos.payload)
-        self._push(
-            {"quantity": filled_quantity, "price": price, "time": get_datetime()},
-            StreamEventType.RECENT_TRADE,
-        )
+        self._push_order_payload(pos.payload)
+        # self._push(
+        #     {"quantity": filled_quantity, "price": price, "time": get_datetime()},
+        #     InstrumentEventType.RECENT_TRADE,
+        # )
 
     def _handle_touched_order(
         self,
@@ -624,11 +636,11 @@ class FuturesEngine(BaseEngine[Order]):
                 metadata={"market_type": MarketType.FUTURES},
             ).model_dump()
         )
-        self._push(pos.payload)
-        self._push(
-            {"quantity": touched_quantity, "price": price, "time": get_datetime()},
-            StreamEventType.RECENT_TRADE,
-        )
+        self._push_order_payload(pos.payload)
+        # self._push(
+        #     {"quantity": touched_quantity, "price": price, "time": get_datetime()},
+        #     InstrumentEventType.RECENT_TRADE,
+        # )
 
     def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
         """

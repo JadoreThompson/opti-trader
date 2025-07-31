@@ -71,7 +71,7 @@ class ClientEventType(Enum):
     PAYLOAD_UPDATE = "payload_update"
 
 
-class StreamEventType(Enum):
-    PRICE = "price"
-    ORDERBOOK = "orderbook"
-    RECENT_TRADE = "recent-trade"
+class InstrumentEventType(Enum):
+    PRICE_UPDATE = "price_update"
+    ORDERBOOK_UPDATE = "orderbook_update"
+    RECENT_TRADE = "recent_trade"

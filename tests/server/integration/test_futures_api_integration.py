@@ -98,7 +98,7 @@ async def test_modify_order(
     rsp = await http_client_authenticated.patch(
         f"/order/modify/{persisted_futures_order_id}", json={"limit_price": 95.0}
     )
-    print(rsp.json())
+    # print(rsp.json())
 
     with get_db_sess() as sess:
         escrow = sess.execute(
