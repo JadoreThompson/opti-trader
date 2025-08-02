@@ -93,6 +93,7 @@ ORDER_EVENTS_CHANNEL = os.getenv("ORDER_EVENTS_CHANNEL", "channel7")
 # Used by each matching engine to set the price.
 FUTURES_BOOKS_KEY = os.getenv("FUTURES_BOOKS_CHANNEL", "channel8")
 SPOT_BOOKS_KEY = os.getenv("SPOT_BOOKS_CHANNEL", "channel9")
+RECENT_TRADES_KEY = os.getenv("RECENT_TRADES_KEY", "channel10")
 
 
 # Server Security

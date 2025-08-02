@@ -148,7 +148,9 @@ async def get_current_user_balance_history(
     earliest_order_dt = res.scalar()
 
     res = await db_sess.execute(
-        select(Orders.realised_pnl, Orders.created_at).where(Orders.user_id == jwt_payload.sub)
+        select(Orders.realised_pnl, Orders.created_at).where(
+            Orders.user_id == jwt_payload.sub
+        )
     )
     pnl_details = res.all()
 
@@ -156,12 +158,12 @@ async def get_current_user_balance_history(
     n_parts = min(6, diff.days)
     if not n_parts:
         return []
-    
+
     part_duration = diff // n_parts
     pnls: list[float] = []
     cur_order_dt = earliest_order_dt + part_duration
 
-    for pnl, dt in pnl_details:     
+    for pnl, dt in pnl_details:
         if dt <= cur_order_dt:
             if not pnls:
                 pnls.append([cur_order_dt, pnl])
@@ -170,15 +172,11 @@ async def get_current_user_balance_history(
         else:
             cur_order_dt += part_duration
             pnls.append([cur_order_dt, pnl])
-            # print(cur_order_dt)   
-    
-    # results = [(cur_order_dt, cur_balance)]
 
     results = []
     for dt, pnl in pnls[::-1]:
         cur_balance -= pnl
         results.append((dt, cur_balance))
-
 
     return [BalanceHistoryItem(time=dt, balance=balance) for dt, balance in results]
 

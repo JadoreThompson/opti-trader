@@ -1,3 +1,4 @@
+from json import dumps
 from sqlalchemy import insert, select, update, func
 from sqlalchemy.orm import Session
 
@@ -6,6 +7,7 @@ from config import (
     FUTURES_BOOKS_KEY,
     INSTRUMENT_EVENTS_CHANNEL,
     ORDER_EVENTS_CHANNEL,
+    RECENT_TRADES_KEY,
     REDIS_CLIENT_SYNC,
     SPOT_BOOKS_KEY,
 )
@@ -23,7 +25,9 @@ def record_order_event(event: Event, db_sess: Session) -> float:
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
 
-    user_balance = db_sess.execute(select(Users.balance).where(Users.user_id == event.user_id)).scalar()
+    user_balance = db_sess.execute(
+        select(Users.balance).where(Users.user_id == event.user_id)
+    ).scalar()
 
     db_sess.execute(
         insert(OrderEvents).values(
@@ -263,6 +267,59 @@ def handle_order_closed_event(event: Event, db_sess: Session) -> float:
     return user_balance
 
 
+def handle_instrument_publishing(event: Event, db_sess: Session):
+    instrument, market_type, side = db_sess.execute(
+        select(Orders.instrument, Orders.market_type, Orders.side).where(
+            Orders.order_id == event.order_id
+        )
+    ).first()
+
+    market_type = event.metadata.get("market_type")
+    if market_type is not None:
+        REDIS_CLIENT_SYNC.hset(
+            (
+                FUTURES_BOOKS_KEY
+                if market_type == MarketType.FUTURES
+                else SPOT_BOOKS_KEY
+            ),
+            instrument,
+            event.price,
+        )
+
+    REDIS_CLIENT_SYNC.publish(
+        INSTRUMENT_EVENTS_CHANNEL,
+        InstrumentEvent[PriceUpdate](
+            event_type=InstrumentEventType.PRICE_UPDATE.value,
+            instrument=instrument,
+            data=PriceUpdate(price=event.price, market_type=market_type),
+        ).model_dump_json(),
+    )
+
+    if event.quantity is not None:
+        recent_trade = RecentTrade(
+            price=event.price,
+            quantity=event.quantity,
+            side=side,
+            time=get_datetime().strftime("%H:%M:%S"),
+        )
+
+        prev_recent_trades: list[dict] = REDIS_CLIENT_SYNC.hget(RECENT_TRADES_KEY, instrument) or []
+        while len(prev_recent_trades) >= 20:
+            prev_recent_trades.pop()
+
+        prev_recent_trades.insert(0, recent_trade.model_dump())
+        REDIS_CLIENT_SYNC.hset(RECENT_TRADES_KEY, instrument, dumps(prev_recent_trades))
+
+        REDIS_CLIENT_SYNC.publish(
+            INSTRUMENT_EVENTS_CHANNEL,
+            InstrumentEvent[RecentTrade](
+                event_type=InstrumentEventType.RECENT_TRADE.value,
+                instrument=instrument,
+                data=recent_trade,
+            ).model_dump_json(),
+        )
+
+
 @CELERY.task
 def log_event(event: EventDict):
     fill_events = (
@@ -271,7 +328,7 @@ def log_event(event: EventDict):
         EventType.ORDER_PARTIALLY_CLOSED,
         EventType.ORDER_CLOSED,
     )
-    
+
     parsed_event = Event(**event)
 
     with get_db_session_sync() as sess:
@@ -290,6 +347,16 @@ def log_event(event: EventDict):
             func = record_order_event
 
         user_balance = func(parsed_event, sess)
+        REDIS_CLIENT_SYNC.publish(
+            ORDER_EVENTS_CHANNEL,
+            ClientEvent(
+                event_type=parsed_event.event_type.value,
+                order_id=parsed_event.order_id,
+                user_id=parsed_event.user_id,
+                balance=user_balance,
+                data=parsed_event.model_dump(exclude={"event_type"}),
+            ).model_dump_json(),
+        )
 
         if parsed_event.event_type in fill_events:
             instrument = sess.execute(
@@ -311,59 +378,4 @@ def log_event(event: EventDict):
             )
             sess.commit()
 
-        instrument, market_type, side = sess.execute(
-            select(Orders.instrument, Orders.market_type, Orders.side).where(
-                Orders.order_id == parsed_event.order_id
-            )
-        ).first()
-
-    # Instrument Update
-    if parsed_event.event_type in fill_events:
-        print(parsed_event)
-        market_type = parsed_event.metadata.get("market_type")
-        if market_type is not None:
-            REDIS_CLIENT_SYNC.hset(
-                (
-                    FUTURES_BOOKS_KEY
-                    if market_type == MarketType.FUTURES
-                    else SPOT_BOOKS_KEY
-                ),
-                instrument,
-                parsed_event.price,
-            )
-
-        REDIS_CLIENT_SYNC.publish(
-            INSTRUMENT_EVENTS_CHANNEL,
-            InstrumentEvent[PriceUpdate](
-                event_type=InstrumentEventType.PRICE_UPDATE.value,
-                instrument=instrument,
-                data=PriceUpdate(price=parsed_event.price, market_type=market_type),
-            ).model_dump_json(),
-        )
-
-        if parsed_event.quantity is not None:
-            REDIS_CLIENT_SYNC.publish(
-                INSTRUMENT_EVENTS_CHANNEL,
-                InstrumentEvent[RecentTrade](
-                    event_type=InstrumentEventType.RECENT_TRADE.value,
-                    instrument=instrument,
-                    data=RecentTrade(
-                        price=parsed_event.price,
-                        quantity=parsed_event.quantity,
-                        side=side,
-                        time=get_datetime().strftime("%I:%M:%S"),
-                    ),
-                ).model_dump_json(),
-            )
-
-    # Order Update
-    REDIS_CLIENT_SYNC.publish(
-        ORDER_EVENTS_CHANNEL,
-        ClientEvent(
-            event_type=parsed_event.event_type.value,
-            order_id=parsed_event.order_id,
-            user_id=parsed_event.user_id,
-            balance=user_balance,
-            data=parsed_event.model_dump(exclude={"event_type"}),
-        ).model_dump_json(),
-    )
+            handle_instrument_publishing(parsed_event, sess)

@@ -10,10 +10,10 @@ from sqlalchemy import literal, select, func, join
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from config import FUTURES_BOOKS_KEY, REDIS_CLIENT, SPOT_BOOKS_KEY
+from config import FUTURES_BOOKS_KEY, RECENT_TRADES_KEY, REDIS_CLIENT, SPOT_BOOKS_KEY
 from db_models import Instruments, MarketData, OrderEvents, Orders
 from enums import EventType, InstrumentEventType, MarketType
-from models import SubscriptionRequest
+from models import RecentTrade, SubscriptionRequest
 from server.utils.db import depends_db_session
 from utils.utils import get_datetime, get_timestamp
 from .client_manager import ClientManager
@@ -228,7 +228,7 @@ async def get_instrument_summary(
 
     if total_quantity is not None and total_standing_quantity is not None:
         volume = (total_quantity - total_standing_quantity) // 2
-    else: 
+    else:
         volume = None
 
     start_price = start.price if start is not None else 0
@@ -317,7 +317,7 @@ async def get_instruments_summary(db_sess: AsyncSession = Depends(depends_db_ses
     for inst, market_type, change_24h in res.all():
         if inst is None or market_type is None or change_24h is None:
             continue
-        
+
         cur_price = await REDIS_CLIENT.hget(
             FUTURES_BOOKS_KEY if market_type == MarketType.FUTURES else SPOT_BOOKS_KEY,
             inst,
@@ -326,3 +326,10 @@ async def get_instruments_summary(db_sess: AsyncSession = Depends(depends_db_ses
             InstrumentSummary(instrument=inst, price=cur_price, change_24h=change_24h)
         )
     return summaries
+
+
+@route.get("/{instrument}/recent-trades")
+async def get_recent_trades(instrument: str):
+    trades = await REDIS_CLIENT.hget(RECENT_TRADES_KEY, instrument)
+    return [RecentTrade(**t) for t in trades]
+
