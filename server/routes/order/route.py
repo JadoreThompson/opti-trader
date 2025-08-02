@@ -13,6 +13,7 @@ from config import (
     FUTURES_BOOKS_KEY,
     FUTURES_QUEUE_CHANNEL,
     REDIS_CLIENT,
+    SPOT_BOOKS_KEY,
     SPOT_QUEUE_CHANNEL,
 )
 from db_models import Orders
@@ -57,26 +58,18 @@ async def ws_live_updates(ws: WebSocket):
 
     try:
         token = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
-    except asyncio.TimeoutError:
-        if ws.client_state != WebSocketState.DISCONNECTED:
-            await ws.close()
-            
-    try:
         payload = decode_jwt(token)
-    except JWTError as e:
-        await ws.send_json({"error": str(e)})
-        if ws.client_state != WebSocketState.DISCONNECTED:
-            await ws.close()
 
-    if not client_manager.is_running:
-        asyncio.create_task(client_manager.run())
+        if not client_manager.is_running:
+            asyncio.create_task(client_manager.run())
 
-    try:
         await client_manager.append(payload.sub, ws)
         await ws.send_text("connected")
 
         while True:
             m = await asyncio.wait_for(ws.receive_text(), timeout)
+    except JWTError as e:
+        await ws.send_json({"error": str(e)})
     except (RuntimeError, asyncio.TimeoutError, WebSocketDisconnect) as e:
         pass
     finally:
@@ -177,7 +170,7 @@ async def create_spot_order(
     return {"order_id": res["order_id"]}
 
 
-@route.patch("/modify/{order_id}", status_code=201)
+@route.patch("/{order_id}/modify", status_code=201)
 async def modify_order(
     order_id: str,
     body: ModifyOrder,
@@ -205,7 +198,12 @@ async def modify_order(
             status_code=400, content={"error": "Limit price cannot be set to null."}
         )
 
+    hash_key = FUTURES_BOOKS_KEY
+    queue_channel = FUTURES_QUEUE_CHANNEL
     if order.market_type == MarketType.SPOT:
+        hash_key = SPOT_BOOKS_KEY
+        queue_channel = SPOT_QUEUE_CHANNEL
+
         if (
             order.order_type not in (OrderType.LIMIT, OrderType.LIMIT_OCO)
             and body.limit_price != MODIFY_ORDER_SENTINEL
@@ -226,7 +224,7 @@ async def modify_order(
                 },
             )
 
-    cur_price = await REDIS_CLIENT.get(order.instrument)
+    cur_price = await REDIS_CLIENT.hget(hash_key, order.instrument)
     if not validate_modify_order(
         cur_price,
         order.order_type,
@@ -244,11 +242,7 @@ async def modify_order(
         )
 
     await REDIS_CLIENT.publish(
-        (
-            SPOT_QUEUE_CHANNEL
-            if order.market_type == MarketType.SPOT
-            else FUTURES_QUEUE_CHANNEL
-        ),
+        queue_channel,
         Payload(
             topic=PayloadTopic.MODIFY,
             data={
@@ -273,7 +267,7 @@ async def modify_order(
     )
 
 
-@route.delete("/cancel/{order_id}", status_code=201)
+@route.delete("/{order_id}/cancel", status_code=201)
 async def cancel_order(
     order_id: str,
     body: CancelOrder,
@@ -310,7 +304,38 @@ async def cancel_order(
     )
 
 
-@route.delete("/close/{order_id}", status_code=201)
+@route.delete("/cancel/all", status_code=201)
+async def cancel_all_orders(
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    res = await db_sess.execute(
+        select(Orders).where(
+            Orders.user_id == jwt_payload.sub,
+            Orders.status.in_([OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED]),
+        )
+    )
+
+    orders = res.scalars().all()
+
+    async with REDIS_CLIENT.pipeline() as pipe:
+        for order in orders:
+            pipe.publish(
+                (
+                    SPOT_QUEUE_CHANNEL
+                    if order.market_type == MarketType.SPOT
+                    else FUTURES_QUEUE_CHANNEL
+                ),
+                Payload(
+                    topic=PayloadTopic.CANCEL,
+                    data={"order_id": order.order_id, "quantity": "ALL"},
+                ).model_dump_json(),
+            )
+
+        await pipe.execute()
+
+
+@route.delete("/{order_id}/close", status_code=201)
 async def close_order(
     order_id: str,
     body: CloseOrder,
@@ -350,6 +375,38 @@ async def close_order(
             data={"order_id": order.order_id, "quantity": body.quantity},
         ).model_dump_json(),
     )
+
+
+@route.delete("/close/all")
+async def close_all_orders(
+    jwt_payload: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+): 
+    res = await db_sess.execute(
+        select(Orders).where(
+            Orders.user_id == jwt_payload.sub,
+            Orders.status.in_([OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED, OrderStatus.PARTIALLY_CLOSED]),
+            Orders.open_quantity > 0,
+        )
+    )
+
+    orders = res.scalars().all()
+
+    async with REDIS_CLIENT.pipeline() as pipe:
+        for order in orders:
+            pipe.publish(
+                (
+                    SPOT_QUEUE_CHANNEL
+                    if order.market_type == MarketType.SPOT
+                    else FUTURES_QUEUE_CHANNEL
+                ),
+                Payload(
+                    topic=PayloadTopic.CLOSE,
+                    data={"order_id": order.order_id, "quantity": "ALL"},
+                ).model_dump_json(),
+            )
+
+        await pipe.execute()
 
 
 @route.get("/access-token")

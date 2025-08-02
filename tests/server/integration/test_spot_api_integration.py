@@ -188,7 +188,7 @@ async def test_modify_spot_limit_order_integration(
     new_limit_price = 80.0
     body = {"limit_price": new_limit_price}
 
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 201
 
     async with get_db_sess_async() as sess:
@@ -273,7 +273,7 @@ async def test_modify_spot_ask_limit_order_integration(
     new_limit_price = 210.0
     modify_body = {"limit_price": new_limit_price}
     modify_rsp = await http_client_authenticated.patch(
-        f"/order/modify/{order_id}", json=modify_body
+        f"/order/{order_id}/modify", json=modify_body
     )
     assert modify_rsp.status_code == 201
 
@@ -324,7 +324,7 @@ async def test_modify_spot_bid_order_rejected_integration(
 
     rejected_limit_price = 110.0
     body = {"limit_price": rejected_limit_price}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 400
 
     async with get_db_sess_async() as sess:
@@ -407,7 +407,7 @@ async def test_modify_spot_ask_order_rejected_integration(
     rejected_limit_price = 90.0
     modify_body = {"limit_price": rejected_limit_price}
     modify_rsp = await http_client_authenticated.patch(
-        f"/order/modify/{order_id}", json=modify_body
+        f"/order/{order_id}/modify", json=modify_body
     )
     assert modify_rsp.status_code == 400
 

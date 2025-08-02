@@ -9,6 +9,7 @@ class ClientEvent(BaseModel):
     event_type: ClientEventType | EventType
     user_id: str
     order_id: str
+    balance: float | None = None
     data: dict
 
 

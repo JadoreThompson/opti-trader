@@ -54,3 +54,12 @@ class OrderEventSummary(BaseModel):
 class UserSummary(BaseModel):
     balance: float
     pnl: float
+
+
+class BalanceHistoryItem(BaseModel):
+    time: datetime
+    balance: float
+
+    @field_validator('balance')
+    def round_balance(cls, v):
+        return round(v, 2)

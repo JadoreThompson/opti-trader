@@ -128,7 +128,7 @@ async def test_modify_order_success(
         "stop_loss": 85.0,
     }
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 201
 
@@ -139,7 +139,7 @@ async def test_modify_order_not_found(http_client_authenticated):
     fake_order_id = uuid4()
     modify_payload = {"limit_price": 100.0}
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{fake_order_id}", json=modify_payload
+        f"/order/{fake_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 400
     assert "Order doesn't exist" in rsp.json()["error"]
@@ -160,7 +160,7 @@ async def test_modify_order_already_closed(
 
     modify_payload = {"limit_price": 100.0}
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 400
     assert "Cannot modify closed order" in rsp.json()["error"]
@@ -193,7 +193,7 @@ async def test_modify_order_wrong_user(
 
     modify_payload = {"limit_price": 100.0}
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 400
     assert "Order doesn't exist" in rsp.json()["error"]
@@ -206,7 +206,7 @@ async def test_modify_order_invalid_payload(
     """Error Path: Send a payload with an incorrect data type."""
     modify_payload = {"limit_price": "not-a-float"}
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 422
 
@@ -218,7 +218,7 @@ async def test_modify_order_negative_value(
     """Error Path: Send a payload with an incorrect data type."""
     modify_payload = {"limit_price": -1}
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 422
 
@@ -228,7 +228,7 @@ async def test_modify_order_unauthenticated(http_client, persisted_futures_order
     """Error Path: Attempt to modify an order without being authenticated."""
     modify_payload = {"limit_price": 100.0}
     rsp = await http_client.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 403
 
@@ -243,7 +243,7 @@ async def test_modify_order_null_limit_price_fails(
     """
     modify_payload = {"limit_price": None}
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json=modify_payload
+        f"/order/{persisted_futures_order_id}/modify", json=modify_payload
     )
     assert rsp.status_code == 400
 
@@ -372,7 +372,7 @@ async def test_close_order(
 
     rsp = await http_client_authenticated.request(
         "DELETE",
-        url=f"/order/close/{persisted_futures_order_id}",
+        url=f"/order/{persisted_futures_order_id}/close",
         json={"quantity": "ALL"},
     )
 
@@ -401,7 +401,7 @@ async def test_close_order(
 
     rsp = await http_client_authenticated.request(
         "DELETE",
-        url=f"/order/close/{persisted_futures_order_id}",
+        url=f"/order/{persisted_futures_order_id}/close",
         json={"quantity": "ALL"},
     )
 
@@ -413,7 +413,7 @@ async def test_close_order_non_existent(http_client_authenticated):
     """Error Path: Attempt to close an order that does not exist."""
     fake_order_id = uuid4()
     rsp = await http_client_authenticated.request(
-        "DELETE", url=f"/order/close/{fake_order_id}", json={"quantity": "ALL"}
+        "DELETE", url=f"/order/{fake_order_id}/close", json={"quantity": "ALL"}
     )
     assert rsp.status_code == 400
     assert "Order doesn't exist" in rsp.json()["error"]
@@ -426,7 +426,7 @@ async def test_close_order_sub_zero(
     """Error Path: Attempt to close an order that does not exist."""
     rsp = await http_client_authenticated.request(
         "DELETE",
-        url=f"/order/close/{persisted_futures_order_id}",
+        url=f"/order/{persisted_futures_order_id}/close",
         json={"quantity": -1},
     )
     assert rsp.status_code == 422
@@ -439,7 +439,7 @@ async def test_close_order_invalid_string(
     """Error Path: Attempt to close an order that does not exist."""
     rsp = await http_client_authenticated.request(
         "DELETE",
-        url=f"/order/close/{persisted_futures_order_id}",
+        url=f"/order/{persisted_futures_order_id}/close",
         json={"quantity": "NONE"},
     )
     assert rsp.status_code == 422

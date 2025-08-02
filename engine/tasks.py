@@ -1,10 +1,8 @@
-from json import dumps
 from sqlalchemy import insert, select, update, func
 from sqlalchemy.orm import Session
 
 from config import (
     CELERY,
-    CLIENT_UPDATE_CHANNEL,
     FUTURES_BOOKS_KEY,
     INSTRUMENT_EVENTS_CHANNEL,
     ORDER_EVENTS_CHANNEL,
@@ -20,25 +18,24 @@ from .typing import EventDict, Event, EventType
 from .enums import Tag
 
 
-def record_order_event(event: Event, db_sess: Session) -> None:
+def record_order_event(event: Event, db_sess: Session) -> float:
     """Record a generic order-related event with the user's current balance."""
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
 
+    user_balance = db_sess.execute(select(Users.balance).where(Users.user_id == event.user_id)).scalar()
+
     db_sess.execute(
         insert(OrderEvents).values(
             **values,
-            balance=(
-                select(Users.balance)
-                .where(Users.user_id == event.user_id)
-                .scalar_subquery()
-            ),
+            balance=user_balance,
         )
     )
     db_sess.commit()
+    return user_balance
 
 
-def handle_spot_order_filled_event(event: Event, db_sess: Session) -> None:
+def handle_spot_order_filled_event(event: Event, db_sess: Session) -> float:
     order = db_sess.execute(
         select(Orders).where(Orders.order_id == event.order_id)
     ).scalar()
@@ -95,9 +92,10 @@ def handle_spot_order_filled_event(event: Event, db_sess: Session) -> None:
 
     db_sess.execute(insert(OrderEvents).values(**dumped_event, balance=user.balance))
     db_sess.commit()
+    return user.balance
 
 
-def handle_order_filled_event(event: Event, db_sess: Session) -> None:
+def handle_order_filled_event(event: Event, db_sess: Session) -> float:
     """
     Persists the event and updates the user's cash balance accordingly.
 
@@ -110,7 +108,7 @@ def handle_order_filled_event(event: Event, db_sess: Session) -> None:
     return handle_spot_order_filled_event(event, db_sess)
 
 
-def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
+def handle_order_cancelled_event(event: Event, db_sess: Session) -> float:
     """
     Handle an order-cancelled event and adjust balances.
 
@@ -145,9 +143,10 @@ def handle_order_cancelled_event(event: Event, db_sess: Session) -> None:
     escrow.balance -= amount
     db_sess.execute(insert(OrderEvents).values(**values, balance=user.balance))
     db_sess.commit()
+    return user.balance
 
 
-def handle_order_modified_event(event: Event, db_sess: Session) -> None:
+def handle_order_modified_event(event: Event, db_sess: Session) -> float:
     """
     Persists the event and updates the order's attributes in the database.
     Note: This handler does not adjust escrow.
@@ -166,10 +165,10 @@ def handle_order_modified_event(event: Event, db_sess: Session) -> None:
         )
     )
 
-    record_order_event(event, db_sess)
+    return record_order_event(event, db_sess)
 
 
-def handle_order_new_rejected_event(event: Event, db_sess: Session) -> None:
+def handle_order_new_rejected_event(event: Event, db_sess: Session) -> float:
     """
     Handle an event where a new order submission was rejected.
 
@@ -207,9 +206,10 @@ def handle_order_new_rejected_event(event: Event, db_sess: Session) -> None:
     values = event.model_dump(exclude_unset=True, exclude_none=True)
     values.pop("metadata", None)
     db_sess.execute(insert(OrderEvents).values(**values, balance=user_balance))
+    return user_balance
 
 
-def handle_order_closed_event(event: Event, db_sess: Session) -> None:
+def handle_order_closed_event(event: Event, db_sess: Session) -> float:
     """
     Persists the order closed event. to be called when FUTURES order
     is closed.
@@ -260,6 +260,7 @@ def handle_order_closed_event(event: Event, db_sess: Session) -> None:
     )
 
     db_sess.commit()
+    return user_balance
 
 
 @CELERY.task
@@ -270,25 +271,27 @@ def log_event(event: EventDict):
         EventType.ORDER_PARTIALLY_CLOSED,
         EventType.ORDER_CLOSED,
     )
+    
+    parsed_event = Event(**event)
 
     with get_db_session_sync() as sess:
-        parsed_event = Event(**event)
-
         if parsed_event.event_type == EventType.ORDER_CANCELLED:
-            handle_order_cancelled_event(parsed_event, sess)
+            func = handle_order_cancelled_event
         elif parsed_event.event_type == EventType.ORDER_MODIFIED:
-            handle_order_modified_event(parsed_event, sess)
+            func = handle_order_modified_event
         elif parsed_event.event_type == EventType.ORDER_NEW_REJECTED:
-            handle_order_new_rejected_event(parsed_event, sess)
+            func = handle_order_new_rejected_event
         elif parsed_event.event_type in (
             EventType.ORDER_PARTIALLY_CLOSED,
             EventType.ORDER_CLOSED,
         ):
-            handle_order_closed_event(parsed_event, sess)
+            func = handle_order_closed_event
         else:
-            record_order_event(parsed_event, sess)
+            func = record_order_event
 
-        if fill_events:
+        user_balance = func(parsed_event, sess)
+
+        if parsed_event.event_type in fill_events:
             instrument = sess.execute(
                 select(Orders.instrument).where(
                     Orders.order_id == parsed_event.order_id
@@ -316,6 +319,7 @@ def log_event(event: EventDict):
 
     # Instrument Update
     if parsed_event.event_type in fill_events:
+        print(parsed_event)
         market_type = parsed_event.metadata.get("market_type")
         if market_type is not None:
             REDIS_CLIENT_SYNC.hset(
@@ -347,7 +351,6 @@ def log_event(event: EventDict):
                         price=parsed_event.price,
                         quantity=parsed_event.quantity,
                         side=side,
-                        # time=get_datetime(),
                         time=get_datetime().strftime("%I:%M:%S"),
                     ),
                 ).model_dump_json(),
@@ -355,12 +358,12 @@ def log_event(event: EventDict):
 
     # Order Update
     REDIS_CLIENT_SYNC.publish(
-        # CLIENT_UPDATE_CHANNEL,
         ORDER_EVENTS_CHANNEL,
         ClientEvent(
             event_type=parsed_event.event_type.value,
             order_id=parsed_event.order_id,
             user_id=parsed_event.user_id,
+            balance=user_balance,
             data=parsed_event.model_dump(exclude={"event_type"}),
         ).model_dump_json(),
     )

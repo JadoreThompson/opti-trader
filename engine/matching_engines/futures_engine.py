@@ -182,7 +182,8 @@ class FuturesEngine(BaseEngine[Order]):
         pos = self._positions.get(request.order_id)
 
         if pos is None:
-            logger.warning("Position not found for order ID: {request.order_id}")
+            msg = f"Position not found for order ID: {request.order_id}"
+            logger.warning(msg)
             return
 
         ob = self._orderbooks[pos.instrument]
@@ -234,6 +235,7 @@ class FuturesEngine(BaseEngine[Order]):
                     quantity=result.quantity,
                     price=result.price,
                     asset_balance=pos.open_quantity,
+                    metadata={'market_type': MarketType.FUTURES}
                 ).model_dump()
             )
             self._push_order_payload(pos.payload)
@@ -270,13 +272,15 @@ class FuturesEngine(BaseEngine[Order]):
         pos.apply_cancel(requested_quantity)
 
         event_type = EventType.ORDER_PARTIALLY_CANCELLED
+        price = None
+
         if pos.status == OrderStatus.CANCELLED:
             ob.remove(pos.entry_order, pos.entry_order.price)
             self._positions.pop(pos.id)
             event_type = EventType.ORDER_CANCELLED
         elif pos.status == OrderStatus.FILLED:
             ob.remove(pos.entry_order, pos.entry_order.price)
-            event_type = EventType.ORDER_FILLED
+            event_type = EventType.ORDER_CANCELLED
 
         log_event.delay(
             Event(
@@ -284,6 +288,7 @@ class FuturesEngine(BaseEngine[Order]):
                 order_id=pos.id,
                 user_id=pos.payload["user_id"],
                 quantity=requested_quantity,
+                price=price,
                 asset_balance=pos.payload["open_quantity"],
             ).model_dump()
         )

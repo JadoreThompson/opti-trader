@@ -230,7 +230,7 @@ async def test_modify_spot_limit_bid(http_client_authenticated):
     order_id = rsp.json()["order_id"]
 
     body = {"limit_price": 50.0}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
 
     assert rsp.status_code == 201
 
@@ -248,11 +248,11 @@ async def test_modify_spot_market_oco_bid(http_client_authenticated):
     order_id = rsp.json()["order_id"]
 
     body = {"take_profit": 50.0}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 400, rsp.json()
 
     body = {"stop_loss": 50.0}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 201, rsp.json()
 
 
@@ -269,15 +269,15 @@ async def test_modify_spot_market_bid_returns_400(http_client_authenticated):
     order_id = rsp.json()["order_id"]
 
     body = {"limit_price": 50.0}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 400
 
     body = {"stop_loss": 50.0}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 400
 
     body = {"take_profit": 50.0}
-    rsp = await http_client_authenticated.patch(f"/order/modify/{order_id}", json=body)
+    rsp = await http_client_authenticated.patch(f"/order/{order_id}/modify", json=body)
     assert rsp.status_code == 400
 
 

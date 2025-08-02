@@ -224,8 +224,12 @@ async def get_instrument_summary(
         Orders.created_at <= datetime.fromtimestamp(end_time, UTC),
     )
     res = await db_sess.execute(stmt)
-    quantity, standing_quantity = res.first()
-    volume = (quantity - standing_quantity) // 2
+    total_quantity, total_standing_quantity = res.first()
+
+    if total_quantity is not None and total_standing_quantity is not None:
+        volume = (total_quantity - total_standing_quantity) // 2
+    else: 
+        volume = None
 
     start_price = start.price if start is not None else 0
     change24h_nominal = end.price - start_price
@@ -311,6 +315,9 @@ async def get_instruments_summary(db_sess: AsyncSession = Depends(depends_db_ses
 
     summaries = []
     for inst, market_type, change_24h in res.all():
+        if inst is None or market_type is None or change_24h is None:
+            continue
+        
         cur_price = await REDIS_CLIENT.hget(
             FUTURES_BOOKS_KEY if market_type == MarketType.FUTURES else SPOT_BOOKS_KEY,
             inst,

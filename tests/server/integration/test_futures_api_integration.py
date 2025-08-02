@@ -96,7 +96,7 @@ async def test_modify_order(
 ):
     await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 100.0)
     rsp = await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}", json={"limit_price": 95.0}
+        f"/order/{persisted_futures_order_id}/modify", json={"limit_price": 95.0}
     )
 
     with get_db_sess() as sess:
@@ -207,7 +207,7 @@ async def test_close_order_no_profit(
 ):
     await REDIS_CLIENT.set("TEST-BTC-USD-FUTURES", 90.0)
     await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}",
+        f"/order/{persisted_futures_order_id}/modify/",
         json={"stop_loss": None, "take_profit": None},
     )
 
@@ -232,7 +232,7 @@ async def test_close_order_no_profit(
 
     await http_client_authenticated.request(
         "DELETE",
-        f"/order/close/{persisted_futures_order_id}",
+        f"/order/{persisted_futures_order_id}/close",
         json={"quantity": "ALL"},
     )
 
@@ -284,7 +284,7 @@ async def test_close_order_profit(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
     await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}",
+        f"/order/{persisted_futures_order_id}/modify/",
         json={"stop_loss": None, "take_profit": None},
     )
 
@@ -310,7 +310,7 @@ async def test_close_order_profit(
 
     await http_client_authenticated.request(
         "DELETE",
-        f"/order/close/{persisted_futures_order_id}",
+        f"/order/{persisted_futures_order_id}/close",
         json={"quantity": "ALL"},
     )
 
@@ -362,7 +362,7 @@ async def test_close_order_loss(
     futures_engine, http_client_authenticated, persisted_futures_order_id
 ):
     await http_client_authenticated.patch(
-        f"/order/modify/{persisted_futures_order_id}",
+        f"/order/{persisted_futures_order_id}/modify/",
         json={"stop_loss": None, "take_profit": None},
     )
 
@@ -388,7 +388,7 @@ async def test_close_order_loss(
 
     await http_client_authenticated.request(
         "DELETE",
-        f"/order/close/{persisted_futures_order_id}",
+        f"/order/{persisted_futures_order_id}/close",
         json={"quantity": "ALL"},
     )
 

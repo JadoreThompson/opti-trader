@@ -51,6 +51,10 @@ class Position:
     @property
     def standing_quantity(self) -> int:
         return self._payload["standing_quantity"]
+    
+    @property
+    def filled_price(self) -> float | None:
+        return self._payload['filled_price']
 
     def apply_entry_fill(self, quantity: int, price: float) -> None:
         """
@@ -146,6 +150,7 @@ class Position:
             OrderStatus.PARTIALLY_FILLED,
         ):
             return
+        
         self._payload["standing_quantity"] -= quantity
 
         if self._payload["standing_quantity"] == 0:

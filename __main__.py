@@ -41,7 +41,7 @@ def run_payload_pusher() -> None:
 
 async def publish_orderbooks(orderbooks: dict[str, OrderBook[Order | SpotOrder]]):
     while True:
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         events = []
         for instrument, ob in orderbooks.items():
