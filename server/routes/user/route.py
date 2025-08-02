@@ -1,4 +1,3 @@
-from datetime import timedelta
 from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -6,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db_models import OrderEvents, Orders, Users
+from enums import EventType, MarketType
 from server.middleware import verify_jwt
 from server.models import PaginatedResponse
 from server.typing import JWTPayload
@@ -128,57 +128,66 @@ async def get_user_summary(
     return await fetch_user_summary(user_id, db_sess)
 
 
-@route.get("/balance-history")
+@route.get("/balance-history", response_model=list[BalanceHistoryItem])
 async def get_current_user_balance_history(
+    market_type: MarketType = MarketType.FUTURES,
     jwt_payload: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    cur_datetime = get_datetime()
     res = await db_sess.execute(
-        select(Users.balance).where(Users.user_id == jwt_payload.sub)
+        select(Users.balance, Users.created_at).where(Users.user_id == jwt_payload.sub)
     )
-    cur_balance = res.scalar()
+    user_balance, user_created_at = res.one()
 
     res = await db_sess.execute(
-        select(Orders.created_at)
-        .where(Orders.user_id == jwt_payload.sub)
-        .order_by(Orders.created_at)
-        .limit(1)
-    )
-    earliest_order_dt = res.scalar()
-
-    res = await db_sess.execute(
-        select(Orders.realised_pnl, Orders.created_at).where(
-            Orders.user_id == jwt_payload.sub
+        select(
+            OrderEvents.created_at,
+            OrderEvents.event_type,
+            OrderEvents.quantity,
+            OrderEvents.price,
+            OrderEvents.balance,
+            Orders.price.label("order_price"),
+            Orders.quantity.label("order_quantity"),
         )
+        .join(Orders, Orders.order_id == OrderEvents.order_id)
+        .where(
+            OrderEvents.user_id == jwt_payload.sub,
+            Orders.market_type == market_type.value,
+        )
+        .order_by(OrderEvents.created_at)
     )
-    pnl_details = res.all()
+    events = res.all()
 
-    diff: timedelta = cur_datetime - earliest_order_dt
-    n_parts = min(6, diff.days)
-    if not n_parts:
-        return []
+    default_item = [BalanceHistoryItem(time=user_created_at, balance=user_balance)]
+    if not events:
+        return default_item
 
-    part_duration = diff // n_parts
-    pnls: list[float] = []
-    cur_order_dt = earliest_order_dt + part_duration
+    newest_date = events[-1].created_at
+    oldest_date = events[0].created_at
 
-    for pnl, dt in pnl_details:
-        if dt <= cur_order_dt:
-            if not pnls:
-                pnls.append([cur_order_dt, pnl])
-            else:
-                pnls[-1][1] += pnl
+    n_parts = 6
+    part_duration = (newest_date - oldest_date) / n_parts
+
+    i, l = 0, len(events)
+    while i < l and events[i].event_type != EventType.ORDER_NEW:
+        i += 1
+
+    if i == l:
+        return default_item
+
+    event = events[i]
+    starting_balance = event.balance + (event.quantity * event.price)
+    result = [BalanceHistoryItem(time=event.created_at, balance=starting_balance)]
+    max_date = event.created_at
+
+    for e in events[i + 1 :]:
+        if e.created_at <= max_date:
+            result[-1].balance = e.balance
         else:
-            cur_order_dt += part_duration
-            pnls.append([cur_order_dt, pnl])
+            max_date += part_duration
+            result.append(BalanceHistoryItem(time=max_date, balance=e.balance))
 
-    results = []
-    for dt, pnl in pnls[::-1]:
-        cur_balance -= pnl
-        results.append((dt, cur_balance))
-
-    return [BalanceHistoryItem(time=dt, balance=balance) for dt, balance in results]
+    return result
 
 
 @route.get("/{user_id}/balance-history")

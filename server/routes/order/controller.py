@@ -1,3 +1,4 @@
+from pprint import pprint
 from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -402,4 +403,5 @@ def validate_modify_order(
     ):
         return False
 
+    pprint(locals())
     return True

@@ -67,7 +67,7 @@ class FuturesEngine(BaseEngine[Order]):
 
                 except Exception as e:
                     logger.error(
-                        f"Error: {type(e)} - {str(e)} - line: {get_exc_line()}"
+                        f"Error: {type(e)} - {str(e)} - line: {get_exc_line()} \n{e}"
                     )
 
     def place_order(self, payload: dict) -> float | None:
@@ -322,7 +322,7 @@ class FuturesEngine(BaseEngine[Order]):
         payload = pos.payload
 
         is_limit_order = payload["order_type"] == OrderType.LIMIT
-        is_filled = payload["status"] == OrderStatus.FILLED
+        is_filled = payload["status"] in (OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED)
 
         sentinel = float("inf")
         updated_limit_price = sentinel
@@ -439,9 +439,10 @@ class FuturesEngine(BaseEngine[Order]):
             pos.entry_order = new_order
             ob.append(new_order, new_order.price)
 
-        if updated_sl_price != sentinel:
+        if is_filled and updated_sl_price != sentinel:
             if pos.stop_loss_order is not None:
                 ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
+                pos.stop_loss_order = None
 
             if updated_sl_price is not None:
                 new_order = Order(
@@ -454,9 +455,10 @@ class FuturesEngine(BaseEngine[Order]):
                 pos.stop_loss_order = new_order
                 ob.append(new_order, new_order.price)
 
-        if updated_tp_price != sentinel:
+        if is_filled and updated_tp_price != sentinel:
             if pos.take_profit_order is not None:
                 ob.remove(pos.take_profit_order, pos.take_profit_order.price)
+                pos.take_profit_order = None
 
             if updated_tp_price is not None:
                 new_order = Order(
@@ -466,6 +468,7 @@ class FuturesEngine(BaseEngine[Order]):
                     payload["open_quantity"],
                     updated_tp_price,
                 )
+                pos.take_profit_order = new_order
                 ob.append(new_order, new_order.price)
 
         if is_limit_order and not is_filled and updated_limit_price != sentinel:
