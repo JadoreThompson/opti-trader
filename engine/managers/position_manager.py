@@ -1,5 +1,5 @@
 from enums import OrderStatus
-from .position import Position
+from ..position import Position
 
 
 class PositionManager:

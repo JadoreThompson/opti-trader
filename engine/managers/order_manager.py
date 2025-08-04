@@ -1,4 +1,4 @@
-from .orders import SpotOrder
+from ..orders import SpotOrder
 
 class OrderManager:
     """

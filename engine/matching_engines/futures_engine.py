@@ -1,5 +1,6 @@
 from asyncio import AbstractEventLoop
 from json import loads
+from logging import getLogger
 
 from config import (
     FUTURES_QUEUE_CHANNEL,
@@ -12,23 +13,21 @@ from enums import (
     OrderType,
     Side,
 )
-from logging import getLogger
-
 from utils.utils import get_exc_line
 from .base_engine import BaseEngine
+from ..config import MODIFY_REQUEST_SENTINEL
 from ..enums import MatchOutcome, Tag
 from ..orderbook import OrderBook
 from ..orders import Order
 from ..position import Position
 from ..tasks import log_event
 from ..typing import (
-    MODIFY_SENTINEL,
     CloseRequest,
     MatchResult,
     ModifyRequest,
     Event,
-    Payload,
-    PayloadTopic,
+    EnginePayload,
+    EnginePayloadTopic,
     SupportsAppend,
 )
 
@@ -39,10 +38,10 @@ class FuturesEngine(BaseEngine[Order]):
     def __init__(
         self,
         loop: AbstractEventLoop | None = None,
-        pusher_queue: SupportsAppend | None = None,
+        queue: SupportsAppend | None = None,
         orderbooks: dict[str, OrderBook[Order]] | None = None,
     ) -> None:
-        super().__init__(loop, pusher_queue)
+        super().__init__(loop, queue)
         self._positions: dict[str, Position] = {}
         self._orderbooks: dict[str, OrderBook[Order]] = orderbooks or {}
 
@@ -54,15 +53,15 @@ class FuturesEngine(BaseEngine[Order]):
                     continue
 
                 try:
-                    payload = Payload(**loads(m["data"]))
-                    if payload.topic == PayloadTopic.CREATE:
-                        self.place_order(payload.data)
+                    payload = EnginePayload(**loads(m["data"]))
 
-                    elif payload.topic == PayloadTopic.CANCEL:
+                    if payload.topic == EnginePayloadTopic.CREATE:
+                        self.place_order(payload.data)
+                    elif payload.topic == EnginePayloadTopic.CANCEL:
                         self.cancel_order(CloseRequest(**payload.data))
-                    elif payload.topic == PayloadTopic.MODIFY:
+                    elif payload.topic == EnginePayloadTopic.MODIFY:
                         self.modify_order(ModifyRequest(**payload.data))
-                    elif payload.topic == PayloadTopic.CLOSE:
+                    elif payload.topic == EnginePayloadTopic.CLOSE:
                         self.close_order(CloseRequest(**payload.data))
 
                 except Exception as e:
@@ -235,7 +234,7 @@ class FuturesEngine(BaseEngine[Order]):
                     quantity=result.quantity,
                     price=result.price,
                     asset_balance=pos.open_quantity,
-                    metadata={'market_type': MarketType.FUTURES}
+                    metadata={"market_type": MarketType.FUTURES},
                 ).model_dump()
             )
             self._push_order_payload(pos.payload)
@@ -271,24 +270,18 @@ class FuturesEngine(BaseEngine[Order]):
         )
         pos.apply_cancel(requested_quantity)
 
-        event_type = EventType.ORDER_PARTIALLY_CANCELLED
-        price = None
-
         if pos.status == OrderStatus.CANCELLED:
             ob.remove(pos.entry_order, pos.entry_order.price)
             self._positions.pop(pos.id)
-            event_type = EventType.ORDER_CANCELLED
         elif pos.status == OrderStatus.FILLED:
             ob.remove(pos.entry_order, pos.entry_order.price)
-            event_type = EventType.ORDER_CANCELLED
 
         log_event.delay(
             Event(
-                event_type=event_type,
+                event_type=EventType.ORDER_CANCELLED,
                 order_id=pos.id,
                 user_id=pos.payload["user_id"],
                 quantity=requested_quantity,
-                price=price,
                 asset_balance=pos.payload["open_quantity"],
             ).model_dump()
         )
@@ -322,22 +315,28 @@ class FuturesEngine(BaseEngine[Order]):
         payload = pos.payload
 
         is_limit_order = payload["order_type"] == OrderType.LIMIT
-        is_filled = payload["status"] in (OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED)
+        is_filled = payload["status"] in (
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.FILLED,
+        )
 
         sentinel = float("inf")
         updated_limit_price = sentinel
         updated_tp_price = sentinel
+        from ..config import MODIFY_REQUEST_SENTINEL
         updated_sl_price = sentinel
 
         if (
+            from ..config import MODIFY_REQUEST_SENTINEL
             is_limit_order
             and not is_filled
-            and request.limit_price not in (MODIFY_SENTINEL, None)
+            from ..config import MODIFY_REQUEST_SENTINEL
+        , None
         ):
             updated_limit_price = request.limit_price
-        if request.take_profit != MODIFY_SENTINEL:
+    
             updated_tp_price = request.take_profit
-        if request.stop_loss != MODIFY_SENTINEL:
+    
             updated_sl_price = request.stop_loss
 
         ob = self._orderbooks[payload["instrument"]]
@@ -495,7 +494,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         self._push_order_payload(payload)
 
-    def _handle_filled_order(
+    def _handle_order_fill(
         self,
         order: Order,
         filled_quantity: int,

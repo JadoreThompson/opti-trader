@@ -22,7 +22,7 @@ async def login_user(
     result = await db_sess.execute(select(Users).where(Users.username == body.username))
     user = result.scalar_one_or_none()
     if user is None or user.password != body.password:
-        raise JSONResponse(status_code=401, error={"error": "Invalid credentials"})
+        return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
 
     rsp = JSONResponse(content={"message": "Logged in successfully."})
     return set_cookie(user.user_id, rsp)

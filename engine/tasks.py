@@ -1,4 +1,5 @@
 from json import dumps
+from typing import TypedDict, get_type_hints
 from sqlalchemy import insert, select, update, func
 from sqlalchemy.orm import Session
 
@@ -10,14 +11,19 @@ from config import (
     RECENT_TRADES_KEY,
     REDIS_CLIENT_SYNC,
     SPOT_BOOKS_KEY,
+    SUPER_USER,
 )
 from db_models import Escrows, Instruments, MarketData, OrderEvents, Orders, Users
 from enums import MarketType, Side, InstrumentEventType
 from models import ClientEvent, InstrumentEvent, PriceUpdate, RecentTrade
 from utils.db import get_db_session_sync
 from utils.utils import get_datetime
-from .typing import EventDict, Event, EventType
+from .typing import Event, EventType
 from .enums import Tag
+
+
+to_typed_dict = lambda typ: TypedDict(f"{typ.__name__}Dict", get_type_hints(typ))
+EventDict = to_typed_dict(Event)
 
 
 def record_order_event(event: Event, db_sess: Session) -> float:
@@ -274,17 +280,13 @@ def handle_instrument_publishing(event: Event, db_sess: Session):
         )
     ).first()
 
-    market_type = event.metadata.get("market_type")
-    if market_type is not None:
-        REDIS_CLIENT_SYNC.hset(
-            (
-                FUTURES_BOOKS_KEY
-                if market_type == MarketType.FUTURES
-                else SPOT_BOOKS_KEY
-            ),
-            instrument,
-            event.price,
-        )
+    market_type = event.metadata["market_type"]
+
+    REDIS_CLIENT_SYNC.hset(
+        (FUTURES_BOOKS_KEY if market_type == MarketType.FUTURES else SPOT_BOOKS_KEY),
+        instrument,
+        event.price,
+    )
 
     REDIS_CLIENT_SYNC.publish(
         INSTRUMENT_EVENTS_CHANNEL,
@@ -303,7 +305,9 @@ def handle_instrument_publishing(event: Event, db_sess: Session):
             time=get_datetime().strftime("%H:%M:%S"),
         )
 
-        prev_recent_trades: list[dict] = REDIS_CLIENT_SYNC.hget(RECENT_TRADES_KEY, instrument) or []
+        prev_recent_trades: list[dict] = (
+            REDIS_CLIENT_SYNC.hget(RECENT_TRADES_KEY, instrument) or []
+        )
         while len(prev_recent_trades) >= 20:
             prev_recent_trades.pop()
 
@@ -322,6 +326,12 @@ def handle_instrument_publishing(event: Event, db_sess: Session):
 
 @CELERY.task
 def log_event(event: EventDict):
+    print(
+        f"Received: {event['event_type']} User ID: {event['user_id']} Order ID: {event['order_id']}"
+    )
+    if event["user_id"] == SUPER_USER:
+        return
+
     fill_events = (
         EventType.ORDER_PARTIALLY_FILLED,
         EventType.ORDER_FILLED,

@@ -6,7 +6,7 @@ from fastapi.websockets import WebSocket, WebSocketState
 from json import loads
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
-from sqlalchemy import literal, select, func, join
+from sqlalchemy import select, func, join
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -232,15 +232,17 @@ async def get_instrument_summary(
         volume = None
 
     start_price = start.price if start is not None else 0
-    change24h_nominal = end.price - start_price
-    change_24h = change24h_nominal / start_price
+    if start_price:
+        change_24h = 100 * ((end.price - start_price) / start_price)
+    else:
+        change_24h = None
 
     return InstrumentSummaryFull(
         price=cur_price,
         high_24h=max_price,
         low_24h=min_price,
         volume_24h=volume,
-        change_24h=change_24h * 100,
+        change_24h=change_24h,
     )
 
 
@@ -330,6 +332,6 @@ async def get_instruments_summary(db_sess: AsyncSession = Depends(depends_db_ses
 
 @route.get("/{instrument}/recent-trades")
 async def get_recent_trades(instrument: str):
-    trades = await REDIS_CLIENT.hget(RECENT_TRADES_KEY, instrument)
+    trades = (await REDIS_CLIENT.hget(RECENT_TRADES_KEY, instrument)) or []
     return [RecentTrade(**t) for t in trades]
 

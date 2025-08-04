@@ -2,19 +2,20 @@ from abc import abstractmethod
 from asyncio import AbstractEventLoop, get_event_loop
 from typing import Generic, TypeVar
 
-from config import REDIS_CLIENT
-from enums import ClientEventType, EventType, Side, InstrumentEventType
-from models import RecentTrade
+from enums import EventType, Side
 from services.payload_pusher import PusherPayload, PusherPayloadTopic
 from ..enums import MatchOutcome
 from ..orderbook import OrderBook
 from ..orders import Order
+from ..order_context import OrderContext
+from ..queue import Queue
+from ..tasks import log_event
 from ..typing import (
+    CancelRequest,
     CloseRequestQuantity,
+    Event,
     MatchResult,
-    CloseRequest,
     ModifyRequest,
-    Queue,
     SupportsAppend,
 )
 
@@ -51,7 +52,7 @@ class BaseEngine(Generic[O]):
         """
 
     @abstractmethod
-    def cancel_order(self, request: CloseRequest) -> None:
+    def cancel_order(self, request: CancelRequest) -> None:
         """
         Cancels an existing order partially or fully.
 
@@ -73,6 +74,11 @@ class BaseEngine(Generic[O]):
         Args:
             request (ModifyRequest): Data containing modifications to apply.
         """
+
+    @abstractmethod
+    def _execute_match(
+        self, order: O, payload: dict, context: OrderContext
+    ) -> MatchResult: ...
 
     def _match(self, order: O, ob: OrderBook[O]) -> MatchResult:
         """
@@ -117,14 +123,15 @@ class BaseEngine(Generic[O]):
             resting_order.filled_quantity += match_quantity
             cur_quantity -= match_quantity
 
-            if resting_order.filled_quantity == resting_order.quantity:
-                self._handle_filled_order(
-                    resting_order, match_quantity, target_price, ob
-                )
-            else:
-                self._handle_touched_order(
-                    resting_order, match_quantity, target_price, ob
-                )
+            # if resting_order.filled_quantity == resting_order.quantity:
+            #     self._handle_filled_order(
+            #         resting_order, match_quantity, target_price, ob
+            #     )
+            # else:
+            #     self._handle_touched_order(
+            #         resting_order, match_quantity, target_price, ob
+            #     )
+            self._handle_order_fill(resting_order, match_quantity, target_price, ob)
 
         if cur_quantity == 0:
             return MatchResult(MatchOutcome.SUCCESS, target_price, starting_quantity)
@@ -135,7 +142,7 @@ class BaseEngine(Generic[O]):
         )
 
     @abstractmethod
-    def _handle_filled_order(
+    def _handle_order_fill(
         self,
         order: O,
         filled_quantity: int,
@@ -186,13 +193,19 @@ class BaseEngine(Generic[O]):
 
         raise ValueError(f"Invalid request quantity {request_quantity}")
 
-    def _update_price(self, instrument: str, price: float) -> None:
-        if self._loop and self._loop.is_running():
-            self._loop.create_task(self._send_price_update(instrument, price))
-
     def _push_order_payload(self, value: dict) -> None:
         payload = PusherPayload(
             action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
         ).model_dump()
         self._queue.append(payload)
 
+    @staticmethod
+    def _log_order_new(payload: dict, **kw) -> None:
+        ev = Event(
+            event_type=EventType.ORDER_NEW,
+            user_id=payload["user_id"],
+            order_id=payload["order_id"],
+            **kw,
+        )
+
+        log_event.delay(ev.model_dump())

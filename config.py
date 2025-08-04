@@ -30,6 +30,7 @@ DB_ENGINE_SYNC = create_engine(DB_URL.replace("+asyncpg", "+psycopg2"))
 TEST_DB_URL = f"postgresql+asyncpg://{os.getenv("TEST_DB_USER")}:{quote(os.getenv("TEST_DB_PASSWORD"))}@{os.getenv("TEST_DB_HOST")}:{os.getenv('TEST_DB_PORT')}/{os.getenv('TEST_DB_NAME')}"
 TEST_DB_ENGINE = create_engine(TEST_DB_URL.replace("+asyncpg", "+psycopg2"))
 TEST_DB_ENGINE_ASYNC = create_async_engine(TEST_DB_URL)
+SUPER_USER = os.getenv("SUPER_USER", '84c4f66c-162f-4e59-85f1-ba1cf1e2a5f5')
 
 
 # Redis

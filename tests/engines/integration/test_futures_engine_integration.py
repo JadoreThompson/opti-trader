@@ -33,7 +33,7 @@ def sanitize_for_snapshot(data: dict) -> dict:
 async def engine(payload_pusher, payload_queue):
     """Provides a fresh FuturesEngine instance for each test."""
     try:
-        yield FuturesEngine(loop=asyncio.get_event_loop(), pusher_queue=payload_queue)
+        yield FuturesEngine(loop=asyncio.get_event_loop(), queue=payload_queue)
     finally:
         pass
 

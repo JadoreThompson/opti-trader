@@ -1,5 +1,5 @@
 from uuid import uuid4
-from .orders import OCOOrder
+from ..orders import OCOOrder
 
 
 class OCOManager:

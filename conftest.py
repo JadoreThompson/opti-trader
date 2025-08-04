@@ -37,11 +37,12 @@ async def db_sess_async(db):
 def patched_log(monkeypatch):
     """Patches log_event in engine to be synchronous and inspectable."""
     mock_log_event = MockCelery(log_event)
-    monkeypatch.setattr(
-        "engine.matching_engines.futures_engine.log_event", mock_log_event
-    )
-    monkeypatch.setattr("engine.matching_engines.spot_engine.log_event", mock_log_event)
-    monkeypatch.setattr("engine.tasks.get_db_session_sync", get_db_sess)
+    # monkeypatch.setattr(
+    #     "engine.matching_engines.futures_engine.log_event", mock_log_event
+    # )
+    # monkeypatch.setattr("engine.matching_engines.spot_engine.log_event", mock_log_event)
+    # monkeypatch.setattr("engine.tasks.get_db_session_sync", get_db_sess)
+    monkeypatch.setattr("engine.event_service.log_event", mock_log_event)
     yield mock_log_event
 
 

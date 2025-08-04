@@ -17,7 +17,7 @@ from config import (
     SPOT_QUEUE_CHANNEL,
 )
 from db_models import Orders
-from engine.typing import MODIFY_SENTINEL, Payload, PayloadTopic
+from engine.typing import MODIFY_SENTINEL, EnginePayload, EnginePayloadTopic
 from enums import MarketType, OrderStatus, OrderType, Side
 from server.exc import JWTError
 from server.middleware import verify_jwt
@@ -112,8 +112,8 @@ async def create_futures_order(
 
     await REDIS_CLIENT.publish(
         FUTURES_QUEUE_CHANNEL,
-        Payload(
-            topic=PayloadTopic.CREATE,
+        EnginePayload(
+            topic=EnginePayloadTopic.CREATE,
             data=payload_data,
         ).model_dump_json(),
     )
@@ -140,7 +140,9 @@ async def create_spot_order(
     else:
         raise ValueError("Invlaid order type.")
 
-    cur_price: float | None = await REDIS_CLIENT.get(parsed_body.instrument)
+    cur_price: float | None = await REDIS_CLIENT.hget(
+        SPOT_BOOKS_KEY, parsed_body.instrument
+    )
     if cur_price is None:
         return JSONResponse(
             status_code=400, content={"error": "Instrument doesn't exist."}
@@ -156,18 +158,19 @@ async def create_spot_order(
     if isinstance(res, JSONResponse):
         return res
 
+    order, balance = res
     await REDIS_CLIENT.publish(
         SPOT_QUEUE_CHANNEL,
-        Payload(
-            topic=PayloadTopic.CREATE,
+        EnginePayload(
+            topic=EnginePayloadTopic.CREATE,
             data={
                 k: (str(v) if isinstance(v, (UUID, datetime)) else v)
-                for k, v in res.items()
+                for k, v in order.items()
             },
         ).model_dump_json(),
     )
 
-    return {"order_id": res["order_id"]}
+    return {"order_id": order["order_id"], "balance": balance}
 
 
 @route.patch("/{order_id}/modify", status_code=201)
@@ -243,8 +246,8 @@ async def modify_order(
 
     await REDIS_CLIENT.publish(
         queue_channel,
-        Payload(
-            topic=PayloadTopic.MODIFY,
+        EnginePayload(
+            topic=EnginePayloadTopic.MODIFY,
             data={
                 "order_id": order.order_id,
                 "limit_price": (
@@ -297,8 +300,8 @@ async def cancel_order(
             if order.market_type == MarketType.SPOT
             else FUTURES_QUEUE_CHANNEL
         ),
-        Payload(
-            topic=PayloadTopic.CANCEL,
+        EnginePayload(
+            topic=EnginePayloadTopic.CANCEL,
             data={"order_id": order.order_id, "quantity": body.quantity},
         ).model_dump_json(),
     )
@@ -326,8 +329,8 @@ async def cancel_all_orders(
                     if order.market_type == MarketType.SPOT
                     else FUTURES_QUEUE_CHANNEL
                 ),
-                Payload(
-                    topic=PayloadTopic.CANCEL,
+                EnginePayload(
+                    topic=EnginePayloadTopic.CANCEL,
                     data={"order_id": order.order_id, "quantity": "ALL"},
                 ).model_dump_json(),
             )
@@ -365,13 +368,9 @@ async def close_order(
         )
 
     await REDIS_CLIENT.publish(
-        (
-            SPOT_QUEUE_CHANNEL
-            if order.market_type == MarketType.SPOT
-            else FUTURES_QUEUE_CHANNEL
-        ),
-        Payload(
-            topic=PayloadTopic.CLOSE,
+        FUTURES_QUEUE_CHANNEL,
+        EnginePayload(
+            topic=EnginePayloadTopic.CLOSE,
             data={"order_id": order.order_id, "quantity": body.quantity},
         ).model_dump_json(),
     )
@@ -381,11 +380,17 @@ async def close_order(
 async def close_all_orders(
     jwt_payload: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
-): 
+):
     res = await db_sess.execute(
         select(Orders).where(
             Orders.user_id == jwt_payload.sub,
-            Orders.status.in_([OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED, OrderStatus.PARTIALLY_CLOSED]),
+            Orders.status.in_(
+                [
+                    OrderStatus.PARTIALLY_FILLED,
+                    OrderStatus.FILLED,
+                    OrderStatus.PARTIALLY_CLOSED,
+                ]
+            ),
             Orders.open_quantity > 0,
         )
     )
@@ -400,8 +405,8 @@ async def close_all_orders(
                     if order.market_type == MarketType.SPOT
                     else FUTURES_QUEUE_CHANNEL
                 ),
-                Payload(
-                    topic=PayloadTopic.CLOSE,
+                EnginePayload(
+                    topic=EnginePayloadTopic.CLOSE,
                     data={"order_id": order.order_id, "quantity": "ALL"},
                 ).model_dump_json(),
             )

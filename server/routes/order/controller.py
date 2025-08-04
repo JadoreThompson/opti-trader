@@ -25,7 +25,7 @@ async def handle_prepare_spot_bid_order(
     user_id: str,
     current_price: float,
     db_sess: AsyncSession,
-) -> JSONResponse | dict:
+) -> tuple[dict, float] | JSONResponse:
     """
     Validates balance, creates escrow and order record.
     Returns a 400 JSON error if balance is insufficient.
@@ -37,9 +37,11 @@ async def handle_prepare_spot_bid_order(
         db_sess (AsynsSession): Active async database session.
 
     Returns:
-        JSONResponse | dict:
+        tuple[dict, float] | JSONResponse:
+            tuple[dict, float]
+                - dict: Dictionary representation of an Orders record.
+                - float: New balance after transaction.
             JSONResponse: Insufficient balance.
-            dict: Dictionary representation of an Orders object.
     """
     res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
     balance = res.scalar()
@@ -112,11 +114,11 @@ async def handle_prepare_spot_bid_order(
     )
 
     await db_sess.commit()
-    return db_order.dump()
+    return db_order.dump(), user_balance
 
 
 async def handle_prepare_spot_ask_order(
-    order: Union[SpotMarketOrder, SpotLimitOrder],
+    order: SpotMarketOrder | SpotLimitOrder,
     user_id: str,
     db_sess: AsyncSession,
 ) -> JSONResponse | dict:
@@ -158,7 +160,7 @@ async def handle_prepare_spot_ask_order(
         insert(Orders)
         .values(
             user_id=user_id,
-            market_type=MarketType.SPOT,
+            market_type=MarketType.SPOT.value,
             standing_quantity=order.quantity,
             **order.model_dump(),
         )
@@ -166,18 +168,21 @@ async def handle_prepare_spot_ask_order(
     )
     db_order = res.scalar()
 
+    res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
+    user_balance = res.scalar()
+
     await db_sess.execute(
         insert(OrderEvents).values(
             user_id=user_id,
             order_id=db_order.order_id,
             event_type=EventType.ASK_SUBMITTED,
             asset_balance=asset_balance - order.quantity,
-            balance=select(Users.balance).where(Users.user_id == user_id),
+            balance=user_balance,
         )
     )
 
     await db_sess.commit()
-    return db_order.dump()
+    return db_order.dump(), user_balance
 
 
 async def handle_prepare_futures_order(
@@ -201,7 +206,7 @@ async def handle_prepare_futures_order(
                 - dict: Dictionary representation of an Orders record.
                 - float: New balance after transaction.
             JSONResponse: Order request invalid
-        
+
     """
     res = await db_sess.execute(select(Users.balance).where(Users.user_id == user_id))
     balance = res.scalar()
@@ -403,5 +408,4 @@ def validate_modify_order(
     ):
         return False
 
-    pprint(locals())
     return True

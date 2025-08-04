@@ -13,6 +13,7 @@ from engine.typing import CloseRequest, EventType, ModifyRequest
 from tests.utils import create_order_simple
 from tests.engines.integration.utils import apply_escrow, create_user, persist_order
 
+
 @pytest.fixture
 def engine():
     """Provides a fresh SpotEngine instance for each test."""
@@ -36,7 +37,7 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
         buy_order["limit_price"] * buy_order["quantity"],
         buy_order["user_id"],
         buy_order["order_id"],
-        db_sess
+        db_sess,
     )
 
     engine.place_order(buy_order)
@@ -75,15 +76,11 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
         limit_buy["limit_price"] * limit_buy["quantity"],
         limit_buy["user_id"],
         limit_buy["order_id"],
-        db_sess
+        db_sess,
     )
 
     market_sell = create_order_simple(
-        "",
-        Side.ASK,
-        OrderType.MARKET,
-        quantity=10,
-        price=100.0
+        "", Side.ASK, OrderType.MARKET, quantity=10, price=100.0
     )
     user = create_user()
     user_id = user.user_id
@@ -93,7 +90,7 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     _, balance_manager = engine._orderbooks.setdefault(
         market_sell["instrument"], (OrderBook(), BalanceManager())
     )
-    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    balance_manager._user_balances[market_sell["user_id"]] = market_sell["quantity"]
 
     engine.place_order(limit_buy)
     engine.place_order(market_sell)
@@ -142,15 +139,11 @@ def test_order_partially_filled_event(
         limit_buy["limit_price"] * limit_buy["quantity"],
         limit_buy["user_id"],
         limit_buy["order_id"],
-        db_sess
+        db_sess,
     )
 
     market_sell = create_order_simple(
-        "",
-        Side.ASK,
-        OrderType.MARKET,
-        quantity=5,
-        price=100.0
+        "", Side.ASK, OrderType.MARKET, quantity=5, price=100.0
     )
     user = create_user()
     user_id = str(user.user_id)
@@ -160,7 +153,7 @@ def test_order_partially_filled_event(
     _, balance_manager = engine._orderbooks.setdefault(
         market_sell["instrument"], (OrderBook(), BalanceManager())
     )
-    balance_manager._users[market_sell["user_id"]] = market_sell["quantity"]
+    balance_manager._user_balances[market_sell["user_id"]] = market_sell["quantity"]
 
     engine.place_order(limit_buy)
     engine.place_order(market_sell)
@@ -209,7 +202,7 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
         limit_buy["quantity"] * limit_buy["limit_price"],
         limit_buy["user_id"],
         limit_buy["order_id"],
-        db_sess
+        db_sess,
     )
     engine.place_order(limit_buy)
 
@@ -289,7 +282,7 @@ def test_order_modified_event(engine: SpotEngine, db_sess: Session, patched_log)
         limit_buy["quantity"] * limit_buy["limit_price"],
         limit_buy["user_id"],
         limit_buy["order_id"],
-        db_sess
+        db_sess,
     )
 
     engine.place_order(limit_buy)
@@ -325,11 +318,7 @@ def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log)
     The engine should reject the order and log an ORDER_REJECTED event.
     """
     sell_order = create_order_simple(
-        "",
-        Side.ASK,
-        OrderType.MARKET,
-        quantity=10,
-        price=100.0
+        "", Side.ASK, OrderType.MARKET, quantity=10, price=100.0
     )
     user = create_user()
     user_id = str(user.user_id)
