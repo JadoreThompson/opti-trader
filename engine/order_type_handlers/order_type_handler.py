@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from enums import OrderType
 from ..orders import SpotOrder
 from ..order_context import OrderContext
+from ..payloads import SpotPayload
 from ..typing import ModifyRequest
 
 
@@ -23,29 +24,34 @@ class OrderTypeHandler(ABC):
         """Return True if this handler supports the given order type."""
 
     @abstractmethod
-    def handle(self, order: SpotOrder, payload: dict, context: OrderContext) -> None:
+    def handle(
+        self, order: SpotOrder, payload: SpotPayload, context: OrderContext
+    ) -> None:
         """Process a new order."""
 
     @abstractmethod
     def handle_filled(
-        self, order: SpotOrder, payload: dict, context: OrderContext
+        self,
+        quantity: int,
+        price: float,
+        order: SpotOrder,
+        payload: SpotPayload,
+        context: OrderContext,
     ) -> None:
         """Handle resting order being filled."""
 
-    @abstractmethod
-    def handle_touched(
-        self, order: SpotOrder, payload: dict, context: OrderContext
-    ) -> None:
-        """Handle resting order being touched."""
-            
     def modify(
         self,
         request: ModifyRequest,
-        payload: dict,
+        payload: SpotPayload,
         context: OrderContext,
     ) -> None:
         """Modify an existing order."""
 
     def cancel(
-        self, quantity: int, payload: dict, order: SpotOrder, context: OrderContext
+        self,
+        quantity: int,
+        payload: SpotPayload,
+        order: SpotOrder,
+        context: OrderContext,
     ) -> None: ...

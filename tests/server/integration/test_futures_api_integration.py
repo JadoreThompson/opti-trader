@@ -75,7 +75,7 @@ async def test_place_order(futures_engine, http_client_authenticated):
     assert len(ask_events) == 2
 
     assert bid_events[0].event_type == EventType.BID_SUBMITTED
-    assert bid_events[1].event_type == EventType.ORDER_NEW
+    assert bid_events[1].event_type == EventType.ORDER_PLACED
     assert bid_events[1].quantity == 10
     assert bid_events[1].balance == get_default_user_balance() - 1000.0
     assert bid_events[2].event_type == EventType.ORDER_FILLED
@@ -134,7 +134,7 @@ async def test_modify_order(
     assert len(events) == 3
 
     assert events[0].event_type == EventType.BID_SUBMITTED
-    assert events[1].event_type == EventType.ORDER_NEW
+    assert events[1].event_type == EventType.ORDER_PLACED
     assert events[2].event_type == EventType.ORDER_MODIFIED
     assert events[2].limit_price == 95.0
     assert events[2].take_profit == 110.0
@@ -191,7 +191,7 @@ async def test_fully_cancel_order(
     assert len(events) == 3
 
     assert events[0].event_type == EventType.BID_SUBMITTED
-    assert events[1].event_type == EventType.ORDER_NEW
+    assert events[1].event_type == EventType.ORDER_PLACED
     assert events[2].event_type == EventType.ORDER_CANCELLED
     assert events[2].quantity == 10
     assert events[2].asset_balance == 0

@@ -60,7 +60,7 @@ def handle_spot_order_filled_event(event: Event, db_sess: Session) -> float:
 
     opening_price = db_sess.execute(
         select(OrderEvents.price).where(
-            OrderEvents.event_type == EventType.ORDER_NEW,
+            OrderEvents.event_type == EventType.ORDER_PLACED,
             OrderEvents.order_id == event.order_id,
         )
     ).scalar_one_or_none()
@@ -141,7 +141,7 @@ def handle_order_cancelled_event(event: Event, db_sess: Session) -> float:
     opening_price = db_sess.execute(
         select(OrderEvents.price)
         .where(
-            OrderEvents.event_type == EventType.ORDER_NEW,
+            OrderEvents.event_type == EventType.ORDER_PLACED,
             OrderEvents.order_id == event.order_id,
         )
         .order_by(OrderEvents.created_at.asc())

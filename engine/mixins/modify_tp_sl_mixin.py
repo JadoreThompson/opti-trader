@@ -108,7 +108,7 @@ class ModifyTPSLMixin:
         is_limit_order = payload["order_type"] in (OrderType.LIMIT, OrderType.LIMIT_OCO)
         is_filled = payload["status"] == OrderStatus.FILLED
         asset_balance = context.balance_manager.get_balance(payload["user_id"])
-        ob = context.orderbook
+        ob = context.order_book
 
         updated_limit_price, updated_tp_price, updated_sl_price = (
             self._extract_updated_prices(request, is_limit_order, payload, sentinel)

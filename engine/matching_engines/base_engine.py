@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from asyncio import AbstractEventLoop, get_event_loop
+from deprecated import deprecated
 from typing import Generic, TypeVar
 
 from enums import EventType, Side
@@ -131,7 +132,7 @@ class BaseEngine(Generic[O]):
             #     self._handle_touched_order(
             #         resting_order, match_quantity, target_price, ob
             #     )
-            self._handle_order_fill(resting_order, match_quantity, target_price, ob)
+            self._handle_fill(resting_order, match_quantity, target_price, ob)
 
         if cur_quantity == 0:
             return MatchResult(MatchOutcome.SUCCESS, target_price, starting_quantity)
@@ -142,19 +143,10 @@ class BaseEngine(Generic[O]):
         )
 
     @abstractmethod
-    def _handle_order_fill(
+    def _handle_fill(
         self,
         order: O,
-        filled_quantity: int,
-        price: float,
-        ob: OrderBook[O],
-    ) -> None: ...
-
-    @abstractmethod
-    def _handle_touched_order(
-        self,
-        order: O,
-        filled_quantity: int,
+        quantity: int,
         price: float,
         ob: OrderBook[O],
     ) -> None: ...
@@ -199,10 +191,11 @@ class BaseEngine(Generic[O]):
         ).model_dump()
         self._queue.append(payload)
 
+    @deprecated
     @staticmethod
     def _log_order_new(payload: dict, **kw) -> None:
         ev = Event(
-            event_type=EventType.ORDER_NEW,
+            event_type=EventType.ORDER_PLACED,
             user_id=payload["user_id"],
             order_id=payload["order_id"],
             **kw,

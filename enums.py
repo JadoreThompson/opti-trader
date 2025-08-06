@@ -35,7 +35,7 @@ class EventType(str, Enum):
     BID_SUBMITTED = "bid_submitted"
 
     # Order placed within orderbook
-    ORDER_NEW = "order_new"
+    ORDER_PLACED = "order_placed"
 
     ORDER_PARTIALLY_CANCELLED = "order_partially_cancelled"
     ORDER_CANCELLED = "order_cancelled"

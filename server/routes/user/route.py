@@ -169,7 +169,7 @@ async def get_current_user_balance_history(
     part_duration = (newest_date - oldest_date) / n_parts
 
     i, l = 0, len(events)
-    while i < l and events[i].event_type != EventType.ORDER_NEW:
+    while i < l and events[i].event_type != EventType.ORDER_PLACED:
         i += 1
 
     if i == l:

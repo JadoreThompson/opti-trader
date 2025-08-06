@@ -113,7 +113,7 @@ class FuturesEngine(BaseEngine[Order]):
             self._push_order_payload(payload)
             log_event.delay(
                 Event(
-                    event_type=EventType.ORDER_NEW,
+                    event_type=EventType.ORDER_PLACED,
                     user_id=payload["user_id"],
                     order_id=order.id,
                     quantity=order.quantity,
@@ -157,7 +157,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         log_event.delay(
             Event(
-                event_type=EventType.ORDER_NEW,
+                event_type=EventType.ORDER_PLACED,
                 user_id=payload["user_id"],
                 order_id=order.id,
                 quantity=order.quantity - order.filled_quantity,
@@ -494,7 +494,7 @@ class FuturesEngine(BaseEngine[Order]):
 
         self._push_order_payload(payload)
 
-    def _handle_order_fill(
+    def _handle_fill(
         self,
         order: Order,
         filled_quantity: int,

@@ -9,9 +9,8 @@ class OrderContext:
     Context passed to order type handlers
     """
 
-    orderbook: OrderBook
+    order_book: OrderBook
     engine: "BaseEngine"
     oco_manager: OCOManager | None = None
     order_manager: OrderManager | None = None
     balance_manager: BalanceManager | None = None
-    

@@ -19,7 +19,7 @@ class LimitOCOOrderHandler(
         return order_type == OrderType.LIMIT_OCO
 
     def handle(self, order: SpotOrder, payload: dict, context: OrderContext) -> None:
-        ob = context.orderbook
+        ob = context.order_book
 
         # Check if crossable
         if self._is_crossable(order, payload, ob):
@@ -35,10 +35,14 @@ class LimitOCOOrderHandler(
                 asset_balance=context.balance_manager.get_balance(payload["user_id"]),
             )
 
-    def handle_filled(self, quantity: int, order: SpotOrder, payload: dict, context: OrderContext) -> None:
+    def handle_filled(
+        self, quantity: int, order: SpotOrder, payload: dict, context: OrderContext
+    ) -> None:
         return super().handle_filled(order, payload, context)
 
-    def handle_touched(self, quantity: int, order: SpotOrder, payload: dict, context: OrderContext) -> None:
+    def handle_touched(
+        self, quantity: int, order: SpotOrder, payload: dict, context: OrderContext
+    ) -> None:
         return super().handle_touched(order, payload, context)
 
     def modify(

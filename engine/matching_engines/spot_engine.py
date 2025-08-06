@@ -16,6 +16,7 @@ from ..order_type_handlers import (
     MarketOCOOrderHandler,
     OrderTypeHandler,
 )
+from ..payloads import SpotPayload
 from ..typing import CancelRequest, MatchResult, ModifyRequest
 
 
@@ -38,26 +39,30 @@ class SpotEngine(BaseEngine[SpotOrder]):
         }
         self._oco_manager = oco_manager or OCOManager()
         self._order_manager = order_manager or OrderManager()
-        self._payloads: dict[str, dict] = {}
+        # self._payloads: dict[str, dict] = {}
+        self._payloads: dict[str, SpotPayload] = {}
 
-    def _handle_match_outcome(
+    def _handle_post_match(
         self,
         result: MatchResult,
         order: SpotOrder,
-        payload: dict,
+        payload: SpotPayload,
         context: OrderContext,
     ) -> None:
-        ob = context.orderbook
+        db_payload = payload.payload
         bm = context.balance_manager
+        ob = context.order_book
+        user_id = db_payload["user_id"]
 
-        if result.outcome == MatchOutcome.SUCCESS:
-            payload["status"] = OrderStatus.FILLED
-        elif result.outcome == MatchOutcome.PARTIAL:
-            payload["status"] = OrderStatus.PARTIALLY_FILLED
+        if result.outcome != MatchOutcome.FAILURE:
+            ob.set_price(result.price)
+            order.filled_quantity += result.quantity
+            payload.apply_fill(result.quantity, result.price)
 
-        if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
-            context.orderbook.set_price(result.price)
-            asset_balance = bm.get_balance(payload["user_id"])
+            if db_payload["side"] == Side.BID:
+                bm.increase_balance(user_id, result.quantity)
+            else:
+                bm.decrease_balance(user_id, result.quantity)
 
             event_type = (
                 EventType.ORDER_FILLED
@@ -65,8 +70,13 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 else EventType.ORDER_PARTIALLY_FILLED
             )
 
-            if result.outcome == MatchOutcome.SUCCESS:
-                bm.remove(payload["user_id"])
+            asset_balance = bm.get_balance(user_id)
+
+            event_type = (
+                EventType.ORDER_FILLED
+                if result.outcome == MatchOutcome.SUCCESS
+                else EventType.ORDER_PARTIALLY_FILLED
+            )
 
             EventService.log_order_event(
                 event_type,
@@ -77,42 +87,22 @@ class SpotEngine(BaseEngine[SpotOrder]):
                 metadata={"tag": order.tag, "market_type": MarketType.SPOT},
             )
 
-        if result.outcome != MatchOutcome.SUCCESS:
-            price = payload["limit_price"] or result.price or ob.price
-            order.price = price
-            ob.append(order, price)
-            context.order_manager.append(order)
-
-            self._log_order_new(
-                payload,
-                quantity=order.quantity - order.filled_quantity,
-                price=order.price,
-                asset_balance=bm.get_balance(payload["user_id"]),
-            )
-
-        self._push_order_payload(payload)
-
     def _execute_match(
-        self, order: SpotOrder, payload: dict, context: OrderContext
+        self, order: SpotOrder, payload: SpotPayload, context: OrderContext
     ) -> MatchResult:
-        result = self._match(order, context.orderbook)
-
-        if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
-            order.filled_quantity = result.quantity
-            payload["open_quantity"] = result.quantity
-            payload["standing_quantity"] = order.quantity - result.quantity
-            context.balance_manager.increase_balance(
-                payload["user_id"], result.quantity
-            )
-
-        self._handle_match_outcome(result, order, payload, context)
+        result = self._match(order, context.order_book)
+        self._handle_post_match(
+            result=result, order=order, payload=payload, context=context
+        )
         return result
 
     def place_order(self, payload: dict) -> None:
         if payload["order_id"] in self._payloads:
             raise RuntimeError("Order ID already exists")
 
-        self._payloads[payload["order_id"]] = payload
+        # self._payloads[payload["order_id"]] = payload
+        spot_payload = SpotPayload(payload)
+        self._payloads[payload["order_id"]] = spot_payload
         ot = payload["order_type"]
         ob, bm = self._instrument_manager.get(payload["instrument"], MarketType.SPOT)
 
@@ -132,12 +122,14 @@ class SpotEngine(BaseEngine[SpotOrder]):
             )
             context = OrderContext(
                 engine=self,
-                orderbook=ob,
+                order_book=ob,
                 balance_manager=bm,
                 oco_manager=self._oco_manager,
                 order_manager=self._order_manager,
             )
-            handler.handle(order, payload, context)
+            handler.handle(order, spot_payload, context)
+
+        self._push_order_payload(payload)
 
     def modify_order(self, request: ModifyRequest) -> None:
         payload = self._payloads.get(request.order_id)
@@ -151,7 +143,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
         ob, bm = self._instrument_manager.get(payload["instrument"])
         context = OrderContext(
-            orderbook=ob,
+            order_book=ob,
             engine=self,
             oco_manager=self._oco_manager,
             order_manager=self._order_manager,
@@ -186,7 +178,7 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
         if handler.is_cancellable():
             context = OrderContext(
-                orderbook=ob,
+                order_book=ob,
                 engine=self,
                 oco_manager=self._oco_manager,
                 order_manager=self._order_manager,
@@ -198,23 +190,45 @@ class SpotEngine(BaseEngine[SpotOrder]):
 
         self._push_order_payload(payload)
 
-    def _handle_order_fill(
-        self, order: SpotOrder, filled_quantity: int, price: float, ob: OrderBook
+    def _handle_fill(
+        self, order: SpotOrder, quantity: int, price: float, ob: OrderBook
     ) -> None:
         payload = self._payloads[order.id]
-        _, bm = self._instrument_manager.get(payload["instrument"])
+        db_payload = payload.payload
+        user_id = db_payload["user_id"]
+        _, bm = self._instrument_manager.get(payload.payload["instrument"])
+
+        if db_payload["side"] == Side.BID:
+            bm.increase_balance(user_id, quantity)
+        else:
+            bm.decrease_balance(user_id, quantity)
+
+        payload.apply_fill(quantity, price)
+
+        etype = (
+            EventType.ORDER_FILLED
+            if db_payload["standing_quantity"] == 0
+            else EventType.ORDER_PARTIALLY_FILLED
+        )
+        EventService.log_order_event(
+            etype,
+            payload,
+            asset_balance=bm.get_balance(user_id),
+            price=price,
+            quantity=quantity,
+            metadata={"market_type": MarketType.SPOT},
+        )
+
         context = OrderContext(
-            orderbook=ob,
+            order_book=ob,
             engine=self,
             oco_manager=self._oco_manager,
             order_manager=self._order_manager,
             balance_manager=bm,
         )
 
-        handler = self._order_type_handlers[payload["order_type"]]
-        handler.handle_filled(filled_quantity, order, payload, context)
-
-        # return super()._handle_filled_order(order, filled_quantity, price, ob)
+        handler = self._order_type_handlers[payload.payload["order_type"]]
+        handler.handle_filled(quantity, price, order, payload, context)
 
     def _handle_cancel_order(
         self,

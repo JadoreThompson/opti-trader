@@ -49,7 +49,7 @@ def test_order_placed_event(engine: SpotEngine, db_sess: Session, patched_log):
         select(Users.balance).where(Users.user_id == buy_order["user_id"])
     ).scalar()
 
-    assert event.event_type == EventType.ORDER_NEW
+    assert event.event_type == EventType.ORDER_PLACED
     assert event.quantity == buy_order["quantity"]
     assert user_balance == 9000.0
 
@@ -110,7 +110,7 @@ def test_order_filled_event(engine: SpotEngine, db_sess: Session, patched_log):
     ).scalar()
 
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_NEW
+    assert events[0].event_type == EventType.ORDER_PLACED
     assert events[0].asset_balance == 0
     assert events[0].balance == 9000.0
     assert events[1].event_type == EventType.ORDER_FILLED
@@ -175,7 +175,7 @@ def test_order_partially_filled_event(
     ).scalar()
 
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_NEW
+    assert events[0].event_type == EventType.ORDER_PLACED
     assert events[0].asset_balance == 0
     assert events[0].balance == 9000.0
     assert events[1].event_type == EventType.ORDER_PARTIALLY_FILLED
@@ -225,7 +225,7 @@ def test_order_cancelled_event(engine: SpotEngine, db_sess, patched_log):
 
     balance = get_default_user_balance() - escrow_balance
     assert len(events) == 1
-    assert events[0].event_type == EventType.ORDER_NEW
+    assert events[0].event_type == EventType.ORDER_PLACED
     assert events[0].asset_balance == 0
     assert events[0].balance == balance
     assert escrow_balance == 1000.0
@@ -309,7 +309,7 @@ def test_order_modified_event(engine: SpotEngine, db_sess: Session, patched_log)
         .all()
     )
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_NEW
+    assert events[0].event_type == EventType.ORDER_PLACED
 
 
 def test_order_rejected_event(engine: SpotEngine, db_sess: Session, patched_log):

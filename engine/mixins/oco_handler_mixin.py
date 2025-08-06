@@ -56,7 +56,7 @@ class OCOOrderHandlerMixin:
         context: OrderContext,
     ) -> None:
         """Cancel or reduce an existing order."""
-        ob = context.orderbook
+        ob = context.order_book
         bm = context.balance_manager
         oco_order = context.oco_manager.get(order.oco_id)
         is_in_book = order.quantity != order.filled_quantity

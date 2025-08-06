@@ -64,7 +64,7 @@ def test_order_new_event(engine: FuturesEngine, db_sess: Session, patched_log):
     ).scalar_one_or_none()
 
     assert event is not None, db_sess.bind.url
-    assert event.event_type == EventType.ORDER_NEW.value
+    assert event.event_type == EventType.ORDER_PLACED.value
     assert event.user_id == user.user_id
     assert event.quantity == 10
     assert event.price == 100.0
@@ -125,7 +125,7 @@ def test_order_filled_event(engine: FuturesEngine, db_sess: Session, patched_log
         .all()
     )
     assert len(buyer_events) == 2
-    assert buyer_events[0].event_type == EventType.ORDER_NEW
+    assert buyer_events[0].event_type == EventType.ORDER_PLACED
     assert buyer_events[1].event_type == EventType.ORDER_FILLED
     assert buyer_events[1].asset_balance == 10  # open_quantity is now 10
 
@@ -262,7 +262,7 @@ def test_order_cancelled_event(engine: FuturesEngine, db_sess: Session, patched_
         .all()
     )
     assert len(events) == 2
-    assert events[0].event_type == EventType.ORDER_NEW
+    assert events[0].event_type == EventType.ORDER_PLACED
     assert events[1].event_type == EventType.ORDER_PARTIALLY_CANCELLED
     assert events[1].quantity == 4
     assert events[1].asset_balance == 0

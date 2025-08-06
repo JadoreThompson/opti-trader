@@ -55,7 +55,7 @@ async def test_spot_bid_market_order_integration(
 
     assert len(events) == 2
     assert events[0].event_type == EventType.BID_SUBMITTED
-    assert events[1].event_type == EventType.ORDER_NEW
+    assert events[1].event_type == EventType.ORDER_PLACED
     assert str(events[1].order_id) == data["order_id"]
 
 
@@ -89,7 +89,7 @@ async def test_spot_bid_limit_order_integration(
 
     assert len(events) == 2, [e.event_type for e in events]
     assert events[0].event_type == EventType.BID_SUBMITTED
-    assert events[1].event_type == EventType.ORDER_NEW
+    assert events[1].event_type == EventType.ORDER_PLACED
     assert str(events[1].order_id) == data["order_id"]
 
 
@@ -154,7 +154,7 @@ async def test_spot_ask_limit_order_integration(
         res = await sess.execute(
             select(OrderEvents).where(
                 OrderEvents.order_id == data["order_id"],
-                OrderEvents.event_type == EventType.ORDER_NEW,
+                OrderEvents.event_type == EventType.ORDER_PLACED,
             )
         )
         events = res.scalars().all()
