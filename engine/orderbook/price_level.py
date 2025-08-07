@@ -1,11 +1,9 @@
-from typing import Generic, TypeVar
 from .price_level_node import PriceLevelNode
 from ..orders import Order
 
-T = TypeVar("T", bound=Order)
 
 
-class PriceLevel(Generic[T]):
+class PriceLevel:
     """
     Houses doubly linked list to manage orders at a single
     price level in an order book.
@@ -18,16 +16,16 @@ class PriceLevel(Generic[T]):
     """
 
     def __init__(self) -> None:
-        self._head: PriceLevelNode[T] | None = None
-        self._tail: PriceLevelNode[T] | None = None
-        self._tracker: dict[str, PriceLevelNode[T]] = {}
+        self._head: PriceLevelNode | None = None
+        self._tail: PriceLevelNode | None = None
+        self._tracker: dict[str, PriceLevelNode] = {}
 
-    def append(self, order: T) -> None:
+    def append(self, order: Order) -> None:
         """Adds a new order to the end of the level. Raises ValueError if duplicate."""
         if order.id in self._tracker:
             raise ValueError(f"Order with id {order.id} already on level.")
 
-        new_node = PriceLevelNode[T](order)
+        new_node = PriceLevelNode(order)
 
         if self._head is None:
             self._head = new_node
@@ -39,7 +37,7 @@ class PriceLevel(Generic[T]):
 
         self._tracker[order.id] = new_node
 
-    def remove(self, order: T) -> None:
+    def remove(self, order: Order) -> None:
         """Removes the specified order from the level. Safe against head/tail removals."""
         orders_node = self._tracker[order.id]
 
@@ -61,13 +59,13 @@ class PriceLevel(Generic[T]):
         return self._head is not None
 
     @property
-    def head(self) -> PriceLevelNode[T] | None:
+    def head(self) -> PriceLevelNode | None:
         return self._head
 
     @property
-    def tail(self) -> PriceLevelNode[T] | None:
+    def tail(self) -> PriceLevelNode | None:
         return self._tail
 
     @property
-    def tracker(self) -> dict[str, PriceLevelNode[T]]:
+    def tracker(self) -> dict[str, PriceLevelNode]:
         return self._tracker

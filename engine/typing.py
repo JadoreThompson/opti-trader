@@ -9,7 +9,8 @@ from utils.utils import get_datetime
 from .config import MODIFY_REQUEST_SENTINEL
 
 
-T = TypeVar("T", bound="EnginePayloadData")
+E = TypeVar("E", bound="EnginePayloadData")
+M = TypeVar("M")
 
 
 MatchResult = namedtuple(
@@ -32,10 +33,10 @@ class EnginePayloadData(BaseModel):
     pass
 
 
-class EnginePayload(BaseModel, Generic[T]):
+class EnginePayload(BaseModel, Generic[E]):
     topic: EnginePayloadTopic
     type: OrderType | None = None
-    data: T
+    data: E
 
 
 class OrderEnginePayloadData(EnginePayloadData):
@@ -43,8 +44,7 @@ class OrderEnginePayloadData(EnginePayloadData):
 
 
 class OCOEnginePayloadData(EnginePayloadData):
-    order: dict  # Entry order.
-    orders: list[dict] = Field(max_length=2)
+    orders: list[dict]
 
 
 class CloseRequest(BaseModel):
@@ -55,20 +55,22 @@ class CancelRequest(CloseRequest):
     pass
 
 
-class ModifyRequest(BaseModel):
+class ModifyRequest(Generic[M], BaseModel):
     order_id: str
-    limit_price: float | str | None = MODIFY_REQUEST_SENTINEL
-    stop_price: float | None = None
-    take_profit: float | str | None = MODIFY_REQUEST_SENTINEL
-    stop_loss: float | str | None = MODIFY_REQUEST_SENTINEL
+    data: M
 
-    @field_validator("limit_price", "take_profit", "stop_loss")
-    def validate_modify_fields(cls, v):
-        if isinstance(v, str) and v != MODIFY_REQUEST_SENTINEL:
-            raise ValueError(
-                "Modify fields must be either a float or the sentinel value '*'."
-            )
-        return v
+
+class LimitModifyRequest(BaseModel):
+    limit_price: float
+
+
+class StopModifyRequest(BaseModel):
+    stop_price: float = None
+
+
+class OCOModifyRequest(BaseModel):
+    above_price: float = MODIFY_REQUEST_SENTINEL
+    below_price: float = MODIFY_REQUEST_SENTINEL
 
 
 class Event(BaseModel):

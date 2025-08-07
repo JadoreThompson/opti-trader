@@ -1,30 +1,36 @@
+from enums import OrderType, Side
 from ..enums import Tag
-from enums import Side
 
 
 class Order:
     """
-    Represents an individual order within the order book.
-
-    Each Order has a unique identifier, a tag to classify its
-    purpose (e.g., entry, take-profit), a side indicating whether
-    it is a bid or ask, a quantity, and an optional price. Tracks
-    how much of the order has been filled to support partial executions.
+    Represents an order within the orderbook.
     """
 
     def __init__(
-        self, id_: str, tag: Tag, side: Side, quantity: int, price: float = None
-    ) -> None:
+        self,
+        id_: str,
+        typ: OrderType,
+        tag: Tag,
+        side: Side,
+        quantity: int,
+        price: float | None = None,
+    ):
         self._id = id_
         self._tag = tag
+        self._type = typ
         self._side = side
-        self.quantity = quantity
         self.price = price
+        self.quantity = quantity
         self.filled_quantity = 0
 
     @property
     def id(self) -> str:
         return self._id
+
+    @property
+    def type(self) -> OrderType:
+        return self._type
 
     @property
     def tag(self) -> Tag:

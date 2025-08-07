@@ -1,658 +1,272 @@
-from asyncio import AbstractEventLoop
-from json import loads
-from logging import getLogger
-
-from config import (
-    FUTURES_QUEUE_CHANNEL,
-    REDIS_CLIENT,
-)
-from enums import (
-    EventType,
-    MarketType,
-    OrderStatus,
-    OrderType,
-    Side,
-)
-from utils.utils import get_exc_line
+from collections import defaultdict
+from engine.position import Position
+from engine.protocols import StoreProtocol
+from engine.stores.order_store import OrderStore
+from engine.stores.payload_store import PayloadStore
+from enums import EventType, MarketType, OrderStatus, OrderType, Side
 from .engine import Engine
-from ..config import MODIFY_REQUEST_SENTINEL
 from ..enums import MatchOutcome, Tag
-from ..orderbook import OrderBook
+from ..event_service import EventService
+from ..managers import SpotBalanceManager
+from ..managers import InstrumentManager
+from ..managers import OrderManager
+from ..orderbook.orderbook import OrderBook
 from ..orders import Order
-from ..position import Position
-from ..tasks import log_event
+from ..order_context import OrderContext
+from ..order_type_handlers import (
+    LimitOrderHandler,
+    MarketOrderHandler,
+    OrderTypeHandler,
+    StopOrderHandler,
+)
+from ..payloads import FuturesPayload
+from ..stores import PositionStore
 from ..typing import (
-    CloseRequest,
+    CancelRequest,
+    EnginePayload,
+    EnginePayloadData,
     MatchResult,
     ModifyRequest,
-    Event,
-    EnginePayload,
-    EnginePayloadTopic,
-    SupportsAppend,
 )
+from ..validation_service import FuturesValidationService
 
-logger = getLogger(__name__)
 
-
-class FuturesEngine(Engine[Order]):
+class FuturesEngine(FuturesValidationService, Engine):
     def __init__(
         self,
-        loop: AbstractEventLoop | None = None,
-        queue: SupportsAppend | None = None,
-        orderbooks: dict[str, OrderBook[Order]] | None = None,
-    ) -> None:
-        super().__init__(loop, queue)
-        self._positions: dict[str, Position] = {}
-        self._orderbooks: dict[str, OrderBook[Order]] = orderbooks or {}
+        loop=None,
+        queue=None,
+    ):
+        super().__init__(loop=loop, queue=queue)
 
-    async def run(self) -> None:
-        async with REDIS_CLIENT.pubsub() as ps:
-            await ps.subscribe(FUTURES_QUEUE_CHANNEL)
-            async for m in ps.listen():
-                if m["type"] == "subscribe":
-                    continue
+        self._instrument_manager = InstrumentManager()
+        self._order_type_handlers: dict[OrderType, OrderTypeHandler] = {
+            OrderType.LIMIT: LimitOrderHandler(),
+            OrderType.MARKET: MarketOrderHandler(),
+            OrderType.STOP: StopOrderHandler(),
+        }
+        self._order_stores: dict[OrderType, OrderStore] = defaultdict(OrderStore)
+        self._payload_store = PayloadStore()
 
-                try:
-                    payload = EnginePayload(**loads(m["data"]))
+    def _build_context(self, payload: FuturesPayload) -> OrderContext:
+        db_payload = payload.payload
+        ob, bm = self._instrument_manager.get(db_payload["instrument"], MarketType.SPOT)
 
-                    if payload.topic == EnginePayloadTopic.CREATE:
-                        self.place_order(payload.data)
-                    elif payload.topic == EnginePayloadTopic.CANCEL:
-                        self.cancel_order(CloseRequest(**payload.data))
-                    elif payload.topic == EnginePayloadTopic.MODIFY:
-                        self.modify_order(ModifyRequest(**payload.data))
-                    elif payload.topic == EnginePayloadTopic.CLOSE:
-                        self.close_order(CloseRequest(**payload.data))
-
-                except Exception as e:
-                    logger.error(
-                        f"Error: {type(e)} - {str(e)} - line: {get_exc_line()} \n{e}"
-                    )
-
-    def place_order(self, payload: dict) -> float | None:
-        """
-        Places a new order in the futures engine.
-
-        Creates an entry order and attempts to match it against the order book.
-        If not immediately filled, the order is added to the book. Handles
-        take-profit and stop-loss setup.
-
-        Args:
-            payload (dict): Order details including instrument, side, quantity,
-                type, and limit price.
-
-        Returns:
-            float | None: Price matched or partially matched at.
-        """
-        ob = self._orderbooks.setdefault(payload["instrument"], OrderBook())
-        if payload["order_id"] in self._positions:
-            raise ValueError(
-                f"Position with order_id {payload['order_id']} already exists."
-            )
-
-        pos = self._positions.setdefault(payload["order_id"], Position(payload))
-        order = Order(pos.id, Tag.ENTRY, payload["side"], payload["quantity"])
-
-        entry_price = payload["limit_price"] or payload["price"]
-
-        if payload["order_type"] == OrderType.LIMIT and not (
-            (  # Checking if not crossable
-                order.side == Side.BID
-                and ob.best_ask is not None
-                and entry_price >= ob.best_ask
-            )
-            or (
-                order.side == Side.ASK
-                and ob.best_bid is not None
-                and entry_price <= ob.best_bid
-            )
-        ):
-            order.price = entry_price
-            ob.append(order, order.price)
-            pos.entry_order = order
-            self._push_order_payload(payload)
-            log_event.delay(
-                Event(
-                    event_type=EventType.ORDER_PLACED,
-                    user_id=payload["user_id"],
-                    order_id=order.id,
-                    quantity=order.quantity,
-                    price=order.price,
-                    asset_balance=payload["open_quantity"],
-                ).model_dump()
-            )
-            return
-
-        result: MatchResult = self._match(order, ob)
-        order.filled_quantity = result.quantity
-
-        if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
-            ob.set_price(result.price)
-            self._place_tp_sl(pos, ob)
-            pos.apply_entry_fill(result.quantity, result.price)
-
-            log_event.delay(
-                Event(
-                    event_type=(
-                        EventType.ORDER_FILLED
-                        if result.outcome == MatchOutcome.SUCCESS
-                        else EventType.ORDER_PARTIALLY_FILLED
-                    ),
-                    user_id=payload["user_id"],
-                    order_id=payload["order_id"],
-                    quantity=result.quantity,
-                    price=result.price,
-                    asset_balance=payload["open_quantity"],
-                    metadata={"market_type": MarketType.FUTURES},
-                ).model_dump()
-            )
-
-            if result.outcome == MatchOutcome.SUCCESS:
-                return self._push_order_payload(payload)
-
-        price = entry_price or result.price or ob.price  # TODO: Check ob fallback
-        order.price = price
-        ob.append(order, price)
-        pos.entry_order = order
-
-        log_event.delay(
-            Event(
-                event_type=EventType.ORDER_PLACED,
-                user_id=payload["user_id"],
-                order_id=order.id,
-                quantity=order.quantity - order.filled_quantity,
-                price=order.price,
-                asset_balance=payload["open_quantity"],
-            ).model_dump()
-        )
-        self._push_order_payload(payload)
-
-    def close_order(self, request: CloseRequest) -> None:
-        """
-        Closes an existing position based on the provided request.
-
-        Attempts to match the opposing side of the order to close it, updating
-        the position and cleaning up TP/SL orders if fully closed.
-
-        Args:
-            request (CloseRequest): Request specifying the order ID and quantity
-                to close.
-        """
-        pos = self._positions.get(request.order_id)
-
-        if pos is None:
-            msg = f"Position not found for order ID: {request.order_id}"
-            logger.warning(msg)
-            return
-
-        ob = self._orderbooks[pos.instrument]
-
-        if pos.status == OrderStatus.PENDING:
-            return log_event.delay(
-                Event(
-                    event_type=EventType.ORDER_REJECTED,
-                    order_id=pos.id,
-                    user_id=pos.payload["user_id"],
-                    asset_balance=pos.payload["open_quantity"],
-                ).model_dump()
-            )
-
-        requested_qty = self._validate_close_req_quantity(
-            request.quantity, pos.open_quantity
+        return OrderContext(
+            engine=self,
+            orderbook=ob,
+            balance_manager=bm,
+            order_store=self._order_stores[db_payload["order_type"]],
         )
 
-        dummy = Order(
-            pos.id,
-            Tag.ENTRY,
-            Side.BID if pos.payload["side"] == Side.ASK else Side.ASK,
-            requested_qty,
-        )
+    def place_order(self, payload: EnginePayload) -> None:
+        handler = self._order_type_handlers.get(payload.type)
+        if handler and handler.can_handle(payload.type):
+            payloads: list[dict] = handler.handle_new(payload.data, self)
 
-        result: MatchResult = self._match(dummy, ob)
-
-        if result.outcome in (MatchOutcome.PARTIAL, MatchOutcome.SUCCESS):
-            ob.set_price(result.price)
-            pos.apply_close(result.quantity, result.price)
-
-            if pos.open_quantity == 0:
-                self._remove_tp_sl(pos, ob)
-
-                if pos.standing_quantity == 0:
-                    event_type = EventType.ORDER_CLOSED
-                    self._positions.pop(pos.id)
-                else:
-                    event_type = EventType.ORDER_PARTIALLY_CLOSED
-            else:
-                self._mutate_tp_sl_quantity(pos)
-                event_type = EventType.ORDER_PARTIALLY_CLOSED
-
-            log_event.delay(
-                Event(
-                    event_type=event_type,
-                    order_id=pos.id,
-                    user_id=pos.payload["user_id"],
-                    quantity=result.quantity,
-                    price=result.price,
-                    asset_balance=pos.open_quantity,
-                    metadata={"market_type": MarketType.FUTURES},
-                ).model_dump()
-            )
-            self._push_order_payload(pos.payload)
-
-    def cancel_order(self, request: CloseRequest) -> None:
-        """
-        Cancels the standing quantity of an existing order.
-        If 'ALL' is passed as the quantity and the open_quantity is 0
-        then the order and it's relating position if removed. Else
-        the order is partially cancelled.
-
-        Args:
-            request (CloseRequest): Request with order ID and quantity to cancel.
-        """
-        pos = self._positions.get(request.order_id)
-        if pos is None:
-            logger.warning(f"Position not found for order ID: {request.order_id}")
-            return
-
-        if pos.status not in (OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED):
-            return log_event.delay(
-                Event(
-                    event_type=EventType.ORDER_REJECTED,
-                    order_id=pos.id,
-                    user_id=pos.payload["user_id"],
-                    asset_balance=pos.payload["open_quantity"],
-                ).model_dump()
-            )
-
-        ob = self._orderbooks[pos.instrument]
-        requested_quantity = self._validate_close_req_quantity(
-            request.quantity, pos.standing_quantity
-        )
-        pos.apply_cancel(requested_quantity)
-
-        if pos.status == OrderStatus.CANCELLED:
-            ob.remove(pos.entry_order, pos.entry_order.price)
-            self._positions.pop(pos.id)
-        elif pos.status == OrderStatus.FILLED:
-            ob.remove(pos.entry_order, pos.entry_order.price)
-
-        log_event.delay(
-            Event(
-                event_type=EventType.ORDER_CANCELLED,
-                order_id=pos.id,
-                user_id=pos.payload["user_id"],
-                quantity=requested_quantity,
-                asset_balance=pos.payload["open_quantity"],
-            ).model_dump()
-        )
-        self._push_order_payload(pos.payload)
+            if payloads:
+                _, bm = self._instrument_manager.get(payloads[0]["instrument"])
+                map(lambda x: bm.append(x["user_id"]), payloads)
+                map(self._push_order_payload, payloads)
 
     def modify_order(self, request: ModifyRequest) -> None:
-        """
-        Modifies the properties of an order. If necessary
-        alters the postiion of it's TP, SL and/or entry order
-        if order was a LIMIT order.
-
-        Args:
-            request (ModifyRequest): ModifyRequest containing the details.
-        """
-
-        def reject_request(payload: dict, asset_balance: int) -> None:
-            log_event.delay(
-                Event(
-                    event_type=EventType.ORDER_REJECTED,
-                    order_id=payload["order_id"],
-                    user_id=payload["user_id"],
-                    asset_balance=asset_balance,
-                ).model_dump()
-            )
-
-        pos = self._positions.get(request.order_id)
-        if pos is None:
-            logger.warning(f"Position not found for order ID: {request.order_id}")
+        payload = self._payload_store.get(request.order_id)
+        if payload is None:
             return
 
-        payload = pos.payload
+        db_payload = payload.payload
+        ot = db_payload["order_type"]
+        handler = self._order_type_handlers.get(ot)
+        if handler is None or not handler.is_modifiable():
+            return
 
-        is_limit_order = payload["order_type"] == OrderType.LIMIT
-        is_filled = payload["status"] in (
-            OrderStatus.PARTIALLY_FILLED,
-            OrderStatus.FILLED,
+        ob, bm = self._instrument_manager.get(db_payload["instrument"])
+        context = OrderContext(
+            orderbook=ob,
+            engine=self,
+            order_store=self._order_stores[db_payload["order_type"]],
+            balance_manager=bm,
         )
+        handler.modify(request, payload, context)
+        self._push_order_payload(db_payload)
 
-        sentinel = float("inf")
-        updated_limit_price = sentinel
-        updated_tp_price = sentinel
-        from ..config import MODIFY_REQUEST_SENTINEL
-        updated_sl_price = sentinel
+    def cancel_order(self, request: CancelRequest) -> None:
+        payload = self._payload_store.get(request.order_id)
+        if payload is None:
+            return
 
-        if (
-            from ..config import MODIFY_REQUEST_SENTINEL
-            is_limit_order
-            and not is_filled
-            from ..config import MODIFY_REQUEST_SENTINEL
-        , None
-        ):
-            updated_limit_price = request.limit_price
-    
-            updated_tp_price = request.take_profit
-    
-            updated_sl_price = request.stop_loss
+        db_payload = payload.payload
+        ob, bm = self._instrument_manager.get(db_payload["instrument"])
 
-        ob = self._orderbooks[payload["instrument"]]
-        asset_balance = pos.open_quantity
-        ob_price: float = ob.price
+        ot = db_payload["order_type"]
+        handler = self._order_type_handlers.get(ot)
+        if handler is None:
+            return
 
-        # Setting temporary prices based on the request
-        tmp_sl_price = float("-inf") if payload["side"] == Side.BID else float("inf")
-        if updated_sl_price != sentinel:
-            if updated_sl_price is not None:
-                tmp_sl_price = updated_sl_price
-        elif payload["stop_loss"] is not None:
-            tmp_sl_price = payload["stop_loss"]
-
-        tmp_tp_price = float("inf") if payload["side"] == Side.BID else float("-inf")
-        if updated_tp_price != sentinel:
-            if updated_tp_price is not None:
-                tmp_tp_price = updated_tp_price
-        elif payload["take_profit"] is not None:
-            tmp_tp_price = payload["take_profit"]
-
-        tmp_limit_price = sentinel
-        if is_limit_order:
-            if updated_limit_price != sentinel:
-                tmp_limit_price = updated_limit_price
-            else:
-                tmp_limit_price = payload["limit_price"]
-
-        # Validating
-        if is_limit_order:
-            if (
-                is_filled
-                and payload["side"] == Side.BID
-                and not (tmp_sl_price < tmp_tp_price)
-            ):
-                return reject_request(payload, asset_balance)
-
-            if (
-                is_filled
-                and payload["side"] == Side.ASK
-                and not (tmp_sl_price > tmp_tp_price)
-            ):
-                return reject_request(payload, asset_balance)
-
-            if (
-                not is_filled
-                and payload["side"] == Side.BID
-                and not (tmp_sl_price < tmp_limit_price <= ob_price < tmp_tp_price)
-            ):
-                return reject_request(payload, asset_balance)
-
-            if (
-                not is_filled
-                and payload["side"] == Side.ASK
-                and not (tmp_sl_price > tmp_limit_price >= ob_price > tmp_tp_price)
-            ):
-                return reject_request(payload, asset_balance)
-
-        if (
-            is_filled
-            and payload["side"] == Side.BID
-            and not (tmp_sl_price < tmp_tp_price)
-        ):
-            return reject_request(payload, asset_balance)
-
-        if (
-            is_filled
-            and payload["side"] == Side.ASK
-            and not (tmp_sl_price > tmp_tp_price)
-        ):
-            return reject_request(payload, asset_balance)
-
-        if (
-            not is_filled
-            and payload["side"] == Side.BID
-            and not (tmp_sl_price < ob_price < tmp_tp_price)
-        ):
-            return reject_request(payload, asset_balance)
-
-        if (
-            not is_filled
-            and payload["side"] == Side.ASK
-            and not (tmp_sl_price > ob_price > tmp_tp_price)
-        ):
-            return reject_request(payload, asset_balance)
-
-        # Cancel and Replace
-        if is_limit_order and not is_filled:
-            order = pos.entry_order
-            ob.remove(order, order.price)
-            new_order = Order(
-                order.id,
-                Tag.ENTRY,
-                payload["side"],
-                payload["quantity"],
-                tmp_limit_price,
+        if handler.is_cancellable():
+            context = OrderContext(
+                orderbook=ob,
+                engine=self,
+                order_store=self._order_stores[db_payload["order_type"]],
+                balance_manager=bm,
             )
-            new_order.filled_quantity = order.filled_quantity
-            pos.entry_order = new_order
-            ob.append(new_order, new_order.price)
+            handler.cancel(payload, context)
+        else:
+            store = self._order_stores[ot]
+            order = store.get(db_payload["order_id"])
+            payload.apply_cancel(db_payload["standing_quantity"])
+            ob.remove(order, order.price)
+            store.remove(order)
 
-        if is_filled and updated_sl_price != sentinel:
-            if pos.stop_loss_order is not None:
-                ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
-                pos.stop_loss_order = None
+        self._push_order_payload(db_payload)
 
-            if updated_sl_price is not None:
-                new_order = Order(
-                    payload["order_id"],
-                    Tag.STOP_LOSS,
-                    Side.ASK if payload["side"] == Side.BID else Side.BID,
-                    payload["open_quantity"],
-                    updated_sl_price,
-                )
-                pos.stop_loss_order = new_order
-                ob.append(new_order, new_order.price)
+    def _execute_match(
+        self, order: Order, payload: FuturesPayload, context: OrderContext
+    ) -> MatchResult:
+        done = False
+        quantity = order.quantity
+        filled_volume = 0.0
+        filled_price = 0.0
+        last_price = None
 
-        if is_filled and updated_tp_price != sentinel:
-            if pos.take_profit_order is not None:
-                ob.remove(pos.take_profit_order, pos.take_profit_order.price)
-                pos.take_profit_order = None
+        while not done:
+            result = self._match(order, context.orderbook, quantity)
 
-            if updated_tp_price is not None:
-                new_order = Order(
-                    payload["order_id"],
-                    Tag.TAKE_PROFIT,
-                    Side.ASK if payload["side"] == Side.BID else Side.BID,
-                    payload["open_quantity"],
-                    updated_tp_price,
-                )
-                pos.take_profit_order = new_order
-                ob.append(new_order, new_order.price)
+            if result.outcome != MatchOutcome.FAILURE:
+                quantity -= result.quantity
+                filled_volume += result.price * result.quantity
+                filled_price = filled_volume / (order.quantity - quantity)
+                last_price = result.price
 
-        if is_limit_order and not is_filled and updated_limit_price != sentinel:
-            payload["limit_price"] = updated_limit_price
+            if result.outcome != MatchOutcome.PARTIAL:
+                done = True
 
-        payload["stop_loss"] = (
-            updated_sl_price if updated_sl_price != sentinel else payload["stop_loss"]
-        )
-        payload["take_profit"] = (
-            updated_tp_price if updated_tp_price != sentinel else payload["take_profit"]
-        )
+        if quantity < order.quantity:
+            if quantity == 0:
+                outcome = MatchOutcome.SUCCESS
+            else:
+                outcome = MatchOutcome.PARTIAL
 
-        log_event.delay(
-            Event(
-                event_type=EventType.ORDER_MODIFIED,
-                user_id=payload["user_id"],
-                order_id=payload["order_id"],
-                asset_balance=asset_balance,
-                limit_price=payload["limit_price"],
-                stop_loss=payload["stop_loss"],
-                take_profit=payload["take_profit"],
-            ).model_dump()
+            context.orderbook.set_price(last_price)
+            _, bm = self._instrument_manager.get(payload.payload["instrument"])
+            self._handle_post_match(
+                quantity=order.quantity - quantity,
+                price=filled_price,
+                order=order,
+                payload=payload,
+                balance_manager=bm,
+                orderbook=context.orderbook,
+            )
+
+            self._push_order_payload(payload.payload)
+        else:
+            outcome = MatchOutcome.FAILURE
+
+        return MatchResult(
+            outcome=outcome, quantity=order.quantity - quantity, price=last_price
         )
 
-        self._push_order_payload(payload)
+    def _handle_post_match(
+        self,
+        quantity: int,
+        price: float,
+        order: Order,
+        payload: FuturesPayload,
+        orderbook: OrderBook,
+        balance_manager: SpotBalanceManager,
+    ) -> None:
+        db_payload = payload.payload
+        user_id = db_payload["user_id"]
+
+        orderbook.set_price(price)
+        payload.apply_fill(quantity, price)
+        order.filled_quantity += quantity
+
+        if order.side == Side.BID:
+            balance_manager.increase_balance(db_payload, quantity)
+        else:
+            balance_manager.decrease_balance(db_payload, quantity)
+
+        event_type = (
+            EventType.ORDER_FILLED
+            if order.filled_quantity == order.quantity
+            else EventType.ORDER_PARTIALLY_FILLED
+        )
+
+        EventService.log_order_event(
+            event_type,
+            db_payload,
+            quantity=quantity,
+            price=price,
+            asset_balance=balance_manager.get_balance(db_payload),
+            metadata={"tag": order.tag, "market_type": MarketType.SPOT},
+        )
 
     def _handle_fill(
-        self,
-        order: Order,
-        filled_quantity: int,
-        price: float,
-        ob: OrderBook,
+        self, order: Order, quantity: int, price: float, ob: OrderBook
     ) -> None:
-        """
-        Applies fill effects to positions, removes orders from the book, and
-        finalizes positions if closed.
+        payload = self._payload_store.get(order.id)
+        _, bm = self._instrument_manager.get(payload.payload["instrument"])
 
-        Args:
-            order (Order): Touched order.
-            touched_quantity (int): Touched quantity.
-            price (float): Execution price.
-            ob (OrderBook): Relevant order book.
-        """
-        pos = self._positions.get(order.id)
-        if pos is None:
-            logger.warning(f"Position not found for order ID: {order.id}")
-            return
-
-        event_type = EventType.ORDER_FILLED
-        if order.tag == Tag.ENTRY:
-            pos.apply_entry_fill(filled_quantity, price)
-            ob.remove(order, order.price)
-
-            if pos.take_profit_order is not None or pos.stop_loss_order is not None:
-                self._mutate_tp_sl_quantity(pos)
-            else:
-                self._place_tp_sl(pos, ob)
-        else:
-            pos.apply_close(filled_quantity, price)
-            self._remove_tp_sl(pos, ob)
-
-            if pos.status == OrderStatus.CLOSED:
-                self._positions.pop(pos.id)
-                event_type = EventType.ORDER_CLOSED
-
-        log_event.delay(
-            Event(
-                event_type=event_type,
-                order_id=pos.id,
-                user_id=pos.payload["user_id"],
-                quantity=filled_quantity,
-                price=price,
-                asset_balance=pos.open_quantity,
-                metadata={"market_type": MarketType.FUTURES},
-            ).model_dump()
+        self._handle_post_match(
+            quantity=quantity,
+            price=price,
+            order=order,
+            payload=payload,
+            balance_manager=bm,
+            orderbook=ob,
         )
-        self._push_order_payload(pos.payload)
 
-    def _handle_touched_order(
+        context = OrderContext(
+            orderbook=ob,
+            engine=self,
+            balance_manager=bm,
+            order_store=self._order_stores[payload.payload["order_type"]],
+        )
+        handler = self._order_type_handlers[payload.payload["order_type"]]
+        handler.handle_filled(quantity, price, order, payload, context)
+        self._push_order_payload(payload.payload)
+
+    def _handle_cancel_order(
         self,
+        quantity: int,
+        payload: dict,
         order: Order,
-        touched_quantity: int,
-        price: float,
-        ob: OrderBook,
+        orderbook: OrderBook,
+        balance_manager: SpotBalanceManager,
     ) -> None:
-        """
-        Updates positions with touched quantities and adjusts TP/SL accordingly.
+        asset_balance = balance_manager.get_balance(payload["user_id"])
+        is_in_book = order.quantity != order.filled_quantity
 
-        Args:
-            order (Order): Touched order.
-            touched_quantity (int): Touched quantity.
-            price (float): Execution price.
-            ob (OrderBook): Relevant order book.
-        """
-        pos = self._positions.get(order.id)
-        if pos is None:
-            logger.warning(f"Position not found for order ID: {order.id}")
-            return
+        standing_quantity = payload["standing_quantity"]
+        order.quantity -= quantity
+        remaining_quantity = standing_quantity - quantity
+        payload["standing_quantity"] = remaining_quantity
 
-        if order.tag == Tag.ENTRY:
-            pos.apply_entry_fill(touched_quantity, price)
+        if remaining_quantity == 0:
+            if is_in_book:
+                orderbook.remove(order, order.price)
 
-            if pos.take_profit_order is not None or pos.stop_loss_order is not None:
-                self._mutate_tp_sl_quantity(pos)
-            else:
-                self._place_tp_sl(pos, ob)
-        else:
-            pos.apply_close(touched_quantity, price)
-            self._mutate_tp_sl_quantity(pos)
+            self._order_stores[payload["order_type"]].remove(order)
+            payload["status"] = (
+                OrderStatus.CANCELLED
+                if payload["open_quantity"] == 0
+                else OrderStatus.FILLED
+            )
 
-        log_event.delay(
-            Event(
-                event_type=(
-                    EventType.ORDER_PARTIALLY_FILLED
-                    if pos.standing_quantity > 0
-                    else EventType.ORDER_PARTIALLY_CLOSED
-                ),
-                order_id=pos.id,
-                user_id=pos.payload["user_id"],
-                quantity=touched_quantity,
-                price=price,
-                asset_balance=pos.open_quantity,
-                metadata={"market_type": MarketType.FUTURES},
-            ).model_dump()
+            if balance_manager.get_balance(payload["user_id"]) == 0:
+                balance_manager.remove(payload["user_id"])
+
+        EventService.log_order_event(
+            EventType.ORDER_CANCELLED,
+            payload,
+            quantity=quantity,
+            asset_balance=asset_balance,
         )
-        self._push_order_payload(pos.payload)
 
-    def _place_tp_sl(self, pos: Position, ob: OrderBook) -> None:
-        """
-        Places take-profit and stop-loss orders for a position if specified.
-
-        Args:
-            pos (Position): The position to attach exit orders to.
-            ob (OrderBook): Order book for the position's instrument.
-        """
-        payload = pos.payload
-        exit_side = Side.BID if payload["side"] == Side.ASK else Side.ASK
-
-        if payload["take_profit"] is not None:
-            new_order = Order(
-                pos.id,
-                Tag.TAKE_PROFIT,
-                exit_side,
-                pos.open_quantity,
-                payload["take_profit"],
-            )
-            pos.take_profit_order = new_order
-            ob.append(new_order, new_order.price)
-
-        if payload["stop_loss"] is not None:
-            new_order = Order(
-                pos.id,
-                Tag.STOP_LOSS,
-                exit_side,
-                pos.open_quantity,
-                payload["stop_loss"],
-            )
-            pos.stop_loss_order = new_order
-            ob.append(new_order, new_order.price)
-
-    def _mutate_tp_sl_quantity(self, pos: Position) -> None:
-        """
-        Adjusts TP/SL order quantities to match current open position quantity.
-
-        Args:
-            pos (Position): Position whose TP/SL orders should be updated.
-        """
-        if pos.take_profit_order is not None:
-            pos.take_profit_order.quantity = pos.open_quantity
-            pos.take_profit_order.filled_quantity = 0
-        if pos.stop_loss_order is not None:
-            pos.stop_loss_order.quantity = pos.open_quantity
-            pos.stop_loss_order.filled_quantity = 0
-
-    def _remove_tp_sl(self, pos: Position, ob: OrderBook[Order]) -> None:
-        """
-        Removes take-profit and stop-loss orders associated with a position.
-
-        Args:
-            pos (Position): The position whose TP/SL orders should be removed.
-            ob (OrderBook): Order book from which to remove the orders.
-        """
-        if pos.take_profit_order is not None:
-            ob.remove(pos.take_profit_order, pos.take_profit_order.price)
-            pos.take_profit_order = None
-        if pos.stop_loss_order is not None:
-            ob.remove(pos.stop_loss_order, pos.stop_loss_order.price)
-            pos.stop_loss_order = None
+    def _create_payload(self, db_payload: dict) -> FuturesPayload:
+        if self._validate_new(db_payload):
+            payload = FuturesPayload(db_payload)
+            self._payload_store.add(payload)
+            return payload
+        raise ValueError("Invalid payload.")

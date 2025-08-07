@@ -1,8 +1,9 @@
 from enums import MarketType
-from .balance_manager import BalanceManager
+from .futures_balance_manager import FuturesBalanceManager
+from .spot_balance_manager import SpotBalanceManager
 from ..market_maker import MarketMaker
 from ..orderbook import OrderBook
-from ..orders import SpotOrder, Order
+from ..orders import Order, Order
 
 
 class InstrumentManager:
@@ -12,19 +13,17 @@ class InstrumentManager:
 
     def get(
         self, instrument: str, market_type: MarketType | None = None
-    ) -> OrderBook[Order] | tuple[OrderBook[SpotOrder], BalanceManager]:
+    ) -> tuple[OrderBook, SpotBalanceManager]:
         res = None
 
         if instrument not in self._orderbooks:
-            if market_type == MarketType.SPOT:
-                self._orderbooks[instrument] = (
-                    OrderBook[SpotOrder](), BalanceManager()
-                )
-                ob, bm = self._orderbooks[instrument]
-                # self._market_maker.seed(instrument, ob, bm)
-                res = ob, bm
+            if market_type == MarketType.FUTURES:
+                BmTyp = FuturesBalanceManager
             else:
-                res = self._orderbooks[instrument] = OrderBook[Order]()
+                BmTyp = SpotBalanceManager
+            
+            res = (OrderBook(), BmTyp())
+            self._orderbooks[instrument] = res
         else:
             res = self._orderbooks[instrument]
 

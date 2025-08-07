@@ -1,5 +1,5 @@
 from .order_payload import OrderPayload
 
 
-class SpotPayload(OrderPayload):
+class FuturesPayload(OrderPayload):
     pass

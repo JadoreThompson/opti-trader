@@ -1,63 +1,59 @@
+from collections import defaultdict
 from enums import EventType, MarketType, OrderStatus, OrderType, Side
 from .engine import Engine
-from ..enums import MatchOutcome, Tag
+from ..enums import MatchOutcome
 from ..event_service import EventService
-from ..managers import BalanceManager
-from ..managers import InstrumentManager
-from ..managers import OrderManager
-from ..orderbook.orderbook import OrderBook
-from ..orders import SpotOrder
+from ..managers import SpotBalanceManager, InstrumentManager
+from ..orderbook import OrderBook
+from ..orders import Order
 from ..order_context import OrderContext
 from ..order_type_handlers import (
     LimitOrderHandler,
     MarketOrderHandler,
     OrderTypeHandler,
+    OCOOrderHandler,
     StopOrderHandler,
 )
+from ..protocols import StoreProtocol
 from ..payloads import SpotPayload
+from ..stores import OrderStore, PayloadStore
 from ..typing import (
     CancelRequest,
     EnginePayload,
-    EnginePayloadData,
     MatchResult,
     ModifyRequest,
 )
 from ..validation_service import SpotValidationService
 
 
-class SpotEngine(SpotValidationService, Engine[SpotOrder]):
+class SpotEngine(SpotValidationService, Engine):
     def __init__(
         self,
         loop=None,
         queue=None,
-        payload_cls=None,
-        order_cls=None,
-        instrument_manager: InstrumentManager | None = None,
-        order_manager: OrderManager | None = None,
     ):
         super().__init__(loop=loop, queue=queue)
 
-        self._instrument_manager = instrument_manager or InstrumentManager()
+        self._instrument_manager = InstrumentManager()
         self._order_type_handlers: dict[OrderType, OrderTypeHandler] = {
             OrderType.LIMIT: LimitOrderHandler(),
             OrderType.MARKET: MarketOrderHandler(),
             OrderType.STOP: StopOrderHandler(),
+            OrderType._OCO: OCOOrderHandler(),
         }
-        self._order_manager = order_manager or OrderManager()
-        self._payload_cls = payload_cls or SpotPayload
-        self._order_cls = order_cls or SpotOrder
+        self._order_stores: dict[OrderType, OrderStore] = defaultdict(OrderStore)
+        self._payload_store = PayloadStore[SpotPayload]()
 
     def _build_context(self, payload: SpotPayload) -> OrderContext:
         db_payload = payload.payload
         ob, bm = self._instrument_manager.get(db_payload["instrument"], MarketType.SPOT)
-
-        context = OrderContext(
+        return OrderContext(
             engine=self,
             orderbook=ob,
             balance_manager=bm,
-            order_manager=self._order_manager,
+            payload_store=self._payload_store,
+            order_store=self._order_stores[payload.internal_type],
         )
-        return context
 
     def place_order(self, payload: EnginePayload) -> None:
         handler = self._order_type_handlers.get(payload.type)
@@ -70,57 +66,65 @@ class SpotEngine(SpotValidationService, Engine[SpotOrder]):
                 map(self._push_order_payload, payloads)
 
     def modify_order(self, request: ModifyRequest) -> None:
-        payload = self._payloads.get(request.order_id)
+        payload = self._payload_store.get(request.order_id)
         if payload is None:
+            print(1)
             return
 
         db_payload = payload.payload
-        ot = db_payload["order_type"]
-        handler = self._order_type_handlers.get(ot)
-        if handler is None or not handler.is_modifiable():
+        ot = payload.internal_type
+
+        handler = self._order_type_handlers[ot]
+        if not handler.is_modifiable():
+            print(2)
+            return
+
+        order = self._order_stores[ot].get(db_payload["order_id"])
+        if order is None:
+            print(3)
             return
 
         ob, bm = self._instrument_manager.get(db_payload["instrument"])
         context = OrderContext(
             orderbook=ob,
             engine=self,
-            order_manager=self._order_manager,
+            order_store=self._order_stores[ot],
+            payload_store=self._payload_store,
             balance_manager=bm,
         )
-        handler.modify(request, payload, context)
-        self._push_order_payload(db_payload)
+        db_payloads = handler.modify(request.data, payload, order, context)
+
+        map(self._push_order_payload, db_payloads)
 
     def cancel_order(self, request: CancelRequest) -> None:
-        payload = self._payloads.get(request.order_id)
+        payload = self._payload_store.get(request.order_id)
         if payload is None:
             return
 
+        ot = payload.internal_type
         db_payload = payload.payload
         ob, bm = self._instrument_manager.get(db_payload["instrument"])
 
-        ot = db_payload["order_type"]
-        handler = self._order_type_handlers.get(ot)
-        if handler is None:
+        handler = self._order_type_handlers[ot]
+
+        store = self._order_stores[ot]
+        order = store.get(db_payload["order_id"])
+        if order is None:
             return
 
-        if handler.is_cancellable():
-            context = OrderContext(
-                orderbook=ob,
-                engine=self,
-                order_manager=self._order_manager,
-                balance_manager=bm,
-            )
-            handler.cancel(payload, context)
-        else:
-            order = self._order_manager.get(db_payload["order_id"])
-            payload.apply_cancel(db_payload["standing_quantity"])
-            ob.remove(order, order.price)
-            self._order_manager.remove(db_payload["order_id"])
+        context = OrderContext(
+            orderbook=ob,
+            engine=self,
+            order_store=self._order_stores[ot],
+            payload_store=self._payload_store,
+            balance_manager=bm,
+        )
+        handler.cancel(db_payload["standing_quantity"], payload, order, context)
 
         self._push_order_payload(db_payload)
 
     def _execute_match(
-        self, order: SpotOrder, payload: SpotPayload, context: OrderContext
+        self, order: Order, payload: SpotPayload, context: OrderContext
     ) -> MatchResult:
         done = False
         quantity = order.quantity
@@ -140,7 +144,6 @@ class SpotEngine(SpotValidationService, Engine[SpotOrder]):
             if result.outcome != MatchOutcome.PARTIAL:
                 done = True
 
-        # if result.outcome != MatchOutcome.FAILURE:
         if quantity < order.quantity:
             if quantity == 0:
                 outcome = MatchOutcome.SUCCESS
@@ -170,22 +173,21 @@ class SpotEngine(SpotValidationService, Engine[SpotOrder]):
         self,
         quantity: int,
         price: float,
-        order: SpotOrder,
+        order: Order,
         payload: SpotPayload,
         orderbook: OrderBook,
-        balance_manager: BalanceManager,
+        balance_manager: SpotBalanceManager,
     ) -> None:
         db_payload = payload.payload
-        user_id = db_payload["user_id"]
 
         orderbook.set_price(price)
         payload.apply_fill(quantity, price)
         order.filled_quantity += quantity
 
         if order.side == Side.BID:
-            balance_manager.increase_balance(user_id, quantity)
+            balance_manager.increase_balance(db_payload, quantity)
         else:
-            balance_manager.decrease_balance(user_id, quantity)
+            balance_manager.decrease_balance(db_payload, quantity)
 
         event_type = (
             EventType.ORDER_FILLED
@@ -198,14 +200,15 @@ class SpotEngine(SpotValidationService, Engine[SpotOrder]):
             db_payload,
             quantity=quantity,
             price=price,
-            asset_balance=balance_manager.get_balance(user_id),
+            asset_balance=balance_manager.get_balance(db_payload),
             metadata={"tag": order.tag, "market_type": MarketType.SPOT},
         )
 
     def _handle_fill(
-        self, order: SpotOrder, quantity: int, price: float, ob: OrderBook
+        self, order: Order, quantity: int, price: float, ob: OrderBook
     ) -> None:
-        payload = self._payloads[order.id]
+        payload = self._payload_store.get(order.id)
+        ot = payload.internal_type
         _, bm = self._instrument_manager.get(payload.payload["instrument"])
 
         self._handle_post_match(
@@ -221,50 +224,22 @@ class SpotEngine(SpotValidationService, Engine[SpotOrder]):
             orderbook=ob,
             engine=self,
             balance_manager=bm,
-            order_manager=self._order_manager,
+            order_store=self._order_stores[ot],
+            payload_store=self._payload_store,
         )
-        handler = self._order_type_handlers[payload.payload["order_type"]]
+
+        handler = self._order_type_handlers[ot]
         handler.handle_filled(quantity, price, order, payload, context)
         self._push_order_payload(payload.payload)
 
-    def _handle_cancel_order(
-        self,
-        quantity: int,
-        payload: dict,
-        order: SpotOrder,
-        orderbook: OrderBook,
-        balance_manager: BalanceManager,
-    ) -> None:
-        asset_balance = balance_manager.get_balance(payload["user_id"])
-        is_in_book = order.quantity != order.filled_quantity
-
-        standing_quantity = payload["standing_quantity"]
-        order.quantity -= quantity
-        remaining_quantity = standing_quantity - quantity
-        payload["standing_quantity"] = remaining_quantity
-
-        if remaining_quantity == 0:
-            if is_in_book:
-                orderbook.remove(order, order.price)
-
-            self._order_manager.remove(order.id)
-            payload["status"] = (
-                OrderStatus.CANCELLED
-                if payload["open_quantity"] == 0
-                else OrderStatus.FILLED
-            )
-
-            if balance_manager.get_balance(payload["user_id"]) == 0:
-                balance_manager.remove(payload["user_id"])
-
-        EventService.log_order_event(
-            EventType.ORDER_CANCELLED,
-            payload,
-            quantity=quantity,
-            asset_balance=asset_balance,
-        )
-
-    def _create_payload(self, payload: dict) -> SpotPayload:
-        if self._validate_new(payload):
-            return self._payloads.setdefault(payload["order_id"], SpotPayload(payload))
+    def _create_payload(
+        self, db_payload: dict, internal_type: OrderType
+    ) -> SpotPayload:
+        if self._validate_new(db_payload):
+            payload = SpotPayload(db_payload, internal_type)
+            self._payload_store.add(payload)
+            return payload
         raise ValueError("Invalid payload.")
+    
+    def _add_to_store(self, order: Order, internal_type: OrderType) -> None:
+        self._order_stores[internal_type].add(order)

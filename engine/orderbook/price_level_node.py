@@ -1,11 +1,8 @@
-from __future__ import annotations
-from typing import Generic, TypeVar
+from typing import Self
 from ..orders.order import Order
 
-T = TypeVar("T", bound=Order)
 
-
-class PriceLevelNode(Generic[T]):
+class PriceLevelNode:
     """
     Doubly linked list to house an order within
     a PriceLevel.
@@ -13,9 +10,9 @@ class PriceLevelNode(Generic[T]):
 
     def __init__(
         self,
-        order: T,
-        prev: PriceLevelNode[T] | None = None,
-        next: PriceLevelNode[T] | None = None,
+        order: Order,
+        prev: Self | None = None,
+        next: Self | None = None,
     ):
         self.order = order
         self.prev = prev

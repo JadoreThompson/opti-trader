@@ -1,29 +1,20 @@
-from .spot_order import SpotOrder
+from __future__ import annotations
+from .order import Order
 
 
-class OCOOrder:
-    """
-    Represents a group of linked spot orders where the execution of one leg
-    should cancel the other(s).
-
-    This object can optionally track up to three related legs:
-      - leg_a: an optional main entry order (e.g. a limit buy)
-      - leg_b: one protective or conditional leg (e.g. a stop-loss or stop order)
-      - leg_c: another protective or conditional leg (e.g. a take-profit or stop order)
-    """
-
+class OCOOrder(Order):
     def __init__(
         self,
-        id_: str,
-        leg_a: SpotOrder | None = None,
-        leg_b: SpotOrder | None = None,
-        leg_c: SpotOrder | None = None,
-    ) -> None:
-        self._id = id_
-        self.leg_a = leg_a
-        self.leg_b = leg_b
-        self.leg_c = leg_c
-        
-    @property
-    def id(self) -> str:
-        return self._id
+        id_,
+        typ,
+        tag,
+        side,
+        quantity,
+        price=None,
+        *,
+        is_above: bool,
+        counterparty: OCOOrder | None = None,
+    ):
+        super().__init__(id_, typ, tag, side, quantity, price)
+        self.counterparty = counterparty
+        self.is_above = is_above

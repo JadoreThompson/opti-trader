@@ -5,9 +5,10 @@ from ..enums import MatchOutcome, Tag
 from ..matching_engines import Engine
 from ..orderbook import OrderBook
 from ..order_context import OrderContext
-from ..orders import SpotOrder
-from ..payloads import SpotPayload, PayloadProtocol
-from ..typing import ModifyRequest, OrderEnginePayloadData
+from ..orders import Order
+from ..payloads import SpotPayload
+from ..protocols import PayloadProtocol
+from ..typing import ModifyRequest, OrderEnginePayloadData, StopModifyRequest
 
 
 class StopOrderHandler(OrderTypeHandler):
@@ -20,30 +21,30 @@ class StopOrderHandler(OrderTypeHandler):
 
     def handle_new(self, data: OrderEnginePayloadData, engine: Engine) -> None:
         db_payload = data.order
-        payload = engine._create_payload(db_payload)
+        payload = engine._create_payload(db_payload, OrderType.STOP)
         context = engine._build_context(payload)
-        order = engine._order_cls(
+        order = Order(
             id_=db_payload["order_id"],
             tag=Tag.ENTRY,
+            typ=OrderType.STOP,
             side=db_payload["side"],
             quantity=db_payload["quantity"],
         )
 
         if self._is_crossable(order, db_payload, context.orderbook):
             result = engine._execute_match(order, payload, context)
-            # print(result)
 
             if result.outcome == MatchOutcome.SUCCESS:
                 return [db_payload]
 
-        context.order_manager.append(order)
+        context.order_store.add(order)
         order.price = db_payload["stop_price"]
         context.orderbook.append(order, order.price)
         EventService.log_order_event(
             EventType.ORDER_PLACED,
             db_payload,
             quantity=db_payload["quantity"],
-            asset_balance=context.balance_manager.get_balance(db_payload["user_id"]),
+            asset_balance=context.balance_manager.get_balance(db_payload),
         )
 
         return [db_payload]
@@ -52,29 +53,28 @@ class StopOrderHandler(OrderTypeHandler):
         self,
         quantity: int,
         price: float,
-        order: SpotOrder,
+        order: Order,
         payload: SpotPayload,
         context: OrderContext,
     ) -> None:
         if order.filled_quantity == order.quantity:
             context.orderbook.remove(order, order.price)
-            context.order_manager.remove(order.id)
+            context.order_store.remove(order)
 
     def modify(
-        self, request: ModifyRequest, payload: PayloadProtocol, context: OrderContext
-    ) -> None:
+        self,
+        request: StopModifyRequest,
+        payload: PayloadProtocol,
+        order: Order,
+        context: OrderContext,
+    ) -> list[dict]:
         ob = context.orderbook
         db_payload = payload.payload
-        order = context.order_manager.get(db_payload["order_id"])
-        if order is None:
-            return
 
         if self._is_crossable(order, db_payload, ob):
             EventService.log_rejection(
                 payload,
-                asset_balance=context.balance_manager.get_balance(
-                    db_payload["user_id"]
-                ),
+                asset_balance=context.balance_manager.get_balance(db_payload),
             )
             return
 
@@ -82,9 +82,22 @@ class StopOrderHandler(OrderTypeHandler):
         ob.remove(order, order.price)
         order.price = request.stop_price
         ob.append(order, order.price)
+        return [db_payload]
+
+    def cancel(
+        self,
+        quantity: int,
+        payload: PayloadProtocol,
+        order: Order,
+        context: OrderContext,
+    ):
+        payload.apply_cancel(quantity)
+        context.orderbook.remove(order, order.price)
+        context.order_store.remove(order)
 
     @staticmethod
-    def _is_crossable(order: SpotOrder, payload: dict, ob: OrderBook) -> bool:
+    def _is_crossable(order: Order, payload: dict, ob: OrderBook) -> bool:
+        print(ob.asks)
         return (
             order.side == Side.BID
             and ob.best_ask is not None

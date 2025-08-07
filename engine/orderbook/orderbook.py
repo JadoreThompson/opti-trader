@@ -1,22 +1,20 @@
 from sortedcontainers.sorteddict import SortedDict
-from typing import Generic, Iterable, KeysView, TypeVar
+from typing import Iterable, KeysView
 
 from enums import Side
 from .price_level import PriceLevel
 from ..orders.order import Order
 from ..typing import Book
 
-T = TypeVar("T", bound=Order)
 
-
-class OrderBook(Generic[T]):
+class OrderBook:
     """
     Manages the order book for a given trading instrument and
     maintains bid and ask price levels using sorted dictionaries.
 
     Attributes:
-        _cur_price (float): The current market price of the instrument.
-        _starting_price (float): The initial price when the book was created.
+        _cur_price (float): Orderhe current market price of the instrument.
+        _starting_price (float): Orderhe initial price when the book was created.
         _best_bid_price (float | None): Highest bid price available.
         _best_ask_price (float | None): Lowest ask price available.
         _bids (dict[float, PriceLevel]): Maps bid prices to price levels.
@@ -26,8 +24,8 @@ class OrderBook(Generic[T]):
     """
 
     def __init__(self, price=100.00) -> None:
-        self._bids: dict[float, PriceLevel[T]] = SortedDict()
-        self._asks: dict[float, PriceLevel[T]] = SortedDict()
+        self._bids: dict[float, PriceLevel] = SortedDict()
+        self._asks: dict[float, PriceLevel] = SortedDict()
         self._bid_levels = self._bids.keys()
         self._ask_levels = self._asks.keys()
 
@@ -41,11 +39,11 @@ class OrderBook(Generic[T]):
         return self._cur_price
 
     @property
-    def bids(self) -> dict[float, PriceLevel[T]]:
+    def bids(self) -> dict[float, PriceLevel]:
         return self._bids
 
     @property
-    def asks(self) -> dict[float, PriceLevel[T]]:
+    def asks(self) -> dict[float, PriceLevel]:
         return self._asks
 
     @property
@@ -64,14 +62,14 @@ class OrderBook(Generic[T]):
     def best_ask(self) -> float | None:
         return self._best_ask_price
 
-    def append(self, order: T, price: float) -> None:
+    def append(self, order: Order, price: float) -> None:
         """
         Adds an order to the order book at the specified price level.
 
         Updates the best bid or ask price accordingly.
 
         Args:
-            order (T): The order to be added.
+            order (Order): Orderhe order to be added.
             price (float): Price level at which to place the order.
 
         Raises:
@@ -91,9 +89,9 @@ class OrderBook(Generic[T]):
         else:
             raise ValueError(f"Invalid order side: {order.side}")
 
-        book.setdefault(price, PriceLevel[T]()).append(order)
+        book.setdefault(price, PriceLevel()).append(order)
 
-    def remove(self, order: T, price: float) -> None:
+    def remove(self, order: Order, price: float) -> None:
         """
         Removes an order from its associated price level.
 
@@ -101,8 +99,8 @@ class OrderBook(Generic[T]):
         and the best bid/ask price is updated.
 
         Args:
-            order (T): The order to remove.
-            price (float): The price level from which to remove the order.
+            order (Order): Orderhe order to remove.
+            price (float): Orderhe price level from which to remove the order.
         """
         if order.side == Side.BID:
             book = self._bids
@@ -131,16 +129,16 @@ class OrderBook(Generic[T]):
     def set_price(self, price: float) -> None:
         self._cur_price = round(price, 2)
 
-    def get_orders(self, price: float, book: Book) -> Iterable[T] | None:
+    def get_orders(self, price: float, book: Book) -> Iterable[Order] | None:
         """
         Retrieves all orders at a specific price level in the specified book.
 
         Args:
-            price (float): The price level to query.
+            price (float): Orderhe price level to query.
             book (str): Either 'bids' or 'asks'.
 
         Returns:
-            Iterable[T] | None: An iterable of orders at the price level, or an empty iterator
+            Iterable[Order] | None: An iterable of orders at the price level, or an empty iterator
                 if none exist.
 
         Raises:

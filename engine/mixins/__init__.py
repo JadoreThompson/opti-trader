@@ -1,6 +1,6 @@
-from .limit_mixin import LimitMixin
+from .limit_order_handler_mixin import LimitOrderHandlerMixin
 from .payload_state_mixin import PayloadStateMixin
 from .tp_sl_mixin import TPSLMixin
 
 
-__all__ = ["LimitMixin", 'PayloadStateMixin', "TPSLMixin"]
+__all__ = ["LimitOrderHandlerMixin", "PayloadStateMixin", "TPSLMixin"]

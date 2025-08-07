@@ -1,17 +1,23 @@
-from pprint import pprint
-from enums import EventType, OrderStatus, OrderType, Side
+from typing import Any
+from enums import EventType, OrderType, Side
 from .order_type_handler import OrderTypeHandler
 from ..matching_engines import Engine
-from ..enums import MatchOutcome
+from ..enums import MatchOutcome, Tag
 from ..event_service import EventService
-from ..mixins import LimitMixin
-from ..orders import SpotOrder
+from ..orderbook import OrderBook
+from ..orders import Order
 from ..order_context import OrderContext
-from ..payloads import SpotPayload, PayloadProtocol
-from ..typing import ModifyRequest, OrderEnginePayloadData, MatchResult
+from ..payloads import SpotPayload
+from ..protocols import PayloadProtocol
+from ..typing import (
+    LimitModifyRequest,
+    ModifyRequest,
+    OrderEnginePayloadData,
+    MatchResult,
+)
 
 
-class LimitOrderHandler(LimitMixin, OrderTypeHandler):
+class LimitOrderHandler(OrderTypeHandler):
     @staticmethod
     def is_modifiable():
         return True
@@ -20,30 +26,58 @@ class LimitOrderHandler(LimitMixin, OrderTypeHandler):
         return order_type == OrderType.LIMIT
 
     def handle_new(self, data: OrderEnginePayloadData, engine: Engine) -> None:
-        order, _, context, _ = self._handle_new_order(data, engine)
-        context.order_manager.append(order)
-        return [data.order]
+        db_payload = data.order
+        payload = engine._create_payload(db_payload, OrderType.LIMIT)
+        order = Order(
+            id_=db_payload["order_id"],
+            typ=OrderType.LIMIT,
+            tag=Tag.ENTRY,
+            side=db_payload["side"],
+            quantity=db_payload["quantity"],
+        )
+
+        context = engine._build_context(payload)
+        ob = context.orderbook
+
+        if self._is_crossable(order, db_payload, ob):
+            result: MatchResult = engine._execute_match(order, payload, context)
+            if result.outcome == MatchOutcome.SUCCESS:
+                return [db_payload]
+
+        context.order_store.add(order)
+        order.price = db_payload["limit_price"]
+        ob.append(order, order.price)
+        print("Appended limit order")
+        EventService.log_order_event(
+            EventType.ORDER_PLACED,
+            db_payload,
+            quantity=db_payload["quantity"],
+            asset_balance=context.balance_manager.get_balance(db_payload),
+        )
+
+        return [db_payload]
 
     def handle_filled(
         self,
         quantity: int,
         price: float,
-        order: SpotOrder,
+        order: Order,
         payload: SpotPayload,
         context: OrderContext,
     ) -> None:
         if order.filled_quantity == order.quantity:
             context.orderbook.remove(order, order.price)
-            context.order_manager.remove(order.id)
+            context.order_store.remove(order)
 
     def modify(
-        self, request: ModifyRequest, payload: PayloadProtocol, context: OrderContext
+        self,
+        request: LimitModifyRequest,
+        payload: PayloadProtocol,
+        order: Order,
+        context: OrderContext,
     ) -> None:
         ob = context.orderbook
         db_payload = payload.payload
-        order = context.order_manager.get(db_payload["order_id"])
-        if order is None:
-            return
 
         if self._is_crossable(order, db_payload, ob):
             EventService.log_rejection(
@@ -52,9 +86,32 @@ class LimitOrderHandler(LimitMixin, OrderTypeHandler):
                     db_payload["user_id"]
                 ),
             )
-            return
+            return [db_payload]
 
         db_payload["limit_price"] = request.limit_price
         ob.remove(order, order.price)
         order.price = request.limit_price
         ob.append(order, order.price)
+        return [db_payload]
+
+    def cancel(
+        self,
+        quantity: int,
+        payload: PayloadProtocol,
+        order: Order,
+        context: OrderContext,
+    ):
+        payload.apply_cancel(quantity)
+        context.orderbook.remove(order, order.price)
+        context.order_store.remove(order)
+
+    def _is_crossable(self, order: Order, payload: dict, ob: OrderBook) -> bool:
+        return (
+            order.side == Side.BID
+            and ob.best_ask is not None
+            and payload["limit_price"] >= ob.best_ask
+        ) or (
+            order.side == Side.ASK
+            and ob.best_bid is not None
+            and payload["limit_price"] <= ob.best_bid
+        )

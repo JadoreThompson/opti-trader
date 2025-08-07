@@ -17,6 +17,7 @@ class OrderType(str, Enum):
     TAKE_PROFIT = "take_profit"
     STOP_LOSS = "stop_loss"
     STOP = 'stop'
+    _OCO = 'oco'
 
 
 class OrderStatus(str, Enum):

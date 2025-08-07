@@ -4,9 +4,9 @@ from config import SUPER_USER
 from enums import MarketType, OrderStatus, OrderType, Side
 from utils.utils import get_datetime
 from .enums import Tag
-from .managers import BalanceManager
+from .managers import SpotBalanceManager
 from .orderbook import OrderBook
-from .orders import SpotOrder
+from .orders import Order
 
 
 # TODO
@@ -18,7 +18,7 @@ class MarketMaker:
         self,
         instrument: str,
         ob: OrderBook,
-        balance_manager: BalanceManager,
+        balance_manager: SpotBalanceManager,
         total_quantity: int = 1_000_000,
     ) -> list[dict]:
         cur_price = ob.price
@@ -55,7 +55,7 @@ class MarketMaker:
                 "created_at": get_datetime(),
             }
             payloads.append(payload)
-            order = SpotOrder(payload["order_id"], Tag.ENTRY, side, q, p)
+            order = Order(payload["order_id"], Tag.ENTRY, side, q, p)
             ob.append(order, order.price)
 
         return payloads

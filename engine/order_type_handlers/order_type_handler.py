@@ -3,7 +3,7 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 from enums import OrderType
-from ..orders import SpotOrder
+from ..orders import Order
 from ..order_context import OrderContext
 from ..payloads import SpotPayload
 from ..typing import EnginePayloadData, ModifyRequest
@@ -15,11 +15,6 @@ class OrderTypeHandler(ABC):
     @staticmethod
     def is_modifiable() -> bool:
         """Return True if orders can be modified (default False)."""
-        return False
-
-    @staticmethod
-    def is_cancellable() -> bool:
-        """Return True if handler provides custom cancel logic (default False)."""
         return False
 
     @abstractmethod
@@ -40,7 +35,7 @@ class OrderTypeHandler(ABC):
         self,
         quantity: int,
         price: float,
-        order: SpotOrder,
+        order: Order,
         payload: SpotPayload,
         context: OrderContext,
     ) -> None:
@@ -48,16 +43,18 @@ class OrderTypeHandler(ABC):
 
     def modify(
         self,
-        request: ModifyRequest,
+        request: BaseModel,
         payload: SpotPayload,
+        order: Order,
         context: OrderContext,
-    ) -> None:
+    ) -> list[dict]:
         """Modify an existing order."""
 
+    @abstractmethod
     def cancel(
         self,
         quantity: int,
         payload: SpotPayload,
-        order: SpotOrder,
+        order: Order,
         context: OrderContext,
     ) -> None: ...

@@ -2,7 +2,7 @@ from enums import OrderType, Side, EventType, OrderStatus
 from ..config import MODIFY_REQUEST_SENTINEL
 from ..enums import Tag
 from ..event_service import EventService
-from ..orders import SpotOrder
+from ..orders import Order
 from ..order_context import OrderContext
 from ..typing import ModifyRequest
 
@@ -42,7 +42,7 @@ class TPSLMixin:
         context: OrderContext,
         sentinel: float = float("inf"),
     ) -> bool:
-        entry_order = context.order_manager.get(request.order_id)
+        entry_order = context.order_store.get(request.order_id)
         if entry_order is None:
             return False
 
@@ -101,7 +101,7 @@ class TPSLMixin:
         context: OrderContext,
         sentinel: float = float("inf"),
     ):
-        entry_order = context.order_manager.get(request.order_id)
+        entry_order = context.order_store.get(request.order_id)
         if entry_order is None:
             return
 
@@ -128,9 +128,9 @@ class TPSLMixin:
 
         # Modify limit order
         if is_limit_order and not is_filled and updated_limit_price != sentinel:
-            context.order_manager.remove(payload["order_id"])
+            context.order_store.remove(payload["order_id"])
             ob.remove(entry_order, entry_order.price)
-            new_entry_order = SpotOrder(
+            new_entry_order = Order(
                 entry_order.id,
                 Tag.ENTRY,
                 payload["side"],
@@ -138,7 +138,7 @@ class TPSLMixin:
                 updated_limit_price,
                 oco_id=oco_order.id,
             )
-            context.order_manager.append(new_entry_order)
+            context.order_store.add(new_entry_order)
             ob.append(new_entry_order, new_entry_order.price)
             oco_order.leg_a = new_entry_order
             payload["limit_price"] = updated_limit_price
@@ -149,7 +149,7 @@ class TPSLMixin:
             if sl_order:
                 ob.remove(sl_order, sl_order.price)
             if updated_sl_price is not None:
-                new_sl_order = SpotOrder(
+                new_sl_order = Order(
                     entry_order.id,
                     Tag.STOP_LOSS,
                     opposite_side,
@@ -167,7 +167,7 @@ class TPSLMixin:
             if tp_order:
                 ob.remove(tp_order, tp_order.price)
             if updated_tp_price is not None:
-                new_tp_order = SpotOrder(
+                new_tp_order = Order(
                     entry_order.id,
                     Tag.TAKE_PROFIT,
                     opposite_side,

@@ -9,7 +9,7 @@ from ..enums import MatchOutcome
 from ..orderbook import OrderBook
 from ..orders import Order
 from ..order_context import OrderContext
-from ..payloads import PayloadProtocol
+from ..protocols import PayloadProtocol, EngineProtocol
 from ..queue import Queue
 from ..tasks import log_event
 from ..typing import (
@@ -21,32 +21,23 @@ from ..typing import (
     SupportsAppend,
 )
 
-O = TypeVar("O", bound=Order)
 
-
-class Engine(Generic[O]):
+class Engine(EngineProtocol):
     def __init__(
         self,
         loop: AbstractEventLoop | None = None,
         queue: SupportsAppend | None = None,
-        payload_cls=None,
-        order_cls: O | None = None,
-        **kw
+        **kw,
     ) -> None:
         self._loop = loop or get_event_loop()
         self._queue = queue or Queue()
-        self._payload_cls = payload_cls
-        self._order_cls = order_cls
 
-    @abstractmethod
-    def _build_context(self, payload: PayloadProtocol) -> OrderContext: ...
-
-    @abstractmethod
-    async def run(self) -> None:
-        """
-        Listens to the pubsub channel, routing each message
-        to their respective native function.
-        """
+    # @abstractmethod
+    # async def run(self) -> None:
+    #     """
+    #     Listens to the pubsub channel, routing each message
+    #     to their respective native function.
+    #     """
 
     @abstractmethod
     def place_order(self, payload: dict) -> None:
@@ -87,10 +78,10 @@ class Engine(Generic[O]):
 
     @abstractmethod
     def _execute_match(
-        self, order: O, payload: PayloadProtocol, context: OrderContext
+        self, order: Order, payload: PayloadProtocol, context: OrderContext
     ) -> MatchResult: ...
 
-    def _match(self, order: O, ob: OrderBook[O], quantity: int) -> MatchResult:
+    def _match(self, order: Order, ob: OrderBook, quantity: int) -> MatchResult:
         """
         Attempts to match the given order against the opposing side
         of the order book at the best available price.
@@ -113,8 +104,6 @@ class Engine(Generic[O]):
         """
 
         book_to_match = "asks" if order.side == Side.BID else "bids"
-        # starting_quantity = order.quantity - order.filled_quantity
-        # cur_quantity = starting_quantity
         starting_quantity = quantity
         cur_quantity = quantity
 
@@ -132,7 +121,7 @@ class Engine(Generic[O]):
             resting_quantity = resting_order.quantity - resting_order.filled_quantity
             match_quantity = min(resting_quantity, cur_quantity)
             cur_quantity -= match_quantity
-            
+
             self._handle_fill(resting_order, match_quantity, target_price, ob)
 
         if cur_quantity == 0:
@@ -146,10 +135,10 @@ class Engine(Generic[O]):
     @abstractmethod
     def _handle_fill(
         self,
-        order: O,
+        order: Order,
         quantity: int,
         price: float,
-        ob: OrderBook[O],
+        ob: OrderBook,
     ) -> None: ...
 
     @staticmethod
@@ -186,14 +175,17 @@ class Engine(Generic[O]):
 
         raise ValueError(f"Invalid request quantity {request_quantity}")
 
+    @abstractmethod
+    def _create_payload(self, payload: dict) -> PayloadProtocol: ...
+
+    @abstractmethod
+    def _build_context(self, payload: PayloadProtocol) -> OrderContext: ...
+
     def _push_order_payload(self, value: dict) -> None:
         payload = PusherPayload(
             action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
         )
         self._queue.append(payload.model_dump())
-
-    @abstractmethod
-    def _create_payload(self, payload: dict) -> PayloadProtocol: ...
 
     @deprecated
     @staticmethod

@@ -35,7 +35,10 @@ class PayloadStateMixin:
 
         self._payload["standing_quantity"] -= quantity
 
-        if self._payload["standing_quantity"] == 0:
+        if (
+            self._payload["standing_quantity"] == 0
+            and self._payload["open_quantity"] == 0
+        ):
             self._payload["status"] = OrderStatus.CANCELLED
             self._payload["closed_at"] = get_datetime()
 

@@ -1,38 +1,40 @@
+from abc import abstractmethod
 from enums import MarketType, Side
 from .event_service import EventService
 
 
 class ValidationService:
-    def __init__(self, payloads: dict | None = None, **kw) -> None:
-        self._payloads = payloads or {}
-        super().__init__(**kw)
-
-    def _validate_new(self, payload: dict) -> bool:
-        return payload["order_id"] not in self._payloads
+    @abstractmethod
+    def _validate_new(self, payload: dict) -> bool: ...
 
 
 class FuturesValidationService(ValidationService):
-    pass
+    def _validate_new(self, db_payload: dict) -> bool:
+        if self._payload_store.get(db_payload["order_id"]) is not None:
+            return False
+
+        if db_payload["order_id"] in self._positions:
+            return False
+
+        return True
 
 
 class SpotValidationService(ValidationService):
-    def _validate_new(self, payload: dict) -> bool:
-        exists = super()._validate_new(payload)
-
-        if exists:
-            return exists
+    def _validate_new(self, db_payload: dict) -> bool:
+        if self._payload_store.get(db_payload["order_id"]) is not None:
+            return False
 
         _, bal_manager = self._instrument_manager.get(
-            payload["instrument"], MarketType.SPOT
+            db_payload["instrument"], MarketType.SPOT
         )
 
         if (
-            payload["side"] == Side.ASK
-            and bal_manager.get_balance(payload["user_id"]) < payload["quantity"]
+            db_payload["side"] == Side.ASK
+            and bal_manager.get_balance(db_payload) < db_payload["quantity"]
         ):
             EventService.log_rejection(
-                payload, asset_balance=bal_manager.get_balance(payload["user_id"])
+                db_payload, asset_balance=bal_manager.get_balance(db_payload)
             )
             return False
-
+        
         return True

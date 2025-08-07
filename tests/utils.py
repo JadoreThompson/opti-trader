@@ -10,6 +10,7 @@ from enums import OrderStatus, OrderType, Side
 from engine.typing import (
     EnginePayload,
     EnginePayloadTopic,
+    OCOEnginePayloadData,
     OrderEnginePayloadData,
 )
 
@@ -43,15 +44,20 @@ def create_order_dict() -> dict:
     }
 
 
-def create_market_limit_data():
+def create_market_limit_stop_data():
     return OrderEnginePayloadData(order=create_order_dict())
+
+
+def create_oco_data():
+    return OCOEnginePayloadData(orders=[create_order_dict(), create_order_dict()])
 
 
 def create_engine_payload(ot: OrderType) -> EnginePayload:
     factories = {
-        OrderType.MARKET: create_market_limit_data,
-        OrderType.LIMIT: create_market_limit_data,
-        OrderType.STOP: create_market_limit_data,
+        OrderType.MARKET: create_market_limit_stop_data,
+        OrderType.LIMIT: create_market_limit_stop_data,
+        OrderType.STOP: create_market_limit_stop_data,
+        OrderType._OCO: create_oco_data,
     }
 
     func = factories[ot]
