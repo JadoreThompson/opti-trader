@@ -1,5 +1,5 @@
-from .base_payload import BasePayload
+from ..mixins import PayloadStateMixin
 
 
-class SpotPayload(BasePayload):
+class SpotPayload(PayloadStateMixin):
     pass

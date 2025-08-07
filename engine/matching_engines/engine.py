@@ -9,6 +9,7 @@ from ..enums import MatchOutcome
 from ..orderbook import OrderBook
 from ..orders import Order
 from ..order_context import OrderContext
+from ..payloads import PayloadProtocol
 from ..queue import Queue
 from ..tasks import log_event
 from ..typing import (
@@ -23,14 +24,22 @@ from ..typing import (
 O = TypeVar("O", bound=Order)
 
 
-class BaseEngine(Generic[O]):
+class Engine(Generic[O]):
     def __init__(
         self,
         loop: AbstractEventLoop | None = None,
         queue: SupportsAppend | None = None,
+        payload_cls=None,
+        order_cls: O | None = None,
+        **kw
     ) -> None:
         self._loop = loop or get_event_loop()
         self._queue = queue or Queue()
+        self._payload_cls = payload_cls
+        self._order_cls = order_cls
+
+    @abstractmethod
+    def _build_context(self, payload: PayloadProtocol) -> OrderContext: ...
 
     @abstractmethod
     async def run(self) -> None:
@@ -78,10 +87,10 @@ class BaseEngine(Generic[O]):
 
     @abstractmethod
     def _execute_match(
-        self, order: O, payload: dict, context: OrderContext
+        self, order: O, payload: PayloadProtocol, context: OrderContext
     ) -> MatchResult: ...
 
-    def _match(self, order: O, ob: OrderBook[O]) -> MatchResult:
+    def _match(self, order: O, ob: OrderBook[O], quantity: int) -> MatchResult:
         """
         Attempts to match the given order against the opposing side
         of the order book at the best available price.
@@ -104,8 +113,10 @@ class BaseEngine(Generic[O]):
         """
 
         book_to_match = "asks" if order.side == Side.BID else "bids"
-        starting_quantity = order.quantity - order.filled_quantity
-        cur_quantity = starting_quantity
+        # starting_quantity = order.quantity - order.filled_quantity
+        # cur_quantity = starting_quantity
+        starting_quantity = quantity
+        cur_quantity = quantity
 
         target_price = ob.best_ask if order.side == Side.BID else ob.best_bid
         if target_price is None:
@@ -120,18 +131,8 @@ class BaseEngine(Generic[O]):
 
             resting_quantity = resting_order.quantity - resting_order.filled_quantity
             match_quantity = min(resting_quantity, cur_quantity)
-
-            resting_order.filled_quantity += match_quantity
             cur_quantity -= match_quantity
-
-            # if resting_order.filled_quantity == resting_order.quantity:
-            #     self._handle_filled_order(
-            #         resting_order, match_quantity, target_price, ob
-            #     )
-            # else:
-            #     self._handle_touched_order(
-            #         resting_order, match_quantity, target_price, ob
-            #     )
+            
             self._handle_fill(resting_order, match_quantity, target_price, ob)
 
         if cur_quantity == 0:
@@ -188,8 +189,11 @@ class BaseEngine(Generic[O]):
     def _push_order_payload(self, value: dict) -> None:
         payload = PusherPayload(
             action=PusherPayloadTopic.UPDATE, table_cls="Orders", data=value
-        ).model_dump()
-        self._queue.append(payload)
+        )
+        self._queue.append(payload.model_dump())
+
+    @abstractmethod
+    def _create_payload(self, payload: dict) -> PayloadProtocol: ...
 
     @deprecated
     @staticmethod

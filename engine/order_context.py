@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from .managers import BalanceManager, OCOManager, OrderManager
+from .managers import BalanceManager, OrderManager
 from .orderbook import OrderBook
 
 
@@ -9,8 +9,7 @@ class OrderContext:
     Context passed to order type handlers
     """
 
-    order_book: OrderBook
-    engine: "BaseEngine"
-    oco_manager: OCOManager | None = None
+    orderbook: OrderBook
+    engine: "Engine"
     order_manager: OrderManager | None = None
     balance_manager: BalanceManager | None = None

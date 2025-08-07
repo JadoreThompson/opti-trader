@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
+
+from pydantic import BaseModel
 from enums import OrderType
 from ..orders import SpotOrder
 from ..order_context import OrderContext
 from ..payloads import SpotPayload
-from ..typing import ModifyRequest
+from ..typing import EnginePayloadData, ModifyRequest
 
 
 class OrderTypeHandler(ABC):
@@ -24,10 +27,13 @@ class OrderTypeHandler(ABC):
         """Return True if this handler supports the given order type."""
 
     @abstractmethod
-    def handle(
-        self, order: SpotOrder, payload: SpotPayload, context: OrderContext
-    ) -> None:
-        """Process a new order."""
+    def handle_new(self, data: BaseModel, engine: "Engine") -> list[dict]:
+        """
+        Handles a new incoming order.
+
+        Returns:
+            list[dict]: List of db records that were updated.
+        """
 
     @abstractmethod
     def handle_filled(

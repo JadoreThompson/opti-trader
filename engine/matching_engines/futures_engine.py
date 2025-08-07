@@ -14,7 +14,7 @@ from enums import (
     Side,
 )
 from utils.utils import get_exc_line
-from .base_engine import BaseEngine
+from .engine import Engine
 from ..config import MODIFY_REQUEST_SENTINEL
 from ..enums import MatchOutcome, Tag
 from ..orderbook import OrderBook
@@ -34,7 +34,7 @@ from ..typing import (
 logger = getLogger(__name__)
 
 
-class FuturesEngine(BaseEngine[Order]):
+class FuturesEngine(Engine[Order]):
     def __init__(
         self,
         loop: AbstractEventLoop | None = None,

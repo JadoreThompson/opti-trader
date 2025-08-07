@@ -1,3 +1,6 @@
+from collections import defaultdict
+
+
 class BalanceManager:
     """
     Manages the open and standing quantities of
@@ -5,7 +8,7 @@ class BalanceManager:
     """
 
     def __init__(self) -> None:
-        self._user_balances: dict[str, int] = {}
+        self._user_balances: dict[str, int] = defaultdict(int)
 
     def append(self, user_id: str):
         self._user_balances.setdefault(user_id, 0)
@@ -17,8 +20,7 @@ class BalanceManager:
         return self._user_balances.get(user_id, 0)
 
     def increase_balance(self, user_id: str, quantity: int):
-        if user_id in self._user_balances:
-            self._user_balances[user_id] += quantity
+        self._user_balances[user_id] += quantity
 
     def decrease_balance(self, user_id: str, quantity: int):
         if user_id in self._user_balances:

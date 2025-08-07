@@ -13,11 +13,10 @@ class Side(str, Enum):
 
 class OrderType(str, Enum):
     LIMIT = "limit"
-    LIMIT_OCO = "limit_oco"
     MARKET = "market"
-    MARKET_OCO = "market_oco"
     TAKE_PROFIT = "take_profit"
     STOP_LOSS = "stop_loss"
+    STOP = 'stop'
 
 
 class OrderStatus(str, Enum):
