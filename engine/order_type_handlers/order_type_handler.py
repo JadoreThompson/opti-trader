@@ -1,13 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
-
 from pydantic import BaseModel
+
 from enums import OrderType
 from ..orders import Order
 from ..order_context import OrderContext
 from ..payloads import SpotPayload
 from ..protocols import EngineProtocol
-from ..typing import EnginePayloadData, ModifyRequest
 
 
 class OrderTypeHandler(ABC):
@@ -39,7 +37,7 @@ class OrderTypeHandler(ABC):
         order: Order,
         payload: SpotPayload,
         context: OrderContext,
-    ) -> None:
+    ) -> list[dict]:
         """Handle resting order being filled."""
 
     def modify(

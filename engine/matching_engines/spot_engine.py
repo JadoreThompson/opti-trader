@@ -13,6 +13,7 @@ from ..order_type_handlers import (
     OrderTypeHandler,
     OCOOrderHandler,
     OTOOrderHandler,
+    OTOCOOrderHandler,
     StopOrderHandler,
 )
 from ..protocols import StoreProtocol
@@ -42,6 +43,7 @@ class SpotEngine(SpotValidationService, Engine):
             OrderType.STOP: StopOrderHandler(),
             OrderType._OCO: OCOOrderHandler(),
             OrderType._OTO: OTOOrderHandler(),
+            OrderType._OTOCO: OTOCOOrderHandler(),
         }
         self._order_stores: dict[OrderType, OrderStore] = defaultdict(OrderStore)
         self._payload_store = PayloadStore[SpotPayload]()
@@ -118,8 +120,10 @@ class SpotEngine(SpotValidationService, Engine):
             payload_store=self._payload_store,
             balance_manager=bm,
         )
-        
-        payloads = handler.cancel(db_payload["standing_quantity"], payload, order, context)
+
+        payloads = handler.cancel(
+            db_payload["standing_quantity"], payload, order, context
+        )
         map(self._push_order_payload, payloads)
 
     def _execute_match(

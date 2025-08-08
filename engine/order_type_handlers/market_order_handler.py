@@ -1,13 +1,12 @@
-from pprint import pprint
-from engine.event_service import EventService
-from engine.protocols import PayloadProtocol
-from enums import EventType, OrderStatus, OrderType, Side
+from enums import EventType, OrderType
 from .order_type_handler import OrderTypeHandler
 from ..enums import MatchOutcome, Tag
+from ..event_service import EventService
 from ..matching_engines import Engine
 from ..orders import Order
 from ..order_context import OrderContext
 from ..payloads import SpotPayload
+from ..protocols import PayloadProtocol
 from ..typing import MatchResult, OrderEnginePayloadData
 
 

@@ -52,6 +52,12 @@ class OTOEnginePayloadData(EnginePayloadData):
     pending_order: dict
 
 
+class OTOCOEnginePayloadData(EnginePayloadData):
+    working_order: dict
+    above_order: dict
+    below_order: dict
+
+
 class CloseRequest(BaseModel):
     order_id: str
 
@@ -86,6 +92,12 @@ class LegModification(BaseModel):
 class OTOModifyRequest(BaseModel):
     working: LegModification | None = None
     pending: LegModification | None = None
+
+
+class OTOCOModifyRequest(BaseModel):
+    trigger: LegModification | None = None
+    above: LegModification | None = None
+    below: LegModification | None = None
 
 
 class Event(BaseModel):

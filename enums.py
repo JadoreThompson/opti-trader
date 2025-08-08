@@ -19,6 +19,7 @@ class OrderType(str, Enum):
     STOP = 'stop'
     _OCO = 'oco'
     _OTO = 'oto'
+    _OTOCO = 'otoco'
 
 
 class OrderStatus(str, Enum):

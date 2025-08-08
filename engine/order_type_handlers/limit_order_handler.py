@@ -1,20 +1,13 @@
-from typing import Any
-from enums import EventType, OrderType, Side
+from enums import EventType, OrderType
 from .order_type_handler import OrderTypeHandler
 from ..matching_engines import Engine
 from ..enums import MatchOutcome, Tag
 from ..event_service import EventService
-from ..orderbook import OrderBook
 from ..orders import Order
 from ..order_context import OrderContext
 from ..payloads import SpotPayload
 from ..protocols import PayloadProtocol
-from ..typing import (
-    LimitModifyRequest,
-    ModifyRequest,
-    OrderEnginePayloadData,
-    MatchResult,
-)
+from ..typing import LimitModifyRequest, OrderEnginePayloadData, MatchResult
 
 
 class LimitOrderHandler(OrderTypeHandler):
@@ -47,7 +40,7 @@ class LimitOrderHandler(OrderTypeHandler):
         context.order_store.add(order)
         order.price = db_payload["limit_price"]
         ob.append(order, order.price)
-        
+
         EventService.log_order_event(
             EventType.ORDER_PLACED,
             db_payload,

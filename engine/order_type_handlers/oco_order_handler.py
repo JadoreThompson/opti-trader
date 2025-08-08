@@ -1,22 +1,14 @@
 from engine.config import MODIFY_REQUEST_SENTINEL
-from enums import EventType, OrderStatus, OrderType, Side
-from .limit_order_handler import LimitOrderHandler
+from enums import EventType, OrderStatus, OrderType
 from .order_type_handler import OrderTypeHandler
-from .stop_order_handler import StopOrderHandler
 from ..event_service import EventService
-from ..enums import MatchOutcome, Tag
-from ..matching_engines import Engine
+from ..enums import Tag
+from ..mixins import LimitOrderHandlerMixin, StopOrderHandlerMixin
 from ..orderbook import OrderBook
 from ..order_context import OrderContext
 from ..orders import Order, OCOOrder
-from ..payloads import SpotPayload
 from ..protocols import EngineProtocol, PayloadProtocol
-from ..typing import (
-    ModifyRequest,
-    OCOEnginePayloadData,
-    OCOModifyRequest,
-    OrderEnginePayloadData,
-)
+from ..typing import OCOEnginePayloadData, OCOModifyRequest
 
 
 class OCOOrderHandler(OrderTypeHandler):
@@ -223,48 +215,22 @@ class OCOOrderHandler(OrderTypeHandler):
 
         if request.above_price != MODIFY_REQUEST_SENTINEL:
             if self._check_crosses_spread(request.above_price, above_order, ob):
-                print(above_order, )
-                print(1)
                 return False
             above_price = request.above_price
 
         if request.below_price != MODIFY_REQUEST_SENTINEL:
             if self._check_crosses_spread(request.below_price, below_order, ob):
-                print(2)
                 return False
             below_price = request.below_price
 
         if below_price >= above_price:
-            print(3)
             return False
 
         return True
 
     def _check_crosses_spread(self, price: float, order: Order, ob: OrderBook) -> bool:
         if order.type == OrderType.LIMIT:
-            # if (
-            #     order.side == Side.BID
-            #     and ob.best_ask is not None
-            #     and price >= ob.best_ask
-            # ) or (
-            #     order.side == Side.ASK
-            #     and ob.best_bid is not None
-            #     and price <= ob.best_bid
-            # ):
-            #     return True
-            return LimitOrderHandler()._is_crossable(order, {"limit_price": price}, ob)
-
-        else:  # STOP
-            # if (
-            #     order.side == Side.BID
-            #     and ob.best_ask is not None
-            #     and price <= ob.best_ask
-            # ) or (
-            #     order.side == Side.ASK
-            #     and ob.best_bid is not None
-            #     and price >= ob.best_bid
-            # ):
-            #     return True
-            return StopOrderHandler()._is_crossable(order, {"stop_price": price}, ob)
-
-        # return False
+            return LimitOrderHandlerMixin()._is_crossable(
+                order, {"limit_price": price}, ob
+            )
+        return StopOrderHandlerMixin()._is_crossable(order, {"stop_price": price}, ob)

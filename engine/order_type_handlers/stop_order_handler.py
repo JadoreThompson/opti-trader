@@ -1,15 +1,14 @@
-from enums import EventType, OrderType, Side
+from enums import EventType, OrderType
 from .order_type_handler import OrderTypeHandler
-from ..event_service import EventService
 from ..enums import MatchOutcome, Tag
+from ..event_service import EventService
 from ..matching_engines import Engine
 from ..mixins import StopOrderHandlerMixin
-from ..orderbook import OrderBook
 from ..order_context import OrderContext
 from ..orders import Order
 from ..payloads import SpotPayload
 from ..protocols import PayloadProtocol
-from ..typing import ModifyRequest, OrderEnginePayloadData, StopModifyRequest
+from ..typing import OrderEnginePayloadData, StopModifyRequest
 
 
 class StopOrderHandler(StopOrderHandlerMixin, OrderTypeHandler):

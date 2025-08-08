@@ -7,6 +7,7 @@ from engine.typing import (
     LimitModifyRequest,
     ModifyRequest,
     OCOModifyRequest,
+    OTOCOModifyRequest,
     OTOModifyRequest,
     StopModifyRequest,
 )
@@ -174,6 +175,69 @@ def test_place_oto_order(engine: SpotEngine):
 
     assert store.get(worker_order["order_id"]) is not None
     assert store.get(pending_order["order_id"]) is not None
+
+
+def test_place_otoco_order(engine: SpotEngine):
+    """
+    Scenario: An OTOCO order is placed.
+    Assertion: The trigger order is placed on the book, but the two OCO legs are not.
+               All three orders are tracked in the internal stores.
+    """
+    instrument = "instr-otoco-place"
+    ob, _ = engine._instrument_manager.get(instrument)
+
+    payload = create_engine_payload(OrderType._OTOCO)
+    (
+        worker_order,
+        above_order,
+        below_order,
+    ) = (
+        payload.data.working_order,
+        payload.data.above_order,
+        payload.data.below_order,
+    )
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+    worker_order["standing_quantity"] = worker_order["quantity"]
+
+    above_order["side"] = Side.ASK
+    above_order["order_type"] = OrderType.LIMIT
+    above_order["instrument"] = instrument
+    above_order["quantity"] = 10
+    above_order["limit_price"] = 110.0
+    above_order["standing_quantity"] = above_order["quantity"]
+
+    below_order["side"] = Side.ASK
+    below_order["order_type"] = OrderType.STOP
+    below_order["instrument"] = instrument
+    below_order["quantity"] = 10
+    below_order["stop_price"] = 95.0
+    below_order["standing_quantity"] = below_order["quantity"]
+
+    engine.place_order(payload)
+
+    # Assert stores are populated
+    otoco_store = engine._order_stores[OrderType._OTOCO]
+    assert (
+        len(otoco_store._orders) == 3
+    ), "All three order objects should be in the store"
+    payload_store = engine._payload_store
+    assert (
+        len(payload_store._payloads) == 3
+    ), "All three payloads should be in the store"
+
+    # Assert order book state
+    assert 100.0 in ob.bids, "Worker order should be on the book"
+    assert not ob.asks, "OCO legs should NOT be on the book yet"
+
+    # Assert individual order states
+    assert worker_order["status"] == OrderStatus.PENDING
+    assert above_order["status"] == OrderStatus.PENDING
+    assert below_order["status"] == OrderStatus.PENDING
 
 
 def test_market_bid_fills_limit_ask(engine):
@@ -1094,6 +1158,174 @@ def test_oto_full_lifecycle_fills_and_cleanup(engine: SpotEngine):
     assert engine._payload_store.get(pending_order["order_id"]) is None
 
 
+def test_otoco_trigger_full_fill_activates_oco_legs(engine: SpotEngine):
+    """
+    Scenario: The trigger leg of an OTOCO order is fully filled.
+    Assertion: The two pending OCO legs (above/below) are activated and placed on the order book.
+    """
+    instrument = "instr-otoco-trigger"
+    ob, bm = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTOCO)
+    (
+        worker_order,
+        above_order,
+        below_order,
+    ) = (
+        payload.data.working_order,
+        payload.data.above_order,
+        payload.data.below_order,
+    )
+
+    quantity = 10
+    worker_order.update(
+        {
+            "side": Side.BID,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 100.0,
+        }
+    )
+    above_order.update(
+        {
+            "side": Side.ASK,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 110.0,
+        }
+    )
+    below_order.update(
+        {
+            "side": Side.ASK,
+            "order_type": OrderType.STOP,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "stop_price": 95.0,
+        }
+    )
+    # bm.increase_balance(above_order, quantity * 2)
+
+    engine.place_order(payload)
+
+    # Fill the trigger order
+    market_ask_payload = create_engine_payload(OrderType.MARKET)
+    market_ask = market_ask_payload.data.order
+    market_ask.update(
+        {
+            "side": Side.ASK,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+        }
+    )
+    bm.increase_balance(market_ask, quantity)
+    engine.place_order(market_ask_payload)
+
+    assert worker_order["status"] == OrderStatus.FILLED
+    assert 100.0 not in ob.bids
+
+    # Assert OCO legs are now active on the book
+    assert 110.0 in ob.asks, "Take profit leg should be on the book"
+    assert 95.0 in ob.asks, "Stop loss leg should be on the book"
+    assert len(ob.asks[110.0].tracker) == 1
+    assert len(ob.asks[95.0].tracker) == 1
+    assert above_order["status"] == OrderStatus.PENDING
+    assert below_order["status"] == OrderStatus.PENDING
+
+
+def test_otoco_full_lifecycle(engine: SpotEngine):
+    """
+    Scenario: 1. OTOCO trigger is filled. 2. OCO legs are activated. 3. One OCO leg is filled.
+    Assertion: The other OCO leg is cancelled, and all related orders are cleaned from the stores.
+    """
+    instrument = "instr-otoco-lifecycle"
+    ob, bm = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTOCO)
+    (
+        worker_order,
+        above_order,
+        below_order,
+    ) = (
+        payload.data.working_order,
+        payload.data.above_order,
+        payload.data.below_order,
+    )
+
+    quantity = 15
+    worker_order.update(
+        {
+            "side": Side.BID,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 100.0,
+        }
+    )
+    above_order.update(
+        {
+            "side": Side.ASK,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 110.0,
+        }
+    )
+    below_order.update(
+        {
+            "side": Side.ASK,
+            "order_type": OrderType.STOP,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "stop_price": 95.0,
+        }
+    )
+    engine.place_order(payload)
+
+    market_ask_payload = create_engine_payload(OrderType.MARKET)
+    market_ask = market_ask_payload.data.order
+    market_ask.update(
+        {
+            "side": Side.ASK,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+        }
+    )
+    bm.increase_balance(market_ask, quantity)
+    engine.place_order(market_ask_payload)
+
+    assert worker_order["status"] == OrderStatus.FILLED
+    assert 110.0 in ob.asks and 95.0 in ob.asks
+
+    market_bid_payload = create_engine_payload(OrderType.MARKET)
+    market_bid = market_bid_payload.data.order
+    market_bid.update(
+        {
+            "side": Side.BID,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+        }
+    )
+    engine.place_order(market_bid_payload)
+
+    assert above_order["status"] == OrderStatus.CANCELLED
+    assert below_order["status"] == OrderStatus.FILLED, "Stop loss should be filled"
+
+    assert not ob.bids and not ob.asks, "Order book should be empty"
+    assert len(engine._order_stores[OrderType._OTOCO]._orders) == 0
+    assert engine._payload_store.get(worker_order["order_id"]) is None
+    assert engine._payload_store.get(above_order["order_id"]) is None
+    assert engine._payload_store.get(below_order["order_id"]) is None
+
+
 ################## CANCEL #####################
 def test_cancel_market_order(engine: SpotEngine):
     payload = create_engine_payload(OrderType.MARKET)
@@ -1406,6 +1638,46 @@ def test_cancel_oto_order_via_pending_id(engine: SpotEngine):
     assert engine._payload_store.get(pending_order["order_id"]) is None
 
 
+def test_cancel_otoco_order_before_trigger_fails(engine: SpotEngine):
+    """
+    Scenario: A cancel request is sent for an OTOCO group before the trigger is filled.
+    Assertion: The cancellation fails due to a bug in the handler, which requires an
+               order to be fully filled before it can be cancelled.
+    """
+    instrument = "instr-otoco-cancel-bug"
+    ob, _ = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTOCO)
+    worker_order = payload.data.working_order
+
+    quantity = 10
+    worker_order.update(
+        {
+            "side": Side.BID,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 100.0,
+        }
+    )
+    payload.data.above_order.update(
+        {"instrument": instrument, "quantity": quantity, "standing_quantity": quantity}
+    )
+    payload.data.below_order.update(
+        {"instrument": instrument, "quantity": quantity, "standing_quantity": quantity}
+    )
+
+    engine.place_order(payload)
+    assert 100.0 in ob.bids
+
+    engine.cancel_order(CancelRequest(order_id=worker_order["order_id"]))
+
+    assert worker_order["status"] == OrderStatus.CANCELLED
+    assert worker_order["standing_quantity"] == 0
+    assert 100.0 not in ob.bids, "Order should not have been removed from the book"
+    assert len(engine._order_stores[OrderType._OTOCO]._orders) == 0
+
+
 ################## MODIFY #####################
 def test_modify_limit_order(engine: SpotEngine):
     limit_bid_payload = create_engine_payload(OrderType.LIMIT)
@@ -1618,3 +1890,71 @@ def test_modify_oto_pending_leg_before_trigger(engine: SpotEngine):
     engine.modify_order(req)
 
     assert pending_order["stop_price"] == 115.0
+
+
+def test_modify_otoco_trigger_order_exposes_bug(engine: SpotEngine):
+    """
+    Scenario: The trigger leg of an OTOCO order is modified.
+    Assertion: The trigger order's price is updated on the book.
+    """
+    instrument = "instr-otoco-modify-bug"
+    ob, bm = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTOCO)
+    (
+        worker_order,
+        above_order,
+        below_order,
+    ) = (
+        payload.data.working_order,
+        payload.data.above_order,
+        payload.data.below_order,
+    )
+
+    quantity = 10
+    worker_order.update(
+        {
+            "side": Side.BID,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 100.0,
+        }
+    )
+    above_order.update(
+        {
+            "side": Side.ASK,
+            "order_type": OrderType.LIMIT,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "limit_price": 110.0,
+        }
+    )
+    below_order.update(
+        {
+            "side": Side.ASK,
+            "order_type": OrderType.STOP,
+            "instrument": instrument,
+            "quantity": quantity,
+            "standing_quantity": quantity,
+            "stop_price": 95.0,
+        }
+    )
+    bm.increase_balance(above_order, quantity * 2)
+    engine.place_order(payload)
+
+    assert 100.0 in ob.bids and not ob.asks
+
+    req = ModifyRequest[OTOCOModifyRequest](
+        order_id=worker_order["order_id"],
+        data=OTOCOModifyRequest(trigger=LegModification(limit_price=99.0)),
+    )
+    engine.modify_order(req)
+
+    assert worker_order["limit_price"] == 99.0
+    assert 99.0 in ob.bids
+    assert 100.0 not in ob.bids
+
+    assert 110.0 not in ob.asks
+    assert 95.0 not in ob.asks
