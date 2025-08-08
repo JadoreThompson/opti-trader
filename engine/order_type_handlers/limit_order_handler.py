@@ -47,7 +47,7 @@ class LimitOrderHandler(OrderTypeHandler):
         context.order_store.add(order)
         order.price = db_payload["limit_price"]
         ob.append(order, order.price)
-        print("Appended limit order")
+        
         EventService.log_order_event(
             EventType.ORDER_PLACED,
             db_payload,
@@ -104,14 +104,4 @@ class LimitOrderHandler(OrderTypeHandler):
         payload.apply_cancel(quantity)
         context.orderbook.remove(order, order.price)
         context.order_store.remove(order)
-
-    def _is_crossable(self, order: Order, payload: dict, ob: OrderBook) -> bool:
-        return (
-            order.side == Side.BID
-            and ob.best_ask is not None
-            and payload["limit_price"] >= ob.best_ask
-        ) or (
-            order.side == Side.ASK
-            and ob.best_bid is not None
-            and payload["limit_price"] <= ob.best_bid
-        )
+        return [payload.payload]

@@ -71,3 +71,4 @@ class MarketOrderHandler(OrderTypeHandler):
         payload.apply_cancel(quantity)
         context.orderbook.remove(order, order.price)
         context.order_store.remove(order)
+        return [payload.payload]

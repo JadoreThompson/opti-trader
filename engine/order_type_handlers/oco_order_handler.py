@@ -129,6 +129,8 @@ class OCOOrderHandler(OrderTypeHandler):
         order.counterparty = None
         cparty_order.counterparty = None
 
+        return [payload.payload, cparty_payload.payload]
+
     def modify(
         self,
         request: OCOModifyRequest,
@@ -136,7 +138,6 @@ class OCOOrderHandler(OrderTypeHandler):
         order: OCOOrder,
         context: OrderContext,
     ) -> None:
-        print("HI")
         bm = context.balance_manager
         db_payload = payload.payload
 

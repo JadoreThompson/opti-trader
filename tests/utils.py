@@ -11,6 +11,7 @@ from engine.typing import (
     EnginePayload,
     EnginePayloadTopic,
     OCOEnginePayloadData,
+    OTOEnginePayloadData,
     OrderEnginePayloadData,
 )
 
@@ -44,20 +45,33 @@ def create_order_dict() -> dict:
     }
 
 
-def create_market_limit_stop_data():
-    return OrderEnginePayloadData(order=create_order_dict())
+def create_market_limit_stop_data(order_type: OrderType):
+    order = create_order_dict()
+    order["order_type"] = order_type
+    return OrderEnginePayloadData(order=order)
 
 
 def create_oco_data():
     return OCOEnginePayloadData(orders=[create_order_dict(), create_order_dict()])
 
 
+def create_oto_data():
+    worker = create_order_dict()
+    worker["order_id"] = "worker"
+
+    pending = create_order_dict()
+    pending["order_id"] = "pending"
+
+    return OTOEnginePayloadData(working_order=worker, pending_order=pending)
+
+
 def create_engine_payload(ot: OrderType) -> EnginePayload:
     factories = {
-        OrderType.MARKET: create_market_limit_stop_data,
-        OrderType.LIMIT: create_market_limit_stop_data,
-        OrderType.STOP: create_market_limit_stop_data,
+        OrderType.MARKET: lambda: create_market_limit_stop_data(OrderType.MARKET),
+        OrderType.LIMIT: lambda: create_market_limit_stop_data(OrderType.LIMIT),
+        OrderType.STOP: lambda: create_market_limit_stop_data(OrderType.STOP),
         OrderType._OCO: create_oco_data,
+        OrderType._OTO: create_oto_data,
     }
 
     func = factories[ot]

@@ -3,9 +3,11 @@ import pytest
 from engine import SpotEngine
 from engine.typing import (
     CancelRequest,
+    LegModification,
     LimitModifyRequest,
     ModifyRequest,
     OCOModifyRequest,
+    OTOModifyRequest,
     StopModifyRequest,
 )
 from enums import MarketType, OrderStatus, OrderType, Side
@@ -18,6 +20,7 @@ def engine():
     return SpotEngine()
 
 
+################## PLACE #####################
 def test_place_limit_order(engine: SpotEngine):
     instrument = "instr"
 
@@ -129,6 +132,48 @@ def test_place_oco_order(engine: SpotEngine):
 
     assert store.get(above_order["order_id"]) is not None
     assert store.get(below_order["order_id"]) is not None
+
+
+def test_place_oto_order(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed.
+    Assertion: A LIMIT and a STOP order are created and placed correctly.
+    """
+    instrument = "instr-oto-place"
+
+    assert not engine._order_stores[OrderType.LIMIT]._orders
+    assert not engine._order_stores[OrderType.STOP]._orders
+
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.STOP
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["stop_price"] = 90.0
+
+    engine.place_order(payload)
+
+    ob, _ = engine._instrument_manager.get(instrument)
+    assert 100.0 in ob.bids
+    assert 90.0 not in ob.asks
+
+    store = engine._order_stores[OrderType._OTO]
+    stored_orders = store._orders
+    assert len(stored_orders) == 1
+
+    store = engine._payload_store
+    assert len(store._payloads) == 2
+
+    assert store.get(worker_order["order_id"]) is not None
+    assert store.get(pending_order["order_id"]) is not None
 
 
 def test_market_bid_fills_limit_ask(engine):
@@ -888,7 +933,168 @@ def test_oco_bid_ask_both_partially_filled_then_one_filled(engine: SpotEngine):
     assert bid_leg["open_quantity"] == 5
 
 
-################## CANCELS #####################
+def test_oto_worker_full_fill_triggers_pending_order(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed. The working leg is fully filled by a market order.
+    Assertion: The working order is removed from the book and stores.
+               The pending order is placed on the order book.
+    """
+    instrument = "instr-oto-fill-trigger"
+    ob, bm = engine._instrument_manager.get(instrument)
+
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+    worker_order["standing_quantity"] = 10
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.LIMIT
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["limit_price"] = 110.0
+
+    engine.place_order(payload)
+
+    assert 100.0 in ob.bids
+    assert 110.0 not in ob.asks
+    assert (
+        engine._order_stores[OrderType._OTO].get(worker_order["order_id"]) is not None
+    )
+
+    market_ask_payload = create_engine_payload(OrderType.MARKET)
+    market_ask = market_ask_payload.data.order
+    market_ask["side"] = Side.ASK
+    market_ask["instrument"] = instrument
+    market_ask["quantity"] = 10
+    market_ask["standing_quantity"] = 10
+    bm.increase_balance(market_ask, 10)
+    engine.place_order(market_ask_payload)
+
+    assert worker_order["status"] == OrderStatus.FILLED
+    assert worker_order["standing_quantity"] == 0
+    assert pending_order["status"] == OrderStatus.PENDING
+
+    assert engine._order_stores[OrderType._OTO].get(worker_order["order_id"]) is None
+    assert engine._payload_store.get(worker_order["order_id"]) is not None
+    assert 100.0 not in ob.bids
+
+    assert 110.0 in ob.asks
+    assert len(ob.asks[110.0].tracker) == 1
+    assert engine._payload_store.get(pending_order["order_id"]) is not None
+    # NOTE: Based on the current implementation, the pending order is NOT added to the order store
+    assert engine._order_stores[OrderType._OTO].get(pending_order["order_id"]) is None
+
+
+def test_oto_worker_partial_fill_does_not_trigger_pending(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed. The working leg is partially filled.
+    Assertion: The pending order is NOT placed on the order book.
+    """
+    instrument = "instr-oto-partial-fill"
+    ob, bm = engine._instrument_manager.get(instrument)
+
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+    worker_order["standing_quantity"] = 10
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.LIMIT
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["limit_price"] = 110.0
+
+    engine.place_order(payload)
+
+    market_ask_payload = create_engine_payload(OrderType.MARKET)
+    market_ask = market_ask_payload.data.order
+    market_ask["side"] = Side.ASK
+    market_ask["instrument"] = instrument
+    market_ask["quantity"] = 5
+    market_ask["standing_quantity"] = 5
+    bm.increase_balance(market_ask, 5)
+    engine.place_order(market_ask_payload)
+
+    assert worker_order["status"] == OrderStatus.PARTIALLY_FILLED
+    assert worker_order["standing_quantity"] == 5
+    assert worker_order["open_quantity"] == 5
+
+    assert 110.0 not in ob.asks
+    assert pending_order["status"] == OrderStatus.PENDING
+
+
+def test_oto_full_lifecycle_fills_and_cleanup(engine: SpotEngine):
+    """
+    Scenario: An OTO order's working leg is filled, triggering the pending leg.
+              The now-active pending leg is also filled.
+    Assertion: Both orders are marked as filled and all related objects are
+               cleaned up from the engine's stores and the order book.
+    """
+    instrument = "instr-oto-lifecycle"
+    ob, bm = engine._instrument_manager.get(instrument)
+
+    oto_payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = (
+        oto_payload.data.working_order,
+        oto_payload.data.pending_order,
+    )
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["standing_quantity"] = 10
+    worker_order["limit_price"] = 100.0
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.LIMIT
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["standing_quantity"] = 10
+    pending_order["limit_price"] = 110.0
+
+    engine.place_order(oto_payload)
+
+    market_ask_payload = create_engine_payload(OrderType.MARKET)
+    market_ask = market_ask_payload.data.order
+    market_ask["side"] = Side.ASK
+    market_ask["instrument"] = instrument
+    market_ask["quantity"] = 10
+    bm.increase_balance(market_ask, 10)
+
+    engine.place_order(market_ask_payload)
+
+    assert worker_order["status"] == OrderStatus.FILLED
+    assert 110.0 in ob.asks
+
+    market_bid_payload = create_engine_payload(OrderType.MARKET)
+    market_bid = market_bid_payload.data.order
+    market_bid["side"] = Side.BID
+    market_bid["instrument"] = instrument
+    market_bid["quantity"] = 10
+    engine.place_order(market_bid_payload)
+
+    assert pending_order["status"] == OrderStatus.FILLED
+    assert pending_order["standing_quantity"] == 0
+
+    assert not ob.bids
+    assert not ob.asks
+    assert len(engine._order_stores[OrderType._OTO]._orders) == 0
+    assert engine._payload_store.get(worker_order["order_id"]) is None
+    assert engine._payload_store.get(pending_order["order_id"]) is None
+
+
+################## CANCEL #####################
 def test_cancel_market_order(engine: SpotEngine):
     payload = create_engine_payload(OrderType.MARKET)
     order = payload.data.order
@@ -1116,6 +1322,90 @@ def test_cancel_partially_filled_oco_order_leg(engine: SpotEngine):
     assert below_order["status"] == OrderStatus.CANCELLED
 
 
+def test_cancel_oto_order_via_worker_id(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed. A cancel request is sent for the working leg's ID.
+    Assertion: Both the working and pending legs are cancelled and removed.
+    """
+    instrument = "instr-oto-cancel"
+    ob, _ = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+    worker_order["standing_quantity"] = 10
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.LIMIT
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["limit_price"] = 110.0
+    engine.place_order(payload)
+
+    assert engine._payload_store.get(worker_order["order_id"]) is not None
+    assert engine._payload_store.get(pending_order["order_id"]) is not None
+    assert (
+        engine._order_stores[OrderType._OTO].get(worker_order["order_id"]) is not None
+    )
+
+    engine.cancel_order(CancelRequest(order_id=worker_order["order_id"]))
+
+    assert worker_order["status"] == OrderStatus.CANCELLED
+    assert pending_order["status"] == OrderStatus.CANCELLED
+    assert worker_order["standing_quantity"] == 0
+
+    assert not ob.bids
+    assert len(engine._order_stores[OrderType._OTO]._orders) == 0
+    assert engine._payload_store.get(worker_order["order_id"]) is None
+    assert engine._payload_store.get(pending_order["order_id"]) is None
+
+
+def test_cancel_oto_order_via_pending_id(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed. A cancel request is sent for the working leg's ID.
+    Assertion: Both the pending and working legs are cancelled and removed.
+    """
+    instrument = "instr-oto-cancel"
+    ob, _ = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+    worker_order["standing_quantity"] = 10
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.LIMIT
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["limit_price"] = 110.0
+    engine.place_order(payload)
+
+    assert engine._payload_store.get(worker_order["order_id"]) is not None
+    assert engine._payload_store.get(pending_order["order_id"]) is not None
+    assert (
+        engine._order_stores[OrderType._OTO].get(worker_order["order_id"]) is not None
+    )
+
+    engine.cancel_order(CancelRequest(order_id=pending_order["order_id"]))
+
+    assert worker_order["status"] == OrderStatus.CANCELLED
+    assert pending_order["status"] == OrderStatus.CANCELLED
+    assert worker_order["standing_quantity"] == 0
+
+    assert not ob.bids
+    assert len(engine._order_stores[OrderType._OTO]._orders) == 0
+    assert engine._payload_store.get(worker_order["order_id"]) is None
+    assert engine._payload_store.get(pending_order["order_id"]) is None
+
+
 ################## MODIFY #####################
 def test_modify_limit_order(engine: SpotEngine):
     limit_bid_payload = create_engine_payload(OrderType.LIMIT)
@@ -1251,3 +1541,80 @@ def test_modify_oco_order_below_order(engine: SpotEngine):
 
     assert len(ob.asks) == 1
     assert ob.asks.get(93.0) is not None
+
+
+def test_modify_oto_working_leg(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed. The working leg's price is modified.
+    Assertion: The price of the working order is updated on the order book.
+    """
+    instrument = "instr-oto-modify-worker"
+    ob, _ = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+    worker_order["standing_quantity"] = 10
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.LIMIT
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["limit_price"] = 110.0
+    engine.place_order(payload)
+
+    assert 100.0 in ob.bids
+    assert 99.0 not in ob.bids
+
+    req = ModifyRequest[OTOModifyRequest](
+        order_id=worker_order["order_id"],
+        data=OTOModifyRequest(working=LegModification(limit_price=99.0)),
+    )
+    engine.modify_order(req)
+
+    assert worker_order["limit_price"] == 99.0
+    assert 100.0 not in ob.bids
+    assert 99.0 in ob.bids
+    stored_order = engine._order_stores[OrderType._OTO].get(worker_order["order_id"])
+    assert stored_order.price == 99.0
+
+
+def test_modify_oto_pending_leg_before_trigger(engine: SpotEngine):
+    """
+    Scenario: An OTO order is placed. A request is made to modify the pending leg's price
+              before the working leg has been filled.
+    Assertion: The price of the pending leg is successfully updated in its payload.
+               The order book is unaffected.
+    """
+    instrument = "instr-oto-modify-pending"
+    ob, _ = engine._instrument_manager.get(instrument)
+    payload = create_engine_payload(OrderType._OTO)
+    worker_order, pending_order = payload.data.working_order, payload.data.pending_order
+
+    worker_order["side"] = Side.BID
+    worker_order["order_type"] = OrderType.LIMIT
+    worker_order["instrument"] = instrument
+    worker_order["quantity"] = 10
+    worker_order["limit_price"] = 100.0
+
+    pending_order["side"] = Side.ASK
+    pending_order["order_type"] = OrderType.STOP
+    pending_order["instrument"] = instrument
+    pending_order["quantity"] = 10
+    pending_order["stop_price"] = 110.0
+    engine.place_order(payload)
+
+    assert pending_order["stop_price"] == 110.0
+    assert 110.0 not in ob.asks
+
+    req = ModifyRequest[OTOModifyRequest](
+        order_id=worker_order["order_id"],
+        data=OTOModifyRequest(pending=LegModification(stop_price=115.0)),
+    )
+    engine.modify_order(req)
+
+    assert pending_order["stop_price"] == 115.0

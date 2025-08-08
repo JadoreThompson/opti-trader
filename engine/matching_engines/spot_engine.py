@@ -12,6 +12,7 @@ from ..order_type_handlers import (
     MarketOrderHandler,
     OrderTypeHandler,
     OCOOrderHandler,
+    OTOOrderHandler,
     StopOrderHandler,
 )
 from ..protocols import StoreProtocol
@@ -40,6 +41,7 @@ class SpotEngine(SpotValidationService, Engine):
             OrderType.MARKET: MarketOrderHandler(),
             OrderType.STOP: StopOrderHandler(),
             OrderType._OCO: OCOOrderHandler(),
+            OrderType._OTO: OTOOrderHandler(),
         }
         self._order_stores: dict[OrderType, OrderStore] = defaultdict(OrderStore)
         self._payload_store = PayloadStore[SpotPayload]()
@@ -68,7 +70,6 @@ class SpotEngine(SpotValidationService, Engine):
     def modify_order(self, request: ModifyRequest) -> None:
         payload = self._payload_store.get(request.order_id)
         if payload is None:
-            print(1)
             return
 
         db_payload = payload.payload
@@ -76,12 +77,10 @@ class SpotEngine(SpotValidationService, Engine):
 
         handler = self._order_type_handlers[ot]
         if not handler.is_modifiable():
-            print(2)
             return
 
         order = self._order_stores[ot].get(db_payload["order_id"])
         if order is None:
-            print(3)
             return
 
         ob, bm = self._instrument_manager.get(db_payload["instrument"])
@@ -119,9 +118,9 @@ class SpotEngine(SpotValidationService, Engine):
             payload_store=self._payload_store,
             balance_manager=bm,
         )
-        handler.cancel(db_payload["standing_quantity"], payload, order, context)
-
-        self._push_order_payload(db_payload)
+        
+        payloads = handler.cancel(db_payload["standing_quantity"], payload, order, context)
+        map(self._push_order_payload, payloads)
 
     def _execute_match(
         self, order: Order, payload: SpotPayload, context: OrderContext
@@ -233,13 +232,14 @@ class SpotEngine(SpotValidationService, Engine):
         self._push_order_payload(payload.payload)
 
     def _create_payload(
-        self, db_payload: dict, internal_type: OrderType
+        self, db_payload: dict, internal_type: OrderType, *, validate: bool = True
     ) -> SpotPayload:
-        if self._validate_new(db_payload):
-            payload = SpotPayload(db_payload, internal_type)
-            self._payload_store.add(payload)
-            return payload
-        raise ValueError("Invalid payload.")
-    
+        if validate and not self._validate_new(db_payload):
+            raise ValueError("Invalid payload.")
+
+        payload = SpotPayload(db_payload, internal_type)
+        self._payload_store.add(payload)
+        return payload
+
     def _add_to_store(self, order: Order, internal_type: OrderType) -> None:
         self._order_stores[internal_type].add(order)

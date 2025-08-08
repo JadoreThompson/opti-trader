@@ -47,6 +47,11 @@ class OCOEnginePayloadData(EnginePayloadData):
     orders: list[dict]
 
 
+class OTOEnginePayloadData(EnginePayloadData):
+    working_order: dict
+    pending_order: dict
+
+
 class CloseRequest(BaseModel):
     order_id: str
 
@@ -71,6 +76,16 @@ class StopModifyRequest(BaseModel):
 class OCOModifyRequest(BaseModel):
     above_price: float = MODIFY_REQUEST_SENTINEL
     below_price: float = MODIFY_REQUEST_SENTINEL
+
+
+class LegModification(BaseModel):
+    limit_price: float = MODIFY_REQUEST_SENTINEL
+    stop_price: float = MODIFY_REQUEST_SENTINEL
+
+
+class OTOModifyRequest(BaseModel):
+    working: LegModification | None = None
+    pending: LegModification | None = None
 
 
 class Event(BaseModel):

@@ -3,6 +3,7 @@ from .order_type_handler import OrderTypeHandler
 from ..event_service import EventService
 from ..enums import MatchOutcome, Tag
 from ..matching_engines import Engine
+from ..mixins import StopOrderHandlerMixin
 from ..orderbook import OrderBook
 from ..order_context import OrderContext
 from ..orders import Order
@@ -11,7 +12,7 @@ from ..protocols import PayloadProtocol
 from ..typing import ModifyRequest, OrderEnginePayloadData, StopModifyRequest
 
 
-class StopOrderHandler(OrderTypeHandler):
+class StopOrderHandler(StopOrderHandlerMixin, OrderTypeHandler):
     @staticmethod
     def is_modifiable() -> bool:
         return True
@@ -94,16 +95,4 @@ class StopOrderHandler(OrderTypeHandler):
         payload.apply_cancel(quantity)
         context.orderbook.remove(order, order.price)
         context.order_store.remove(order)
-
-    @staticmethod
-    def _is_crossable(order: Order, payload: dict, ob: OrderBook) -> bool:
-        print(ob.asks)
-        return (
-            order.side == Side.BID
-            and ob.best_ask is not None
-            and payload["stop_price"] <= ob.best_ask
-        ) or (
-            order.side == Side.ASK
-            and ob.best_bid is not None
-            and payload["stop_price"] >= ob.best_bid
-        )
+        return [payload.payload]

@@ -4,8 +4,7 @@ from enums import Side
 
 
 class StopOrderHandlerMixin:
-    @staticmethod
-    def _is_crossable(order: Order, payload: dict, ob: OrderBook) -> bool:
+    def _is_crossable(self, order: Order, payload: dict, ob: OrderBook) -> bool:
         return (
             order.side == Side.BID
             and ob.best_ask is not None

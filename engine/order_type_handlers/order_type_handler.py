@@ -6,6 +6,7 @@ from enums import OrderType
 from ..orders import Order
 from ..order_context import OrderContext
 from ..payloads import SpotPayload
+from ..protocols import EngineProtocol
 from ..typing import EnginePayloadData, ModifyRequest
 
 
@@ -22,7 +23,7 @@ class OrderTypeHandler(ABC):
         """Return True if this handler supports the given order type."""
 
     @abstractmethod
-    def handle_new(self, data: BaseModel, engine: "Engine") -> list[dict]:
+    def handle_new(self, data: BaseModel, engine: EngineProtocol) -> list[dict]:
         """
         Handles a new incoming order.
 
@@ -57,4 +58,4 @@ class OrderTypeHandler(ABC):
         payload: SpotPayload,
         order: Order,
         context: OrderContext,
-    ) -> None: ...
+    ) -> list[dict]: ...
