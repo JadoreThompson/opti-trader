@@ -1,0 +1,114 @@
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from config import PAGE_SIZE
+from db_models import Orders
+from enums import OrderStatus, Side
+from server.middleware import convert_csv, verify_jwt
+from server.typing import JWTPayload
+from server.utils.db import depends_db_session
+from .controller import create_new_order
+from .models import OrderCreate, OrderModify, OrderRead, PaginatedOrderResponse
+
+
+route = APIRouter(prefix="/orders", tags=["orders"])
+
+
+@route.post("/", status_code=202)
+async def create_order(details: OrderCreate, jwt: JWTPayload = Depends(verify_jwt)):
+    """
+    Accepts a new order. The order is placed on a queue for processing
+    by the matching engine. The response is immediate and does not
+    confirm the order has been filled.
+    """
+    response = await create_new_order(jwt.sub, details)
+    return response
+
+
+@route.get("/", response_model=PaginatedOrderResponse)
+async def get_orders(
+    page: int = Query(1, ge=1),
+    instrument_ids: list[str] = Depends(convert_csv("instrument_ids", str, [])),
+    statuses: list[OrderStatus] = Depends(convert_csv("statuses", OrderStatus, [])),
+    sides: list[Side] = Depends(convert_csv("sides", Side, [])),
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    """
+    Retrieves a paginated list of orders for the authenticated user,
+    with optional filtering.
+    """
+    query = select(Orders).where(Orders.user_id == jwt.sub)
+
+    if instrument_ids:
+        query = query.where(Orders.instrument_id.in_(instrument_ids))
+    if statuses:
+        query = query.where(Orders.status.in_([s.value for s in statuses]))
+    if sides:
+        query = query.where(Orders.side.in_([s.value for s in sides]))
+
+    offset = (page - 1) * PAGE_SIZE
+    query = query.order_by(Orders.created_at.desc()).offset(offset).limit(PAGE_SIZE + 1)
+
+    result = await db_sess.execute(query)
+    orders = result.scalars().all()
+
+    has_next = len(orders) > PAGE_SIZE
+
+    return PaginatedOrderResponse(
+        page=page,
+        size=len(orders[:PAGE_SIZE]),
+        has_next=has_next,
+        data=[OrderRead(**vars(o)) for o in orders[:PAGE_SIZE]],
+    )
+
+
+@route.get("/{order_id}", response_model=OrderRead)
+async def get_order(
+    order_id: UUID,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    """Retrieves a single order by its ID."""
+    order = await db_sess.get(Orders, order_id)
+    if not order or order.user_id != jwt.sub:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return OrderRead.from_orm(order)
+
+
+@route.put("/{order_id}", status_code=202, summary="Modify an active order")
+async def modify_order(
+    order_id: UUID,
+    details: OrderModify,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    """Requests modification of an active order (e.g., changing the price)."""
+    response = await modify_order(jwt.sub, order_id, details, db_sess)
+    if not response:
+        raise HTTPException(status_code=404, detail="Order not found or not active")
+    return response
+
+
+@route.delete("/", status_code=202, summary="Cancel all active orders for the user")
+async def cancel_all_orders(
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    """Sends requests to cancel all PENDING or PARTIALLY_FILLED orders."""
+    await cancel_all_orders(jwt.sub, db_sess)
+
+
+@route.delete("/{order_id}", status_code=202, summary="Cancel a specific order")
+async def cancel_order(
+    order_id: UUID,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    """Sends a request to cancel a specific order by its ID."""
+    order_id = await cancel_order(jwt.sub, order_id, db_sess)
+    if not order_id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {"order_id": str(order_id)}
