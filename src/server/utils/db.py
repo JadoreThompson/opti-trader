@@ -1,6 +1,6 @@
-from utils.db import smaker
+from utils.db import smaker_async
 
 
 async def depends_db_session():
-    async with smaker.begin() as sess:
+    async with smaker_async.begin() as sess:
         yield sess

@@ -50,10 +50,14 @@ async def validate_jwt_payload(payload: JWTPayload) -> JWTPayload:
     Returns:
         JWTPayload: The validated JWT payload.
     """
+    print(1)
     async with get_db_session() as sess:
+        print(2, sess.bind.url)
         res = await sess.execute(select(Users).where(Users.user_id == payload.sub))
-        user = res.first()
+        # print(res)
+        user = res.scalar_one_or_none()
 
+    print(3)
     if not user:
         raise JWTError("Invalid user")
 

@@ -1,6 +1,6 @@
 from json import dumps
 
-from enums import EventType, LiquidityRole, Side, StrategyType
+from enums import EventType, LiquidityRole, OrderType, Side, StrategyType
 from .balance_manager import BalanceManager
 from .enums import CommandType, MatchOutcome
 from .event_logger import EventLogger
@@ -35,8 +35,8 @@ class SpotEngine(EngineProtocol):
                 self._ctxs[iid] = ExecutionContext(
                     engine=self,
                     orderbook=OrderBook(),
-                    balance_manager=self._balance_manager,
                     order_store=OrderStore(),
+                    instrument_id=iid,
                 )
 
     def process_command(self, command: Command) -> None:
@@ -87,6 +87,15 @@ class SpotEngine(EngineProtocol):
         Public method for strategies to submit an order for immediate matching.
         This fulfills the EngineProtocol requirement cleanly.
         """
+        if not self._check_sufficient_balance(
+            taker_order, taker_order.quantity, taker_order.price
+        ):
+            handler = self._strategy_handlers[taker_order.strategy_type]
+            handler.cancel(taker_order, ctx)
+            return MatchResult(
+                outcome=MatchOutcome.UNAUTHORISED, quantity=0, price=None
+            )
+
         return self._match(taker_order, ctx)
 
     def _match(self, taker_order: Order, ctx: ExecutionContext) -> MatchResult:
@@ -111,6 +120,15 @@ class SpotEngine(EngineProtocol):
                     taker_order.quantity - taker_order.executed_quantity,
                 )
 
+                if not self._check_sufficient_balance(
+                    maker_order, trade_qty, best_price
+                ):
+                    handler = self._strategy_handlers[maker_order.strategy_type]
+                    handler.cancel(maker_order, ctx)
+                    continue
+                elif maker_order.executed_quantity == 0:
+                    self._increase_escrow(maker_order)
+
                 self._process_trade(
                     taker_order, maker_order, trade_qty, best_price, ctx
                 )
@@ -126,6 +144,53 @@ class SpotEngine(EngineProtocol):
         return MatchResult(
             MatchOutcome.PARTIAL, taker_order.executed_quantity, last_best_price
         )
+
+    def _check_sufficient_balance(
+        self, order: Order, quantity: float, price: float
+    ) -> bool:
+        """
+        Checks if the user has sufficient balance to execute this trade.
+
+        Args:
+            order (Order): Order being used in the trade.
+            quantity (float): Quantity being matched
+            price (float): _description_
+
+        Returns:
+            bool:
+                - True: Sufficient balance.
+                - False: Insufficient balance.
+        """
+        if order.order_type == OrderType.MARKET:
+            # In a more complex system, balance checks would be made.
+            # For now we're assuming the amount for the trade was already
+            # escrowed at the HTTP API layer.
+            return True
+
+        if order.side == Side.ASK:
+            return quantity <= BalanceManager.get_asset_balance(order.user_id, order)
+
+        trade_value = quantity * price
+        return trade_value <= BalanceManager.get_user_balance(order.user_id)
+
+    def _increase_escrow(self, order: Order) -> None:
+        """
+        Increases the escrow balance to open up the trade.
+        To be used for LIMIT and STOP orders prior to their
+        first match.
+
+        Args:
+            order (Order): LIMIT or STOP order being filled.
+        """
+        if order.executed_quantity > 0:
+            return
+
+        if order.side == Side.BID:
+            BalanceManager.increase_cash_escrow(
+                order.user_id, order.quantity * order.price
+            )
+        else:
+            BalanceManager.increase_asset_escrow(order.user_id, order.quantity)
 
     def _process_trade(
         self,
@@ -143,9 +208,19 @@ class SpotEngine(EngineProtocol):
         maker_order.executed_quantity += quantity
 
         if taker_order.side == Side.BID:
-            self._balance_manager.increase_balance(taker_order.user_id, quantity)
-        if maker_order.side == Side.BID:
-            self._balance_manager.increase_balance(maker_order.user_id, quantity)
+            BalanceManager.settle_bid(
+                taker_order.user_id, ctx.instrument_id, quantity, price
+            )
+            BalanceManager.settle_ask(
+                maker_order.user_id, ctx.instrument_id, quantity, price
+            )
+        else:
+            BalanceManager.settle_ask(
+                taker_order.user_id, ctx.instrument_id, quantity, price
+            )
+            BalanceManager.settle_bid(
+                maker_order.user_id, ctx.instrument_id, quantity, price
+            )
 
         taker_strategy = self._strategy_handlers[taker_order.strategy_type]
         maker_strategy = self._strategy_handlers[maker_order.strategy_type]

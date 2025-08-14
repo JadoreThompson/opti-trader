@@ -55,6 +55,7 @@ class TransactionType(Enum):
 
 class OrderStatus(Enum):
     PENDING = "pending"
+    PLACED = 'placed'
     PARTIALLY_FILLED = "partially_filled"
     FILLED = "filled"
     CANCELLED = "cancelled"

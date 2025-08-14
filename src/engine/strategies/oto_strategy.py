@@ -54,6 +54,9 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
             result: MatchResult = ctx.engine.match(parent_order, ctx)
             parent_order.executed_quantity = result.quantity
 
+            if result.outcome == MatchOutcome.UNAUTHORISED:
+                return
+
             if result.outcome == MatchOutcome.SUCCESS:
                 ctx.orderbook.append(child_order, child_order.price)
                 ctx.order_store.add(child_order)

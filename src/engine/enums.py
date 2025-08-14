@@ -7,6 +7,7 @@ class CommandType(Enum):
     MODIFY_ORDER = "MODIFY_ORDER"
 
 class MatchOutcome(Enum):
-    FAILURE = 0
-    PARTIAL = 1
-    SUCCESS = 2
+    FAILURE = 0 # 0 quantity matched
+    PARTIAL = 1 # > 0 quantity matched
+    SUCCESS = 2 # full quantity matched
+    UNAUTHORISED = 3 # didn't pass risk checks.

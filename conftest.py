@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import uuid
 from decimal import Decimal
 
@@ -5,8 +6,10 @@ import pytest
 from faker import Faker
 from unittest.mock import MagicMock
 
+import pytest_asyncio
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.db_models import Base, Instruments, Users as DBUser, Orders as DBOrder
 from src.enums import OrderStatus, OrderType, Side, StrategyType
@@ -15,28 +18,33 @@ from src.engine.event_logger import EventLogger
 from src.engine.models import Event
 from src.engine.orders import Order
 from src.event_handler import EventHandler
-from tests.config import DB_URL
+from tests.config import (
+    DB_URL,
+    ASYNC_DB_URL,
+    engine,
+    engine_async,
+    smaker,
+    smaker_async,
+)
+from tests.utils import async_db_session_context
+from src.utils.utils import get_default_cash_balance
 
 
 @pytest.fixture(scope="session")
-def engine():
-    return create_engine(DB_URL)
-
-
-@pytest.fixture(scope="session")
-def tables(engine):
+def tables():
     """Session-scoped fixture to create tables."""
     try:
+        print(engine.url)
         Base.metadata.create_all(engine)
         yield
     finally:
+        print("Creating tables")
         Base.metadata.drop_all(engine)
 
 
 @pytest.fixture(scope="session")
-def db_session(engine, tables):
+def db_session(tables):
     """Provides a DB session for tests."""
-    smaker = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
     sess = smaker()
     try:
         yield sess
@@ -44,17 +52,24 @@ def db_session(engine, tables):
         sess.close()
 
 
+@pytest_asyncio.fixture(loop_scope="session", scope="session")
+async def async_db_session(tables):
+    """Provides a DB session for tests."""
+    async with async_db_session_context() as sess:
+        yield sess
+
+
 @pytest.fixture
 def user_factory_db(db_session):
     """Factory to create and persist User objects in the test DB."""
     fkr = Faker()
 
-    def _create_user(username=None, cash_balance=10000.0):
+    def _create_user(username=None, cash_balance=None):
         user = DBUser(
             user_id=uuid.uuid4(),
             username=username or fkr.user_name(),
             password="hashed_password",
-            cash_balance=cash_balance,
+            cash_balance=cash_balance or get_default_cash_balance(),
         )
         db_session.add(user)
         db_session.commit()
@@ -98,6 +113,8 @@ def test_instrument(db_session):
             instrument_id=instrument_id, symbol="BTC", tick_size=0.001
         )
         db_session.add(instrument)
+    db_session.commit()
+    db_session.refresh(instrument)
     return instrument
 
 

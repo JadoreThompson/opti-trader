@@ -9,22 +9,69 @@ from enums import OrderStatus, Side
 from server.middleware import convert_csv, verify_jwt
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
-from .controller import create_new_order
-from .models import OrderCreate, OrderModify, OrderRead, PaginatedOrderResponse
+from .controller import (
+    create_order as create_order_controller,
+    create_oco_order as create_oco_order_controller,
+    create_oto_order as create_oto_order_controller,
+    create_otoco_order as create_otoco_order_controller,
+)
+from .models import (
+    OCOOrderCreate,
+    OTOCOOrderCreate,
+    OTOOrderCreate,
+    OrderCreate,
+    OrderModify,
+    OrderRead,
+    PaginatedOrderResponse,
+)
 
 
 route = APIRouter(prefix="/orders", tags=["orders"])
 
 
 @route.post("/", status_code=202)
-async def create_order(details: OrderCreate, jwt: JWTPayload = Depends(verify_jwt)):
+async def create_order(
+    details: OrderCreate,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
     """
     Accepts a new order. The order is placed on a queue for processing
     by the matching engine. The response is immediate and does not
     confirm the order has been filled.
     """
-    response = await create_new_order(jwt.sub, details)
-    return response
+    order_id = await create_order_controller(jwt.sub, details, db_sess)
+    return {"order_id": order_id}
+
+
+@route.post("/oco", status_code=202)
+async def create_oco_order(
+    details: OCOOrderCreate,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    order_id = await create_oco_order_controller(jwt.sub, details, db_sess)
+    return {"order_id": order_id}
+
+
+@route.post("/oto", status_code=202)
+async def create_oto_order(
+    details: OTOOrderCreate,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    order_id = await create_oto_order_controller(jwt.sub, details, db_sess)
+    return {"order_id": order_id}
+
+
+@route.post("/otoco", status_code=202)
+async def create_otoco_order(
+    details: OTOCOOrderCreate,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    order_id = await create_otoco_order_controller(jwt.sub, details, db_sess)
+    return {"order_id": order_id}
 
 
 @route.get("/", response_model=PaginatedOrderResponse)
@@ -75,7 +122,9 @@ async def get_order(
     order = await db_sess.get(Orders, order_id)
     if not order or order.user_id != jwt.sub:
         raise HTTPException(status_code=404, detail="Order not found")
-    return OrderRead.from_orm(order)
+    dumped = order.dump()
+    dumped.pop("user_id")
+    return OrderRead(**dumped)
 
 
 @route.put("/{order_id}", status_code=202, summary="Modify an active order")

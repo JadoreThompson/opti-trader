@@ -3,11 +3,13 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import CASH_BALANCE_HKEY, REDIS_CLIENT_ASYNC
 from db_models import Users
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils import set_cookie
 from server.utils.db import depends_db_session
+from utils.utils import get_default_cash_balance
 from .models import UserCreate
 
 
@@ -45,6 +47,7 @@ async def register_user(
     user_id = res.scalar()
 
     await db_sess.commit()
+    await REDIS_CLIENT_ASYNC.hset(CASH_BALANCE_HKEY, user_id, get_default_cash_balance())
 
     rsp = JSONResponse(status_code=200, content={"message": "Registered successfully."})
     return set_cookie(user_id, rsp)

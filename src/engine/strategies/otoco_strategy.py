@@ -71,6 +71,9 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
             result: MatchResult = ctx.engine.match(parent_order, ctx)
             parent_order.executed_quantity = result.quantity
 
+            if result.outcome == MatchOutcome.UNAUTHORISED:
+                return
+
             if result.outcome == MatchOutcome.SUCCESS:
                 ctx.order_store.remove(parent_order)
                 ctx.orderbook.append(child_a, child_a.price)

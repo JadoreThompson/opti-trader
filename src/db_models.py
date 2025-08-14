@@ -12,17 +12,18 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
-    declarative_base,
     Mapped,
     mapped_column,
     relationship,
 )
 
 from enums import InstrumentStatus, UserStatus, OrderStatus
-from utils.utils import get_datetime
+from utils.utils import get_datetime, get_default_cash_balance
 
 
-Base: DeclarativeBase = declarative_base()
+class Base(DeclarativeBase):
+    def dump(self) -> dict:
+        return {k: v for k, v in vars(self).items() if k != "_sa_instance"}
 
 
 class Users(Base):
@@ -33,7 +34,9 @@ class Users(Base):
     )
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(255), nullable=False)
-    cash_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.00)
+    cash_balance: Mapped[float] = mapped_column(
+        Float, nullable=False, default=get_default_cash_balance
+    )
     escrow_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.00)
     status: Mapped[str] = mapped_column(
         String, nullable=False, default=UserStatus.ACTIVE.value
@@ -122,7 +125,9 @@ class Orders(Base):
 
     user = relationship("Users", back_populates="orders")
     instrument = relationship("Instruments", back_populates="orders")
-    trades = relationship("Trades", back_populates="order", cascade="all, delete-orphan")
+    trades = relationship(
+        "Trades", back_populates="order", cascade="all, delete-orphan"
+    )
 
 
 class Trades(Base):

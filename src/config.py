@@ -1,4 +1,5 @@
 import os
+from multiprocessing.queues import Queue as MPQueue
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -7,8 +8,10 @@ from redis.asyncio import Redis as RedisAsync
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 
+
 PRODUCTION = False
 BASE_PATH = os.path.dirname(__file__)
+
 
 load_dotenv(os.path.join(BASE_PATH, ".env"))
 
@@ -35,6 +38,8 @@ REDIS_CLIENT = Redis(**redis_kwargs)
 
 INSTRUMENT_PRICE_QUEUE = os.getenv("INSTRUMENT_PRICE_QUEUE", "channel-1")
 ORDER_UPDATE_QUEUE = os.getenv("ORDER_UPDATE_QUEUE", "channel-2")
+CASH_BALANCE_HKEY = os.getenv("CASH_BALANCE_HKEY", "channel-3")
+CASH_ESCROW_HKEY = os.getenv("CASH_ESCROW_HKEY", "channel-4")
 
 
 # Auth
@@ -45,3 +50,7 @@ JWT_EXPIRY_MINS = int(os.getenv("JWT_EXPIRY_MINS", "10_000"))
 
 
 PAGE_SIZE = 10
+
+
+# Engine
+COMMAND_QUEUE: MPQueue | None = None

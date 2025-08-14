@@ -37,7 +37,7 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
             result: MatchResult = ctx.engine.match(order, ctx)
             order.executed_quantity = result.quantity
 
-            if result.outcome == MatchOutcome.SUCCESS:
+            if result.outcome in (MatchOutcome.UNAUTHORISED, MatchOutcome.SUCCESS):
                 return
 
         ctx.order_store.add(order)

@@ -18,7 +18,7 @@ class EventHandler:
 
     def __init__(self) -> None:
         self.handlers = {
-            EventType.ORDER_PLACED: self._handle_generic_log,
+            EventType.ORDER_PLACED: self._handle_order_status_update,
             EventType.ORDER_PARTIALLY_FILLED: self._handle_order_status_update,
             EventType.ORDER_FILLED: self._handle_order_status_update,
             EventType.ORDER_CANCELLED: self._handle_order_cancelled,
@@ -27,7 +27,7 @@ class EventHandler:
             EventType.NEW_TRADE: self._handle_new_trade,
         }
 
-    def process_event(self, session: Session, event: Event) -> None:
+    def process_event(self, event: Event, session: Session) -> None:
         """
         Process a list of events from the engine. Each event is handled
         within its own atomic transaction.
@@ -62,9 +62,6 @@ class EventHandler:
             AssetBalances.instrument_id == instrument_id,
         )
         asset_balance = session.execute(stmt).scalar_one_or_none()
-        # if not asset_balance:
-        #     asset_balance = AssetBalance(user_id=user_id, instrument_id=instrument_id)
-        #     session.add(asset_balance)
         return asset_balance
 
     def _handle_order_status_update(self, session: Session, event: Event):
@@ -72,10 +69,12 @@ class EventHandler:
         if not order:
             return
 
-        if event.event_type == EventType.ORDER_FILLED:
-            order.status = OrderStatus.FILLED.value
+        if event.event_type == EventType.ORDER_PLACED:
+            order.status = OrderStatus.PLACED.value
         elif event.event_type == EventType.ORDER_PARTIALLY_FILLED:
             order.status = OrderStatus.PARTIALLY_FILLED.value
+        elif event.event_type == EventType.ORDER_FILLED:
+            order.status = OrderStatus.FILLED.value
 
         session.add(order)
 
@@ -100,10 +99,7 @@ class EventHandler:
         if order.side == Side.BID.value:
             # Refund escrowed CASH for unfilled portion of a BUY order
             entry_price = self._get_entry_price(order)
-            print("")
-            print("Above")
             refund_amount = Decimal(str(entry_price)) * unfilled_qty
-            print("Below")
             user.escrow_balance = float(
                 Decimal(str(user.escrow_balance)) - refund_amount
             )
