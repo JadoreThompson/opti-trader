@@ -1,11 +1,12 @@
 import asyncio
 from json import loads
+from typing import Iterable
 
 from fastapi import WebSocket
 
-from config import INSTRUMENT_PRICE_QUEUE, REDIS_CLIENT_ASYNC
+from config import INSTRUMENT_EVENT_CHANNEL, REDIS_CLIENT_ASYNC
 from enums import InstrumentEventType
-from models import PriceUpdate
+from models import InstrumentEvent, OrderBookEvent, PriceEvent, TradeEvent
 
 
 class InstrumentManager:
@@ -20,24 +21,36 @@ class InstrumentManager:
     def subscribe(
         self, channel: InstrumentEventType, instrument: str, ws: WebSocket
     ) -> None:
-        self._channels.setdefault((channel, instrument), set()).add(ws)
+        key = (channel, instrument)
+        if key not in self._channels:
+            self._channels[(channel, instrument)] = set()
+        self._channels[(channel, instrument)].add(ws)
 
     def unsubscribe(
         self, channel: InstrumentEventType, instrument: str, ws: WebSocket
     ) -> None:
-        self._channels[(channel, instrument)].discard(ws)
+        key = (channel, instrument)
+        if key in self._channels:
+            self._channels[key].discard(ws)
 
     async def listen(self):
         async with REDIS_CLIENT_ASYNC.pubsub() as ps:
-            await ps.subscribe(INSTRUMENT_PRICE_QUEUE)
+            await ps.subscribe(INSTRUMENT_EVENT_CHANNEL)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     self._is_running = True
                     continue
 
-                # parsed_m = PriceUpdate(**loads(m["data"]))
-                # asyncio.create_task(self._broadcast(parsed_m.instrument))
+                parsed_m = InstrumentEvent(**loads(m))
+                wsockets = self._channels.get(
+                    (parsed_m.event_type, parsed_m.instrument_id)
+                )
+                asyncio.create_task(self._broadcast(parsed_m, wsockets))
 
-    async def _broadcast(self, data: PriceUpdate) -> None:
-        for ws in self._channels[data.instrument]:
-            await ws.send_json(data.model_dump_json())
+    async def _broadcast(
+        self,
+        event_data: PriceEvent | TradeEvent | OrderBookEvent,
+        wsockets: Iterable[WebSocket],
+    ):
+        for ws in wsockets:
+            await ws.send_json(event_data.model_dump_json())

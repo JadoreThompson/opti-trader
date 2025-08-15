@@ -5,9 +5,19 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from config import INSTRUMENT_EVENT_CHANNEL, ORDER_UPDATE_CHANNEL, REDIS_CLIENT
 from db_models import Orders, Trades, Users, Transactions, Events, AssetBalances
+from engine.balance_manager import BalanceManager
 from engine.models import Event
-from enums import EventType, OrderStatus, Side, TransactionType, OrderType
+from enums import (
+    EventType,
+    InstrumentEventType,
+    OrderStatus,
+    Side,
+    TransactionType,
+    OrderType,
+)
+from models import OrderEvent, InstrumentEvent, PriceEvent, TradeEvent
 
 
 class EventHandler:
@@ -19,8 +29,8 @@ class EventHandler:
     def __init__(self) -> None:
         self.handlers = {
             EventType.ORDER_PLACED: self._handle_order_status_update,
-            EventType.ORDER_PARTIALLY_FILLED: self._handle_order_status_update,
-            EventType.ORDER_FILLED: self._handle_order_status_update,
+            EventType.ORDER_PARTIALLY_FILLED: self._handle_filled_event,
+            EventType.ORDER_FILLED: self._handle_filled_event,
             EventType.ORDER_CANCELLED: self._handle_order_cancelled,
             EventType.ORDER_MODIFIED: self._handle_order_modified,
             EventType.ORDER_MODIFY_REJECTED: self._handle_generic_log,
@@ -36,6 +46,8 @@ class EventHandler:
         if not handler:
             return
 
+        print(event)
+
         try:
             db_event = Events(
                 event_type=event.event_type.value,
@@ -45,7 +57,7 @@ class EventHandler:
             )
             session.add(db_event)
 
-            handler(session, event)
+            handler(event, session)
             session.commit()
         except Exception as e:
             print(
@@ -53,8 +65,22 @@ class EventHandler:
             )
             session.rollback()
 
+        print("hi, doing my job here, ", event.event_type)
+        if event.event_type != EventType.NEW_TRADE:
+            print("Event handler relayign to user")
+            order = session.get(Orders, event.related_id)
+            REDIS_CLIENT.publish(
+                ORDER_UPDATE_CHANNEL,
+                OrderEvent(
+                    event_type=event.event_type,
+                    available_balance=BalanceManager.get_user_balance(event.user_id),
+                    data=order.dump(),
+                ).model_dump_json(),
+            )
+            print("Evnet handler relayed to channel")
+
     def _get_asset_balance(
-        self, session: Session, user_id: UUID, instrument_id: str
+        self, session: Session, user_id: UUID, instrument_id: str, event: Event
     ) -> AssetBalances:
         """Helper to fetch or create an asset balance record."""
         stmt = select(AssetBalances).where(
@@ -62,9 +88,18 @@ class EventHandler:
             AssetBalances.instrument_id == instrument_id,
         )
         asset_balance = session.execute(stmt).scalar_one_or_none()
+        if asset_balance is None:
+            asset_balance = AssetBalances(
+                user_id=user_id,
+                instrument_id=instrument_id,
+                balance=event.details["quantity"],
+                escrow_balance=0
+            )
+            session.add(asset_balance)
+
         return asset_balance
 
-    def _handle_order_status_update(self, session: Session, event: Event):
+    def _handle_order_status_update(self, event: Event, session: Session):
         order = session.get(Orders, event.related_id)
         if not order:
             return
@@ -78,7 +113,16 @@ class EventHandler:
 
         session.add(order)
 
-    def _handle_order_cancelled(self, session: Session, event: Event):
+    def _handle_filled_event(self, event: Event, session: Session) -> None:
+        self._handle_order_status_update(event, session)
+        order = session.get(Orders, event.related_id)
+        if not order:
+            return
+
+        order.executed_quantity = event.details["executed_quantity"]
+        session.add(order)
+
+    def _handle_order_cancelled(self, event: Event, session: Session):
         order = session.get(Orders, event.related_id)
         if not order:
             return
@@ -121,15 +165,12 @@ class EventHandler:
             asset_balance.escrow_balance = float(
                 Decimal(str(asset_balance.escrow_balance)) - unfilled_qty
             )
-            # asset_balance.balance = float(
-            #     Decimal(str(asset_balance.balance)) + unfilled_qty
-            # )
             session.add(asset_balance)
 
         session.add(order)
         session.add(user)
 
-    def _handle_order_modified(self, session: Session, event: Event) -> None:
+    def _handle_order_modified(self, event: Event, session: Session) -> None:
         # A full implementation must also adjust cash/asset escrow.
         order = session.get(Orders, event.related_id)
         if not order:
@@ -143,10 +184,10 @@ class EventHandler:
                 order.stop_price = new_price
             session.add(order)
 
-    def _handle_generic_log(self, session: Session, event: Event) -> None:
+    def _handle_generic_log(self, event: Event, session: Session) -> None:
         pass
 
-    def _handle_new_trade(self, session: Session, event: Event) -> None:
+    def _handle_new_trade(self, event: Event, session: Session) -> None:
         details = event.details
         order = session.get(Orders, event.related_id)
         user = session.get(Users, event.user_id)
@@ -188,7 +229,7 @@ class EventHandler:
             user.cash_balance = float(Decimal(str(user.cash_balance)) - trade_escrow)
 
             asset_balance = self._get_asset_balance(
-                session, user.user_id, order.instrument_id
+                session, user.user_id, order.instrument_id, event
             )
             asset_balance.balance = float(
                 Decimal(str(asset_balance.balance)) + trade_quantity
@@ -229,9 +270,38 @@ class EventHandler:
         session.add(user)
         session.add(new_transaction)
 
+        self._publish_instrument_events(event, order)
+
     def _get_entry_price(self, order: Orders) -> float:
         if order.order_type == OrderType.MARKET.value:
             return order.price
         elif order.order_type == OrderType.LIMIT.value:
             return order.limit_price
         return order.stop_price
+
+    def _publish_instrument_events(self, event: Event, order: Orders) -> None:
+        details = event.details
+        if "price" not in details:
+            return
+
+        price_event = InstrumentEvent(
+            event_type=InstrumentEventType.PRICE,
+            instrument_id=order.instrument_id,
+            data=PriceEvent(price=details["price"]),
+        )
+        REDIS_CLIENT.publish(INSTRUMENT_EVENT_CHANNEL, price_event.model_dump_json())
+
+        if "quantity":
+            trade_event = InstrumentEvent(
+                event_type=InstrumentEventType.TRADES,
+                instrument_id=order.instrument_id,
+                data=TradeEvent(
+                    price=details["price"],
+                    quantity=details["quantity"],
+                    side=order.side.value,
+                    executed_at=details["executed_at"],
+                ),
+            )
+            REDIS_CLIENT.publish(
+                INSTRUMENT_EVENT_CHANNEL, trade_event.model_dump_json()
+            )

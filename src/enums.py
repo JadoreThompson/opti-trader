@@ -1,12 +1,12 @@
 from enum import Enum
 
 
-class Side(Enum):
+class Side(str, Enum):
     BID = "bid"
     ASK = "ask"
 
 
-class OrderType(Enum):
+class OrderType(str, Enum):
     MARKET = "market"
     LIMIT = "limit"
     STOP = "stop"
@@ -18,7 +18,7 @@ class TimeInForce(Enum):
     FOK = "FOK"  # Fill Or Kill
 
 
-class StrategyType(Enum):
+class StrategyType(str, Enum):
     SINGLE = "SINGLE"
     OCO = "OCO"
     OTO = "OTO"
@@ -55,7 +55,7 @@ class TransactionType(Enum):
 
 class OrderStatus(Enum):
     PENDING = "pending"
-    PLACED = 'placed'
+    PLACED = "placed"
     PARTIALLY_FILLED = "partially_filled"
     FILLED = "filled"
     CANCELLED = "cancelled"
@@ -78,3 +78,17 @@ class TimeFrame(Enum):
     H1 = "1h"
     H4 = "4h"
     D1 = "1d"
+
+    def to_interval(self) -> str:
+        """Convert shorthand timeframe into a PostgreSQL interval string."""
+        unit = self.value[-1]
+        amount = int(self.value[:-1])
+
+        if unit == "m":
+            return f"{amount} minute"
+        elif unit == "h":
+            return f"{amount} hour"
+        elif unit == "d":
+            return f"{amount} day"
+        else:
+            raise ValueError(f"Unsupported timeframe unit: {unit}")

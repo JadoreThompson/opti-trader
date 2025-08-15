@@ -3,6 +3,7 @@ from .orderbook import OrderBook
 
 
 def get_price_key(ot: OrderType) -> str | None:
+    ot = OrderType(ot)
     m = {
         OrderType.MARKET: "price",
         OrderType.LIMIT: "limit_price",

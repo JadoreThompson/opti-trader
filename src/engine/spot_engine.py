@@ -88,7 +88,7 @@ class SpotEngine(EngineProtocol):
         This fulfills the EngineProtocol requirement cleanly.
         """
         if not self._check_sufficient_balance(
-            taker_order, taker_order.quantity, taker_order.price
+            taker_order, taker_order.quantity, taker_order.price, ctx.instrument_id
         ):
             handler = self._strategy_handlers[taker_order.strategy_type]
             handler.cancel(taker_order, ctx)
@@ -121,7 +121,7 @@ class SpotEngine(EngineProtocol):
                 )
 
                 if not self._check_sufficient_balance(
-                    maker_order, trade_qty, best_price
+                    maker_order, trade_qty, best_price, ctx.instrument_id
                 ):
                     handler = self._strategy_handlers[maker_order.strategy_type]
                     handler.cancel(maker_order, ctx)
@@ -146,7 +146,7 @@ class SpotEngine(EngineProtocol):
         )
 
     def _check_sufficient_balance(
-        self, order: Order, quantity: float, price: float
+        self, order: Order, quantity: float, price: float, instrument_id: str
     ) -> bool:
         """
         Checks if the user has sufficient balance to execute this trade.
@@ -168,7 +168,9 @@ class SpotEngine(EngineProtocol):
             return True
 
         if order.side == Side.ASK:
-            return quantity <= BalanceManager.get_asset_balance(order.user_id, order)
+            return quantity <= BalanceManager.get_asset_balance(
+                order.user_id, instrument_id
+            )
 
         trade_value = quantity * price
         return trade_value <= BalanceManager.get_user_balance(order.user_id)
@@ -237,25 +239,21 @@ class SpotEngine(EngineProtocol):
             EventType.NEW_TRADE,
             user_id=taker_order.user_id,
             related_id=taker_order.id,
-            details=dumps(
-                {
-                    "quantity": quantity,
-                    "price": price,
-                    "role": LiquidityRole.TAKER.value,
-                }
-            ),
+            details={
+                "quantity": quantity,
+                "price": price,
+                "role": LiquidityRole.TAKER.value,
+            },
         )
         EventLogger.log_event(
             EventType.NEW_TRADE,
             user_id=maker_order.user_id,
             related_id=maker_order.id,
-            details=dumps(
-                {
-                    "quantity": quantity,
-                    "price": price,
-                    "role": LiquidityRole.MAKER.value,
-                }
-            ),
+            details={
+                "quantity": quantity,
+                "price": price,
+                "role": LiquidityRole.MAKER.value,
+            },
         )
 
     def _log_fill_event(self, order: Order, price: float) -> None:
@@ -270,5 +268,5 @@ class SpotEngine(EngineProtocol):
             else EventType.ORDER_PARTIALLY_FILLED
         )
         EventLogger.log_event(
-            etype, user_id=order.user_id, related_id=order.id, details=dumps(ev_details)
+            etype, user_id=order.user_id, related_id=order.id, details=ev_details
         )

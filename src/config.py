@@ -36,8 +36,8 @@ redis_kwargs = {
 REDIS_CLIENT_ASYNC = RedisAsync(**redis_kwargs)
 REDIS_CLIENT = Redis(**redis_kwargs)
 
-INSTRUMENT_PRICE_QUEUE = os.getenv("INSTRUMENT_PRICE_QUEUE", "channel-1")
-ORDER_UPDATE_QUEUE = os.getenv("ORDER_UPDATE_QUEUE", "channel-2")
+INSTRUMENT_EVENT_CHANNEL = os.getenv("INSTRUMENT_EVENT_QUEUE", "channel-1")
+ORDER_UPDATE_CHANNEL = os.getenv("ORDER_UPDATE_QUEUE", "channel-2")
 CASH_BALANCE_HKEY = os.getenv("CASH_BALANCE_HKEY", "channel-3")
 CASH_ESCROW_HKEY = os.getenv("CASH_ESCROW_HKEY", "channel-4")
 

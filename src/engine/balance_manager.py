@@ -60,8 +60,8 @@ class BalanceManager:
     @classmethod
     def get_asset_balance(cls, user_id: str, instrument_id: str) -> float:
         """Return available asset balance = balance - escrow."""
-        escrow_hkey = get_instrument_escrows_hkey(instrument_id)
         balance_hkey = get_instrument_balance_hkey(instrument_id)
+        escrow_hkey = get_instrument_escrows_hkey(instrument_id)
 
         balance = REDIS_CLIENT.hget(balance_hkey, user_id)
         escrow = REDIS_CLIENT.hget(escrow_hkey, user_id)
@@ -73,7 +73,7 @@ class BalanceManager:
 
         balance = float(balance) if balance is not None else 0.0
         escrow = float(escrow) if escrow is not None else 0.0
-
+        print(locals())
         return balance - escrow
 
     @classmethod

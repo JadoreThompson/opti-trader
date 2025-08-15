@@ -2,9 +2,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID
+
 from pydantic import BaseModel
 
-from enums import EventType, InstrumentEventType
+from enums import EventType, InstrumentEventType, Side
 
 
 class CustomBaseModel(BaseModel):
@@ -17,35 +18,43 @@ class CustomBaseModel(BaseModel):
     }
 
 
-class InstrumentEvent(BaseModel):
+class InstrumentEvent(CustomBaseModel):
     event_type: InstrumentEventType
+    instrument_id: str
     # PriceUpdate | Trade | OrderBookUpdate
     data: Any
 
 
-class PriceUpdate(BaseModel):
-    instrument: str
+class PriceEvent(BaseModel):
     price: float
 
 
-class Trade(BaseModel):
+class TradeEvent(BaseModel):
     price: float
     quantity: float
+    side: Side
     executed_at: datetime
 
 
-class OrderBookUpdate(BaseModel):
+class OrderBookEvent(BaseModel):
     # { price: quantity }
-    bids: dict[float, float] 
-    asks: dict[float, float] 
+    bids: dict[float, float]
+    asks: dict[float, float]
 
 
-class OrderUpdate(BaseModel):
-    """
-    Represents an update to an order, extending the base order dictionary
-    with an `event_type` field. Additional unexpected fields are allowed
-    for flexibility in handling varied update payloads.
-    """
-
+class OrderEvent(CustomBaseModel):
+    """Event emitted on a fill, place, cancel of an order."""
     event_type: EventType
-    model_config = {"extra": "allow"}
+    available_balance: float
+    data: dict[str, Any]  # order dictionary
+
+
+# class OrderUpdate(BaseModel):
+#     """
+#     Represents an update to an order, extending the base order dictionary
+#     with an `event_type` field. Additional unexpected fields are allowed
+#     for flexibility in handling varied update payloads.
+#     """
+
+#     event_type: EventType
+#     model_config = {"extra": "allow"}

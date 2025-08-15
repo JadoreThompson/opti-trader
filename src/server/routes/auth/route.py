@@ -1,3 +1,4 @@
+from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import insert, select, text
@@ -8,8 +9,9 @@ from db_models import Users
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils import set_cookie
+from server.utils.auth import generate_jwt_token
 from server.utils.db import depends_db_session
-from utils.utils import get_default_cash_balance
+from utils.utils import get_datetime, get_default_cash_balance
 from .models import UserCreate
 
 
@@ -37,8 +39,8 @@ async def register_user(
 ):
     result = await db_sess.execute(select(Users).where(Users.username == body.username))
     if result.scalar_one_or_none():
-        raise JSONResponse(
-            status_code=409, error={"error": "Username already registered"}
+        return JSONResponse(
+            status_code=409, content={"error": "Username already registered"}
         )
 
     res = await db_sess.execute(
@@ -47,7 +49,11 @@ async def register_user(
     user_id = res.scalar()
 
     await db_sess.commit()
-    await REDIS_CLIENT_ASYNC.hset(CASH_BALANCE_HKEY, user_id, get_default_cash_balance())
+
+    # Setting for engine
+    await REDIS_CLIENT_ASYNC.hset(
+        CASH_BALANCE_HKEY, str(user_id), get_default_cash_balance()
+    )
 
     rsp = JSONResponse(status_code=200, content={"message": "Registered successfully."})
     return set_cookie(user_id, rsp)
@@ -61,3 +67,14 @@ async def get_current_user(jwt_payload: JWTPayload = Depends(verify_jwt)):
 @route.get("/me-id")
 async def get_current_user_id(jwt_payload: JWTPayload = Depends(verify_jwt)):
     return {"user_id": jwt_payload.sub}
+
+
+@route.get(
+    "/access-token",
+    summary="Returns a websocket token to be used to connect to the /ws/orders websocket for order updates",
+)
+async def get_access_token(jwt: JWTPayload = Depends(verify_jwt)):
+    token = generate_jwt_token(
+        sub=jwt.sub, exp=get_datetime() + timedelta(minutes=5)
+    )
+    return {"access_token": token}

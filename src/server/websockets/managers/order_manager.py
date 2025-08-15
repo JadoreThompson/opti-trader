@@ -4,13 +4,14 @@ from json import loads
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
 
-from config import ORDER_UPDATE_QUEUE, REDIS_CLIENT_ASYNC
-from models import OrderUpdate, PriceUpdate
+from config import ORDER_UPDATE_CHANNEL, REDIS_CLIENT_ASYNC
+from models import OrderEvent, PriceEvent
 
 
 class OrderManager:
     def __init__(self):
         self._channels: dict[str, WebSocket] = {}
+        self._is_running = False
 
     @property
     def is_running(self) -> bool:
@@ -30,15 +31,17 @@ class OrderManager:
 
     async def listen(self):
         async with REDIS_CLIENT_ASYNC.pubsub() as ps:
-            await ps.subscribe(ORDER_UPDATE_QUEUE)
+            await ps.subscribe(ORDER_UPDATE_CHANNEL)
             async for m in ps.listen():
                 if m["type"] == "subscribe":
                     self._is_running = True
                     continue
 
-                parsed_m = OrderUpdate(**loads(m["data"]))
+                print("Received event, relaying")
 
-                if parsed_m.user_id in self._channels:
-                    await self._channels[parsed_m.user_id].send_json(
+                parsed_m = OrderEvent(**loads(m["data"]))
+
+                if parsed_m.data['user_id'] in self._channels:
+                    await self._channels[parsed_m.data['user_id']].send_text(
                         parsed_m.model_dump_json()
                     )

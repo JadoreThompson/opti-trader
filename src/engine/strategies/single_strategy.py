@@ -37,11 +37,22 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
             result: MatchResult = ctx.engine.match(order, ctx)
             order.executed_quantity = result.quantity
 
-            if result.outcome in (MatchOutcome.UNAUTHORISED, MatchOutcome.SUCCESS):
+            if result.outcome == MatchOutcome.UNAUTHORISED:
+                print("here")
+                EventLogger.log_event(
+                    EventType.ORDER_CANCELLED,
+                    user_id=order.user_id,
+                    related_id=order.id,
+                    details={"reason": "Insufficient funds"},
+                )
+                return
+
+            if result.outcome == MatchOutcome.SUCCESS:
                 return
 
         ctx.order_store.add(order)
         ctx.orderbook.append(order, order.price)
+
         EventLogger.log_event(
             EventType.ORDER_PLACED, user_id=order.user_id, related_id=order.id
         )
@@ -56,7 +67,10 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
         ctx.orderbook.remove(order, order.price)
         ctx.order_store.remove(order)
         EventLogger.log_event(
-            EventType.ORDER_CANCELLED, user_id=order.user_id, related_id=order.id
+            EventType.ORDER_CANCELLED,
+            user_id=order.user_id,
+            related_id=order.id,
+            details={"reason": "Insufficient funds"},
         )
 
     def modify(self, details, order: Order, ctx: ExecutionContext):

@@ -12,7 +12,7 @@ from ..typing import JWTPayload
 from ..exc import JWTError
 
 
-def generate_jwt(**kwargs) -> str:
+def generate_jwt_token(**kwargs) -> str:
     """Generates a JWT token
 
     Args:
@@ -29,7 +29,7 @@ def generate_jwt(**kwargs) -> str:
     return jwt.encode(asdict(payload), JWT_SECRET_KEY, algorithm=JWT_ALGO)
 
 
-def decode_jwt(token: str) -> JWTPayload:
+def decode_jwt_token(token: str) -> JWTPayload:
     try:
         return JWTPayload(**jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGO]))
     except jwt.ExpiredSignatureError:
@@ -50,14 +50,10 @@ async def validate_jwt_payload(payload: JWTPayload) -> JWTPayload:
     Returns:
         JWTPayload: The validated JWT payload.
     """
-    print(1)
     async with get_db_session() as sess:
-        print(2, sess.bind.url)
         res = await sess.execute(select(Users).where(Users.user_id == payload.sub))
-        # print(res)
         user = res.scalar_one_or_none()
 
-    print(3)
     if not user:
         raise JWTError("Invalid user")
 
@@ -65,7 +61,7 @@ async def validate_jwt_payload(payload: JWTPayload) -> JWTPayload:
 
 
 def set_cookie(user_id: int, rsp: Response | None = None) -> Response:
-    token = generate_jwt(sub=user_id)
+    token = generate_jwt_token(sub=user_id)
     if rsp is None:
         rsp = Response()
     rsp.set_cookie(COOKIE_ALIAS, token, httponly=True, secure=PRODUCTION)

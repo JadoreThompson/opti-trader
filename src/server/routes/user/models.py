@@ -4,5 +4,5 @@ from server.models import PaginationMeta
 
 
 class UserOverviewResponse(PaginationMeta):
-    balance: float
+    cash_balance: float
     data: dict[str, float]  # { BTC-USD: 100 }

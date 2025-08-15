@@ -19,20 +19,22 @@ async def get_user_overview(
     jwt_payload: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    user_balance = await db_sess.execute(
+    res = await db_sess.execute(
         select(Users.cash_balance).where(Users.user_id == jwt_payload.sub)
     )
-    asset_balances = await db_sess.execute(
+    user_balance = res.scalar()
+    res = await db_sess.execute(
         select(AssetBalances.instrument_id, AssetBalances.balance)
         .where(AssetBalances.user_id == jwt_payload.sub)
         .offset((page - 1) * 10)
         .limit(PAGE_SIZE + 1)
     )
+    asset_balances = res.all()
 
     return UserOverviewResponse(
         page=page,
         size=len(asset_balances),
         has_next=len(asset_balances) > PAGE_SIZE,
-        balance=user_balance,
+        cash_balance=user_balance,
         data={instrument: balance for instrument, balance in asset_balances},
     )

@@ -23,7 +23,20 @@ from utils.utils import get_datetime, get_default_cash_balance
 
 class Base(DeclarativeBase):
     def dump(self) -> dict:
-        return {k: v for k, v in vars(self).items() if k != "_sa_instance"}
+        return {k: v for k, v in vars(self).items() if k != "_sa_instance_state"}
+    
+    def dump_serialised(self) -> dict:
+        res = {}
+        for k, v in vars(self).items():
+            if k == "_sa_instance_state":
+                continue
+            if isinstance(v, UUID):
+                res[k] = str(v)
+            elif isinstance(v, datetime):
+                res[k] = v.isoformat()
+            else:
+                res[k] = v
+        return res
 
 
 class Users(Base):

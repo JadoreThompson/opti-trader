@@ -24,6 +24,7 @@ from .models import (
     OrderRead,
     PaginatedOrderResponse,
 )
+from .order_service import OrderService
 
 
 route = APIRouter(prefix="/orders", tags=["orders"])
@@ -40,8 +41,9 @@ async def create_order(
     by the matching engine. The response is immediate and does not
     confirm the order has been filled.
     """
-    order_id = await create_order_controller(jwt.sub, details, db_sess)
-    return {"order_id": order_id}
+    # order_id = await create_order_controller(jwt.sub, details, db_sess)
+    # return {"order_id": order_id}
+    return await OrderService.create(jwt.sub, details, db_sess)
 
 
 @route.post("/oco", status_code=202)
@@ -50,8 +52,9 @@ async def create_oco_order(
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    order_id = await create_oco_order_controller(jwt.sub, details, db_sess)
-    return {"order_id": order_id}
+    # order_id = await create_oco_order_controller(jwt.sub, details, db_sess)
+    # return {"order_id": order_id}
+    return await OrderService.create(jwt.sub, details, db_sess)
 
 
 @route.post("/oto", status_code=202)
@@ -60,8 +63,9 @@ async def create_oto_order(
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    order_id = await create_oto_order_controller(jwt.sub, details, db_sess)
-    return {"order_id": order_id}
+    # order_id = await create_oto_order_controller(jwt.sub, details, db_sess)
+    # return {"order_id": order_id}
+    return await OrderService.create(jwt.sub, details, db_sess)
 
 
 @route.post("/otoco", status_code=202)
@@ -70,16 +74,17 @@ async def create_otoco_order(
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    order_id = await create_otoco_order_controller(jwt.sub, details, db_sess)
-    return {"order_id": order_id}
+    # order_id = await create_otoco_order_controller(jwt.sub, details, db_sess)
+    # return {"order_id": order_id}
+    return await OrderService.create(jwt.sub, details, db_sess)
 
 
 @route.get("/", response_model=PaginatedOrderResponse)
 async def get_orders(
     page: int = Query(1, ge=1),
-    instrument_ids: list[str] = Depends(convert_csv("instrument_ids", str, [])),
-    statuses: list[OrderStatus] = Depends(convert_csv("statuses", OrderStatus, [])),
-    sides: list[Side] = Depends(convert_csv("sides", Side, [])),
+    instruments: list[str] = Query(default=[]),
+    status: list[OrderStatus] = Query(default=[]),
+    sides: list[Side] = Query(default=[]),
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
@@ -87,12 +92,13 @@ async def get_orders(
     Retrieves a paginated list of orders for the authenticated user,
     with optional filtering.
     """
+    print(locals())
     query = select(Orders).where(Orders.user_id == jwt.sub)
 
-    if instrument_ids:
-        query = query.where(Orders.instrument_id.in_(instrument_ids))
-    if statuses:
-        query = query.where(Orders.status.in_([s.value for s in statuses]))
+    if instruments:
+        query = query.where(Orders.instrument_id.in_(instruments))
+    if status:
+        query = query.where(Orders.status.in_([s.value for s in status]))
     if sides:
         query = query.where(Orders.side.in_([s.value for s in sides]))
 
@@ -127,7 +133,7 @@ async def get_order(
     return OrderRead(**dumped)
 
 
-@route.put("/{order_id}", status_code=202, summary="Modify an active order")
+@route.patch("/{order_id}", status_code=202, summary="Modify an active order")
 async def modify_order(
     order_id: UUID,
     details: OrderModify,

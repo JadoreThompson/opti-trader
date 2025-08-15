@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from config import COOKIE_ALIAS
 from .exc import JWTError
 from .typing import JWTPayload
-from .utils import decode_jwt, validate_jwt_payload
+from .utils import decode_jwt_token, validate_jwt_payload
 
 
 T = TypeVar("T")
@@ -28,7 +28,7 @@ async def verify_jwt(req: Request) -> JWTPayload:
     if not token:
         raise JWTError("Authentication token is missing")
 
-    payload = decode_jwt(token)
+    payload = decode_jwt_token(token)
     return await validate_jwt_payload(payload)
 
 
@@ -53,7 +53,7 @@ def convert_csv(
             return [target_type(item.strip()) for item in value.strip().split(",")]
         except (ValueError, TypeError):
             raise JSONResponse(
-                status_code=400, error={"error": f"Invalid {param_name}"}
+                status_code=400, content={"error": f"Invalid {param_name}"}
             )
 
     return wrapper

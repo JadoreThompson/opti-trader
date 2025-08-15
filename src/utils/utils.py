@@ -12,5 +12,6 @@ def get_instrument_balance_hkey(instrument_id: str) -> str:
 def get_instrument_escrows_hkey(instrument_id: str) -> str:
     return f"{instrument_id}.escrows"
 
-def get_default_cash_balance() -> float: 
+
+def get_default_cash_balance() -> float:
     return 10_000.00

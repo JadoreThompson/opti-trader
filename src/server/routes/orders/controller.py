@@ -103,23 +103,24 @@ async def fetch_last_trade_price(
 async def create_order(
     user_id: str, details: OrderCreate, db_sess: AsyncSession
 ) -> str:
-    if details.order_type == OrderType.MARKET:
-        entry_price = await fetch_last_trade_price(details.instrument_id, db_sess)
-        if not entry_price:
-            raise ValueError(
-                f"No last trade price for market order on {details.instrument_id}"
-            )
+    # if details.order_type == OrderType.MARKET:
+    #     entry_price = await fetch_last_trade_price(details.instrument_id, db_sess)
+    #     if not entry_price:
+    #         raise ValueError(
+    #             f"No last trade price for market order on {details.instrument_id}"
+    #         )
 
-        await handle_escrow(
-            user_id,
-            details.instrument_id,
-            details.quantity,
-            entry_price,
-            details.side,
-            db_sess,
-        )
-
+    #     await handle_escrow(
+    #         user_id,
+    #         details.instrument_id,
+    #         details.quantity,
+    #         entry_price,
+    #         details.side,
+    #         db_sess,
+    #     )
     order_data = details.model_dump()
+    order_data["price"] = 100
+
     res = await db_sess.execute(
         insert(Orders)
         .values(
@@ -141,7 +142,6 @@ async def create_order(
     )
 
     command = Command(command_type=CommandType.NEW_ORDER, data=cmd_data)
-    COMMAND_QUEUE.put_nowait(command)
     return str(order.order_id)
 
 

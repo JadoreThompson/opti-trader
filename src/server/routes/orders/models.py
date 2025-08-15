@@ -105,6 +105,9 @@ class OrderRead(OrderBase, CustomBaseModel):
     executed_quantity: float
     avg_fill_price: float | None = None
     created_at: datetime
+    limit_price: float | None
+    stop_price: float | None
+    price: float | None
 
 
 class PaginatedOrderResponse(PaginatedResponse):
