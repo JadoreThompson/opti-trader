@@ -43,6 +43,8 @@ class EventHandler:
         Process a list of events from the engine. Each event is handled
         within its own atomic transaction.
         """
+        if event.user_id == "layer":
+            return
         handler = self.handlers.get(event.event_type)
         if not handler:
             return
@@ -66,11 +68,18 @@ class EventHandler:
 
         if event.event_type != EventType.NEW_TRADE:
             order = session.get(Orders, event.related_id)
+            b = BalanceManager.get_available_asset_balance(
+                event.user_id, event.instrument_id
+            )
+            print("Balance:", b)
             REDIS_CLIENT.publish(
                 ORDER_UPDATE_CHANNEL,
                 OrderEvent(
                     event_type=event.event_type,
-                    available_balance=BalanceManager.get_user_balance(event.user_id),
+                    available_balance=BalanceManager.get_available_cash_balance(
+                        event.user_id
+                    ),
+                    available_asset_balance=b,
                     data=order.dump(),
                 ).model_dump_json(),
             )
@@ -233,7 +242,7 @@ class EventHandler:
         else:  # ASK order
             # SELLER: Settle from asset escrow, receive cash.
             asset_balance = self._get_asset_balance(
-                session, user.user_id, order.instrument_id
+                session, user.user_id, order.instrument_id, event
             )
             asset_balance.escrow_balance = float(
                 Decimal(str(asset_balance.escrow_balance)) - trade_quantity

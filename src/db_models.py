@@ -83,6 +83,7 @@ class Instruments(Base):
     )
     symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     tick_size: Mapped[float] = mapped_column(Float, nullable=False)
+    starting_price: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
     status: Mapped[str] = mapped_column(
         String, nullable=False, default=InstrumentStatus.TRADABLE.value
     )

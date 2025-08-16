@@ -3,8 +3,10 @@ from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from config import PAGE_SIZE
+from config import COMMAND_QUEUE, PAGE_SIZE
 from db_models import Instruments, Orders, Trades
+from engine.enums import CommandType
+from engine import CommandType, Command, NewInstrument
 from enums import TimeFrame
 from models import TradeEvent
 from server.models import PaginatedResponse
@@ -29,6 +31,12 @@ async def create_instrument(
     try:
         await db_sess.execute(insert(Instruments).values(**details.model_dump()))
         await db_sess.commit()
+        COMMAND_QUEUE.put_nowait(
+            Command(
+                command_type=CommandType.NEW_INSTRUMENT,
+                data=NewInstrument(instrument_id=details.instrument_id),
+            )
+        )
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Instrument already exists.")
 

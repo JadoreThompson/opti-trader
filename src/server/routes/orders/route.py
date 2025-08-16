@@ -1,6 +1,8 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PAGE_SIZE
@@ -41,9 +43,10 @@ async def create_order(
     by the matching engine. The response is immediate and does not
     confirm the order has been filled.
     """
-    # order_id = await create_order_controller(jwt.sub, details, db_sess)
-    # return {"order_id": order_id}
-    return await OrderService.create(jwt.sub, details, db_sess)
+    try:
+        return await OrderService.create(jwt.sub, details, db_sess)
+    except IntegrityError:
+        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
 
 
 @route.post("/oco", status_code=202)
@@ -52,9 +55,10 @@ async def create_oco_order(
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    # order_id = await create_oco_order_controller(jwt.sub, details, db_sess)
-    # return {"order_id": order_id}
-    return await OrderService.create(jwt.sub, details, db_sess)
+    try:
+        return await OrderService.create(jwt.sub, details, db_sess)
+    except IntegrityError:
+        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
 
 
 @route.post("/oto", status_code=202)
@@ -63,9 +67,10 @@ async def create_oto_order(
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    # order_id = await create_oto_order_controller(jwt.sub, details, db_sess)
-    # return {"order_id": order_id}
-    return await OrderService.create(jwt.sub, details, db_sess)
+    try:
+        return await OrderService.create(jwt.sub, details, db_sess)
+    except IntegrityError:
+        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
 
 
 @route.post("/otoco", status_code=202)
@@ -74,17 +79,18 @@ async def create_otoco_order(
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
-    # order_id = await create_otoco_order_controller(jwt.sub, details, db_sess)
-    # return {"order_id": order_id}
-    return await OrderService.create(jwt.sub, details, db_sess)
+    try:
+        return await OrderService.create(jwt.sub, details, db_sess)
+    except IntegrityError:
+        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
 
 
 @route.get("/", response_model=PaginatedOrderResponse)
 async def get_orders(
     page: int = Query(1, ge=1),
-    instruments: list[str] = Query(default=[]),
+    instrument: list[str] = Query(default=[]),
     status: list[OrderStatus] = Query(default=[]),
-    sides: list[Side] = Query(default=[]),
+    side: list[Side] = Query(default=[]),
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
@@ -94,12 +100,12 @@ async def get_orders(
     """
     query = select(Orders).where(Orders.user_id == jwt.sub)
 
-    if instruments:
-        query = query.where(Orders.instrument_id.in_(instruments))
+    if instrument:
+        query = query.where(Orders.instrument_id.in_(instrument))
     if status:
         query = query.where(Orders.status.in_([s.value for s in status]))
-    if sides:
-        query = query.where(Orders.side.in_([s.value for s in sides]))
+    if side:
+        query = query.where(Orders.side.in_([s.value for s in side]))
 
     offset = (page - 1) * PAGE_SIZE
     query = query.order_by(Orders.created_at.desc()).offset(offset).limit(PAGE_SIZE + 1)

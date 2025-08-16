@@ -3,17 +3,22 @@ from threading import Thread
 import time
 from multiprocessing import Process, Queue
 from multiprocessing.queues import Queue as MPQueue
+from uuid import uuid4
 
+from sqlalchemy import select
 import uvicorn
 
-from config import INSTRUMENT_EVENT_CHANNEL, REDIS_CLIENT
+from config import CASH_BALANCE_HKEY, INSTRUMENT_EVENT_CHANNEL, REDIS_CLIENT
+from db_models import Instruments
 from engine import SpotEngine
-from engine.models import Event
-from enums import InstrumentEventType
+from engine.enums import CommandType
+from engine.models import Command, Event, NewSingleOrder
+from enums import InstrumentEventType, OrderStatus, OrderType, Side, StrategyType
 from event_handler import EventHandler
 from models import InstrumentEvent, OrderBookSnapshot
 from orderbook_duplicator import OrderBookReplicator
 from utils.db import get_db_session_sync
+from utils.utils import get_instrument_balance_hkey, get_instrument_escrows_hkey
 
 
 def publish_orderbooks(orderbooks: dict[str, OrderBookReplicator], delay: float = 1.0):
@@ -55,16 +60,48 @@ def run_event_handler(event_queue: MPQueue):
         replicator.process_event(event)
 
 
+def lay_orders(engine: SpotEngine, instrument_id: str):
+    REDIS_CLIENT.hset(get_instrument_balance_hkey(instrument_id), "layer", 2000)
+    REDIS_CLIENT.hset(get_instrument_escrows_hkey(instrument_id), "layer", 0)
+
+    for i in range(200):
+        data = NewSingleOrder(
+            strategy_type=StrategyType.SINGLE,
+            instrument_id=instrument_id,
+            order={
+                "user_id": "layer",
+                "order_id": str(uuid4()),
+                "instrument": instrument_id,
+                "order_type": OrderType.LIMIT,
+                "side": Side.ASK,
+                "quantity": 10,
+                "executed_quantity": 0,
+                "limit_price": i,
+                "status": OrderStatus.PENDING,
+            },
+        )
+        cmd = Command(command_type=CommandType.NEW_ORDER, data=data)
+        engine.process_command(cmd)
+
+
 def run_engine(command_queue: MPQueue, event_queue: MPQueue) -> None:
     from engine.event_logger import EventLogger
 
-    engine = SpotEngine(["BTC-USD"])
+    with get_db_session_sync() as sess:
+        insts = sess.execute(select(Instruments.instrument_id)).scalars().all()
+
+    engine = SpotEngine(insts)
     EventLogger.queue = event_queue
 
-    while True:
-        command = command_queue.get()
-        engine.process_command(command)
+    for inst in insts:
+        lay_orders(engine, inst)
 
+    while True:
+        command: Command = command_queue.get()
+        engine.process_command(command)
+        print(command)
+        if command.command_type == CommandType.NEW_INSTRUMENT:
+            lay_orders(engine, command.data.instrument_id)
 
 def run_server(command_queue: MPQueue):
     import config

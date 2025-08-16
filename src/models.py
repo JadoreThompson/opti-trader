@@ -51,4 +51,5 @@ class OrderEvent(CustomBaseModel):
 
     event_type: EventType
     available_balance: float
+    available_asset_balance: float
     data: dict[str, Any]  # order dictionary

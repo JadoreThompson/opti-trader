@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from enums import EventType, StrategyType
 from models import CustomBaseModel
@@ -46,6 +46,10 @@ class ModifyOrderCommand(CustomBaseModel):
     symbol: str
     limit_price: float = MODIFY_SENTINEL
     stop_price: float = MODIFY_SENTINEL
+
+
+class NewInstrument(CustomBaseModel):
+    instrument_id: str
 
 
 class Event(CustomBaseModel):

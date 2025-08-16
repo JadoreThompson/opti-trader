@@ -58,7 +58,12 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
             user_id=order.user_id,
             related_id=order.id,
             instrument_id=ctx.instrument_id,
-            details={'executed_quantity': order.executed_quantity, "quantity": order.quantity, "price": order.price, "side": order.side}
+            details={
+                "executed_quantity": order.executed_quantity,
+                "quantity": order.quantity,
+                "price": order.price,
+                "side": order.side,
+            },
         )
 
     def handle_filled(

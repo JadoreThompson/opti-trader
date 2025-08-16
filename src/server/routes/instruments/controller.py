@@ -3,23 +3,10 @@ from datetime import timedelta
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db_models import Instruments, Trades
+from db_models import Trades
 from enums import TimeFrame
 from utils.utils import get_datetime
-from .models import InstrumentCreate, OHLC, Stats24h
-
-
-async def create_instrument(
-    db_sess: AsyncSession, details: InstrumentCreate
-) -> Instruments:
-    """Creates a new instrument in the database."""
-    instrument = Instruments(**details.model_dump())
-    db_sess.add(instrument)
-    await db_sess.commit()
-    await db_sess.refresh(instrument)
-    # Here you might signal the engine manager to add a new context
-    # to the running engine, but that's a more advanced feature.
-    return instrument
+from .models import OHLC, Stats24h
 
 
 async def get_ohlc_data(

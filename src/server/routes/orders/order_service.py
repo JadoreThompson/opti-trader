@@ -5,7 +5,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import CASH_ESCROW_HKEY, REDIS_CLIENT_ASYNC, COMMAND_QUEUE
-from db_models import AssetBalances, Orders, Trades, Users
+from db_models import AssetBalances, Instruments, Orders, Trades, Users
 from enums import OrderStatus, OrderType, Side, StrategyType
 from engine.models import (
     Command,
@@ -44,6 +44,7 @@ class OrderService:
                 )
             )
             remaining_balance = res.scalar()
+
             if remaining_balance < total_value:
                 raise ValueError("Invalid cash balance.")
 
@@ -52,7 +53,6 @@ class OrderService:
                 .where(Users.user_id == user_id)
                 .values(escrow_balance=Users.escrow_balance + total_value)
             )
-            await db_sess.commit()
 
             await REDIS_CLIENT_ASYNC.hincrbyfloat(
                 CASH_ESCROW_HKEY, user_id, total_value
@@ -77,7 +77,7 @@ class OrderService:
             )
             .values(escrow_balance=AssetBalances.escrow_balance + quantity)
         )
-        await db_sess.commit()
+        await db_sess.flush()
 
         await REDIS_CLIENT_ASYNC.hincrbyfloat(
             get_instrument_escrows_hkey(instrument_id), user_id, quantity
@@ -94,9 +94,38 @@ class OrderService:
         return res.scalar_one_or_none()
 
     @classmethod
-    async def _create_order(cls, user_id, db_sess, details: OrderCreate) -> list[str]:
+    async def _create_order(
+        cls, user_id: str, db_sess: AsyncSession, details: OrderCreate
+    ) -> list[str]:
         order_data = details.model_dump()
-        order_data["price"] = 100  # default placeholder
+
+        if details.order_type == OrderType.MARKET:
+            res = await db_sess.execute(
+                select(Trades.price)
+                .where(Trades.instrument_id == details.instrument_id)
+                .order_by(Trades.executed_at.desc())
+                .limit(1)
+            )
+            price = res.scalar_one_or_none()
+
+            if price is None:
+                res = await db_sess.execute(
+                    select(Instruments.starting_price)
+                    .where(Instruments.instrument_id == details.instrument_id)
+                )
+                price = res.scalar_one()
+
+            order_data["price"] = price
+            await cls.handle_escrow(
+                user_id,
+                db_sess,
+                details.instrument_id,
+                details.quantity,
+                order_data["price"],
+                details.side,
+            )
+
+
         res = await db_sess.execute(
             insert(Orders)
             .values(
@@ -145,7 +174,7 @@ class OrderService:
                 .returning(Orders)
             )
             db_orders.append(res.scalar())
-        
+
         await db_sess.flush()
 
         COMMAND_QUEUE.put_nowait(

@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import PAGE_SIZE
-from db_models import AssetBalances, Users
+from db_models import AssetBalances, Orders, Trades, Users
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
@@ -14,30 +14,56 @@ from .models import HistoryInterval, PortfolioHistory, UserOverviewResponse
 route = APIRouter(prefix="/user", tags=["user"])
 
 
-@route.get("/", response_model=UserOverviewResponse)
+@route.get("/")
 async def get_user_overview(
     page: int = Query(1, ge=1),
-    jwt_payload: JWTPayload = Depends(verify_jwt),
+    jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
     res = await db_sess.execute(
-        select(Users.cash_balance).where(Users.user_id == jwt_payload.sub)
+        select(Users.cash_balance - Users.escrow_balance).where(Users.user_id == jwt.sub)
     )
-    user_balance = res.scalar()
-    res = await db_sess.execute(
+    cash_balance = res.scalar()
+
+    balances_subq = (
         select(AssetBalances.instrument_id, AssetBalances.balance)
-        .where(AssetBalances.user_id == jwt_payload.sub)
-        .offset((page - 1) * PAGE_SIZE)
-        .limit(PAGE_SIZE + 1)
+        .where(AssetBalances.user_id == jwt.sub)
+        .subquery()
     )
-    asset_balances = res.all()
+
+    latest_trade_subq = (
+        select(Trades.instrument_id, Trades.price)
+        .where(Trades.user_id == jwt.sub)
+        .order_by(Trades.executed_at.desc())
+        .subquery()
+    )
+
+    stmt = (
+        select(
+            balances_subq.c.instrument_id,
+            balances_subq.c.balance * latest_trade_subq.c.price,
+        )
+        .join(
+            latest_trade_subq,
+            balances_subq.c.instrument_id == latest_trade_subq.c.instrument_id,
+        )
+        .distinct(balances_subq.c.instrument_id)
+    )
+
+    res = await db_sess.execute(stmt)
+    rows = res.all()
+    
+    portfolio_balance = 0.0
+    data = {}
+
+    for instrument, balance in rows:
+        portfolio_balance += balance
+        data[instrument] = balance
 
     return UserOverviewResponse(
-        page=page,
-        size=len(asset_balances),
-        has_next=len(asset_balances) > PAGE_SIZE,
-        cash_balance=user_balance,
-        data={instrument: balance for instrument, balance in asset_balances},
+        cash_balance=cash_balance,
+        portfolio_balance=portfolio_balance,
+        data=data,
     )
 
 

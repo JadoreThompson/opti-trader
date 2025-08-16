@@ -5,7 +5,13 @@ from .balance_manager import BalanceManager
 from .enums import CommandType, MatchOutcome
 from .event_logger import EventLogger
 from .execution_context import ExecutionContext
-from .models import Command, CancelOrderCommand, ModifyOrderCommand, NewOrderCommand
+from .models import (
+    Command,
+    CancelOrderCommand,
+    ModifyOrderCommand,
+    NewInstrument,
+    NewOrderCommand,
+)
 from .orderbook import OrderBook
 from .orders import Order
 from .protocols import EngineProtocol, StrategyProtocol
@@ -45,6 +51,7 @@ class SpotEngine(EngineProtocol):
             CommandType.NEW_ORDER: self._handle_new_order,
             CommandType.CANCEL_ORDER: self._handle_cancel_order,
             CommandType.MODIFY_ORDER: self._handle_modify_order,
+            CommandType.NEW_INSTRUMENT: self._handle_new_instrument,
         }
         handler = handlers.get(command.command_type)
         if handler:
@@ -81,6 +88,14 @@ class SpotEngine(EngineProtocol):
 
         strategy = self._strategy_handlers.get(order.strategy_type)
         strategy.modify(details, order, ctx)
+
+    def _handle_new_instrument(self, details: NewInstrument):
+        self._ctxs[details.instrument_id] = ExecutionContext(
+            engine=self,
+            orderbook=OrderBook(),
+            order_store=OrderStore(),
+            instrument_id=details.instrument_id,
+        )
 
     def match(self, taker_order: Order, ctx: ExecutionContext) -> MatchResult:
         """
@@ -126,8 +141,17 @@ class SpotEngine(EngineProtocol):
                     handler = self._strategy_handlers[maker_order.strategy_type]
                     handler.cancel(maker_order, ctx)
                     continue
-                elif maker_order.executed_quantity == 0:
-                    self._increase_escrow(maker_order)
+
+                if maker_order.executed_quantity == 0:
+                    if maker_order.side == Side.BID:
+                        BalanceManager.increase_cash_escrow(
+                            maker_order.user_id,
+                            maker_order.quantity * maker_order.price,
+                        )
+                    else:
+                        BalanceManager.increase_asset_escrow(
+                            maker_order.user_id, ctx.instrument_id, maker_order.quantity
+                        )
 
                 self._process_trade(
                     taker_order, maker_order, trade_qty, best_price, ctx
@@ -168,31 +192,12 @@ class SpotEngine(EngineProtocol):
             return True
 
         if order.side == Side.ASK:
-            return quantity <= BalanceManager.get_asset_balance(
+            return quantity <= BalanceManager.get_available_asset_balance(
                 order.user_id, instrument_id
             )
 
         trade_value = quantity * price
-        return trade_value <= BalanceManager.get_user_balance(order.user_id)
-
-    def _increase_escrow(self, order: Order) -> None:
-        """
-        Increases the escrow balance to open up the trade.
-        To be used for LIMIT and STOP orders prior to their
-        first match.
-
-        Args:
-            order (Order): LIMIT or STOP order being filled.
-        """
-        if order.executed_quantity > 0:
-            return
-
-        if order.side == Side.BID:
-            BalanceManager.increase_cash_escrow(
-                order.user_id, order.quantity * order.price
-            )
-        else:
-            BalanceManager.increase_asset_escrow(order.user_id, order.quantity)
+        return trade_value <= BalanceManager.get_available_cash_balance(order.user_id)
 
     def _process_trade(
         self,

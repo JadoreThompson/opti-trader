@@ -8,5 +8,6 @@ from .models import (
     NewSingleOrder,
     CancelOrderCommand,
     ModifyOrderCommand,
+    NewInstrument,
 )
 from .enums import CommandType

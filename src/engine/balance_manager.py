@@ -12,7 +12,7 @@ class BalanceManager:
     queue: MPQueue | None = None
 
     @classmethod
-    def get_user_balance(cls, user_id: str) -> float:
+    def get_available_cash_balance(cls, user_id: str) -> float:
         """Return available cash balance = balance - escrow."""
         balance = REDIS_CLIENT.hget(CASH_BALANCE_HKEY, user_id)
         escrow = REDIS_CLIENT.hget(CASH_ESCROW_HKEY, user_id)
@@ -26,6 +26,22 @@ class BalanceManager:
         escrow = float(escrow) if escrow is not None else 0.0
 
         return balance - escrow
+
+    @classmethod
+    def get_cash_escrow(cls, user_id: str) -> float:
+        balance = REDIS_CLIENT.hget(CASH_BALANCE_HKEY, user_id)
+        if balance is None:
+            REDIS_CLIENT.hset(CASH_BALANCE_HKEY, user_id, 0)
+            balance = 0.0
+        return balance
+    
+    @classmethod
+    def get_cash_escrow(cls, user_id: str) -> float:
+        escrow = REDIS_CLIENT.hget(CASH_ESCROW_HKEY, user_id)
+        if escrow is None:
+            REDIS_CLIENT.hset(CASH_ESCROW_HKEY, user_id, 0)
+            return 0.0
+        return float(escrow)
 
     @classmethod
     def increase_cash_balance(cls, user_id: str, amount: float) -> float:
@@ -58,7 +74,7 @@ class BalanceManager:
         return float(new_escrow)
 
     @classmethod
-    def get_asset_balance(cls, user_id: str, instrument_id: str) -> float:
+    def get_available_asset_balance(cls, user_id: str, instrument_id: str) -> float:
         """Return available asset balance = balance - escrow."""
         balance_hkey = get_instrument_balance_hkey(instrument_id)
         escrow_hkey = get_instrument_escrows_hkey(instrument_id)
