@@ -1,4 +1,3 @@
-from json import dumps
 from enums import EventType, OrderType, StrategyType
 from ..enums import MatchOutcome
 from ..event_logger import EventLogger
@@ -131,7 +130,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
                 user_id=order.child.user_id,
                 related_id=order.child.id,
                 instrument_id=ctx.instrument_id,
-                details=dumps({"reason": "Parent order cancelled."}),
+                details={"reason": "Parent order cancelled."},
             )
         elif order.parent:
             if order.triggered:
@@ -157,7 +156,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
                     user_id=order.user_id,
                     related_id=order.id,
                     instrument_id=ctx.instrument_id,
-                    details=dumps({"reason": "Parent order cancelled."}),
+                    details={"reason": "Parent order cancelled."},
                 )
 
         ctx.order_store.remove(order)
@@ -175,7 +174,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
                     user_id=order.user_id,
                     related_id=order.id,
                     instrument_id=ctx.instrument_id,
-                    details=dumps({"price": order.price}),
+                    details={"price": order.price},
                 )
             return
 

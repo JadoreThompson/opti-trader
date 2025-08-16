@@ -1,14 +1,15 @@
 import asyncio
-from threading import Thread
 import time
+
 from multiprocessing import Process, Queue
 from multiprocessing.queues import Queue as MPQueue
+from threading import Thread
 from uuid import uuid4
 
-from sqlalchemy import select
 import uvicorn
+from sqlalchemy import select
 
-from config import CASH_BALANCE_HKEY, INSTRUMENT_EVENT_CHANNEL, REDIS_CLIENT
+from config import INSTRUMENT_EVENT_CHANNEL, REDIS_CLIENT
 from db_models import Instruments
 from engine import SpotEngine
 from engine.enums import CommandType
@@ -99,7 +100,7 @@ def run_engine(command_queue: MPQueue, event_queue: MPQueue) -> None:
     while True:
         command: Command = command_queue.get()
         engine.process_command(command)
-        print(command)
+
         if command.command_type == CommandType.NEW_INSTRUMENT:
             lay_orders(engine, command.data.instrument_id)
 
@@ -128,7 +129,6 @@ async def main():
     try:
         while True:
             for ind, p in enumerate(ps):
-                # print(p)
                 if not p.is_alive():
                     print("[INFO]:", p.name, "has died")
                     p.kill()

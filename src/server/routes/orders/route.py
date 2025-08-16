@@ -12,10 +12,9 @@ from server.middleware import convert_csv, verify_jwt
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
 from .controller import (
-    create_order as create_order_controller,
-    create_oco_order as create_oco_order_controller,
-    create_oto_order as create_oto_order_controller,
-    create_otoco_order as create_otoco_order_controller,
+    modify_order as modify_order_controller,
+    cancel_order as cancel_order_controller,
+    cancel_all_orders as cancel_all_orders_controller,
 )
 from .models import (
     OCOOrderCreate,
@@ -46,7 +45,7 @@ async def create_order(
     try:
         return await OrderService.create(jwt.sub, details, db_sess)
     except IntegrityError:
-        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
+        return JSONResponse(status_code=404, content={"error": "Invalid instrument."})
 
 
 @route.post("/oco", status_code=202)
@@ -58,7 +57,7 @@ async def create_oco_order(
     try:
         return await OrderService.create(jwt.sub, details, db_sess)
     except IntegrityError:
-        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
+        return JSONResponse(status_code=404, content={"error": "Invalid instrument."})
 
 
 @route.post("/oto", status_code=202)
@@ -70,7 +69,7 @@ async def create_oto_order(
     try:
         return await OrderService.create(jwt.sub, details, db_sess)
     except IntegrityError:
-        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
+        return JSONResponse(status_code=404, content={"error": "Invalid instrument."})
 
 
 @route.post("/otoco", status_code=202)
@@ -82,7 +81,7 @@ async def create_otoco_order(
     try:
         return await OrderService.create(jwt.sub, details, db_sess)
     except IntegrityError:
-        return JSONResponse(status_code=404, content={'error': "Invalid instrument."})
+        return JSONResponse(status_code=404, content={"error": "Invalid instrument."})
 
 
 @route.get("/", response_model=PaginatedOrderResponse)
@@ -140,13 +139,13 @@ async def get_order(
 
 @route.patch("/{order_id}", status_code=202, summary="Modify an active order")
 async def modify_order(
-    order_id: UUID,
+    order_id: str,
     details: OrderModify,
     jwt: JWTPayload = Depends(verify_jwt),
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
     """Requests modification of an active order (e.g., changing the price)."""
-    response = await modify_order(jwt.sub, order_id, details, db_sess)
+    response = await modify_order_controller(jwt.sub, order_id, details, db_sess)
     if not response:
         raise HTTPException(status_code=404, detail="Order not found or not active")
     return response
@@ -158,7 +157,7 @@ async def cancel_all_orders(
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
     """Sends requests to cancel all PENDING or PARTIALLY_FILLED orders."""
-    await cancel_all_orders(jwt.sub, db_sess)
+    await cancel_all_orders_controller(jwt.sub, db_sess)
 
 
 @route.delete("/{order_id}", status_code=202, summary="Cancel a specific order")
@@ -168,7 +167,7 @@ async def cancel_order(
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
     """Sends a request to cancel a specific order by its ID."""
-    order_id = await cancel_order(jwt.sub, order_id, db_sess)
+    order_id = await cancel_order_controller(jwt.sub, order_id, db_sess)
     if not order_id:
         raise HTTPException(status_code=404, detail="Order not found")
     return {"order_id": str(order_id)}

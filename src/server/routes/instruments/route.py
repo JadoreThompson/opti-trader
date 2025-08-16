@@ -106,10 +106,10 @@ async def get_instruments(
 
     return [
         InstrumentRead(
-            instrument_id=r.instrument_id,
-            volume=r.volume,
-            price=r.price,
-            h24_change=r.h24_change,
+            instrument_id=r["instrument_id"],
+            volume=r["volume"],
+            price=r["price"],
+            h24_change=r["h24_change"],
         )
         for r in res
     ]

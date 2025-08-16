@@ -19,7 +19,6 @@ from src.enums import (
 from src.orderbook_duplicator import OrderBookReplicator, OrderEntry
 
 
-# Mock the Event class since its source from `engine.models` is not provided.
 @dataclass
 class MockEvent:
     event_type: EventType

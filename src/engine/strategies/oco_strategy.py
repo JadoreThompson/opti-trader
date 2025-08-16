@@ -1,5 +1,3 @@
-from json import dumps
-
 from enums import EventType, StrategyType
 from ..event_logger import EventLogger
 from ..execution_context import ExecutionContext
@@ -79,7 +77,7 @@ class OCOStrategy(ModifyOrderMixin, StrategyProtocol):
             user_id=order.user_id,
             related_id=order.counterparty.id,
             instrument_id=ctx.instrument_id,
-            details=dumps({"reason": f"OCO peer {order.id} was filled."}),
+            details={"reason": f"OCO peer {order.id} was filled."},
         )
 
     def cancel(self, order: OCOOrder, ctx: ExecutionContext) -> None:
@@ -89,14 +87,14 @@ class OCOStrategy(ModifyOrderMixin, StrategyProtocol):
             user_id=order.user_id,
             related_id=order.id,
             instrument_id=ctx.instrument_id,
-            details=dumps({"reason": "Client requested cancel."}),
+            details={"reason": "Client requested cancel."},
         )
         EventLogger.log_event(
             EventType.ORDER_CANCELLED,
             user_id=order.user_id,
             related_id=order.counterparty.id,
             instrument_id=ctx.instrument_id,
-            details=dumps({"reason": "Client requested cancel."}),
+            details={"reason": "Client requested cancel."},
         )
 
     def _cancel(self, order: OCOOrder, ctx: ExecutionContext) -> None:

@@ -1,5 +1,3 @@
-from json import dumps
-
 from enums import EventType, OrderType
 from ..event_logger import EventLogger
 from ..execution_context import ExecutionContext
@@ -30,7 +28,8 @@ class ModifyOrderMixin:
             EventType.ORDER_MODIFY_REJECTED,
             user_id=order.user_id,
             related_id=order.id,
-            details=dumps({"reason": "Modification would cross the spread."}),
+            instrument_id=ctx.instrument_id,
+            details={"reason": "Modification would cross the spread."},
         )
 
         if (
@@ -62,5 +61,6 @@ class ModifyOrderMixin:
             EventType.ORDER_MODIFIED,
             user_id=order.user_id,
             related_id=order.id,
-            details=dumps({"price": new_price}),
+            instrument_id=ctx.instrument_id,
+            details={"price": new_price},
         )

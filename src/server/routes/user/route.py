@@ -2,13 +2,17 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import PAGE_SIZE
-from db_models import AssetBalances, Orders, Trades, Users
+from db_models import AssetBalances, Events, Trades, Users
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
-from server.utils.db import depends_db_session
+from server.utils import depends_db_session
 from .controller import get_portfolio_history
-from .models import HistoryInterval, PortfolioHistory, UserOverviewResponse
+from .models import (
+    UserEvents,
+    HistoryInterval,
+    PortfolioHistory,
+    UserOverviewResponse,
+)
 
 
 route = APIRouter(prefix="/user", tags=["user"])
@@ -21,7 +25,9 @@ async def get_user_overview(
     db_sess: AsyncSession = Depends(depends_db_session),
 ):
     res = await db_sess.execute(
-        select(Users.cash_balance - Users.escrow_balance).where(Users.user_id == jwt.sub)
+        select(Users.cash_balance - Users.escrow_balance).where(
+            Users.user_id == jwt.sub
+        )
     )
     cash_balance = res.scalar()
 
@@ -52,7 +58,7 @@ async def get_user_overview(
 
     res = await db_sess.execute(stmt)
     rows = res.all()
-    
+
     portfolio_balance = 0.0
     data = {}
 
@@ -75,3 +81,17 @@ async def get_user_portfolio_history(
 ):
     history = await get_portfolio_history(interval, jwt.sub, 6, db_sess)
     return history
+
+
+@route.get("/events", response_model=list[UserEvents])
+async def get_user_events(
+    size: int = Query(10, ge=1),
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    size = min(20, size)
+    res = await db_sess.execute(
+        select(Events.event_type, Events.related_id).where(Events.user_id == jwt.sub).limit(size)
+    )
+    events = res.all()
+    return [UserEvents(event_type=etype, order_id=str(oid)) for etype, oid in events]

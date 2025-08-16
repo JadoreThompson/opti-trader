@@ -139,13 +139,7 @@ async def get_24h_stats_all(
             Trades.instrument_id,
             (func.sum(Trades.quantity) / 2).label("volume"),
             last_trade.c.last_price.label("price"),
-            (
-                (
-                    (last_trade.c.last_price - first_trade.c.first_price)
-                    / first_trade.c.first_price
-                )
-                * 100
-            ).label("h24_change"),
+            first_trade.c.first_price.label("first_price"),
         )
         .join(first_trade, first_trade.c.instrument_id == Trades.instrument_id)
         .join(last_trade, last_trade.c.instrument_id == Trades.instrument_id)
@@ -162,5 +156,21 @@ async def get_24h_stats_all(
     if instrument_id is not None:
         stmt = stmt.where(Trades.instrument_id.like(f"%{instrument_id}%"))
 
-    result = await db_sess.execute(stmt)
-    return result.all()
+    rows = (await db_sess.execute(stmt)).all()
+
+    results = []
+    for inst_id, volume, last_price, first_price in rows:
+        if first_price and first_price != 0:
+            h24_change = ((last_price - first_price) / first_price) * 100
+        else:
+            h24_change = None
+
+        results.append({
+            "instrument_id": inst_id,
+            "volume": float(volume),
+            "price": float(last_price),
+            "h24_change": h24_change,
+        })
+
+    return results
+

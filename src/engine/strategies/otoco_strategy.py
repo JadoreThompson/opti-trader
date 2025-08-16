@@ -1,4 +1,3 @@
-from json import dumps
 from enums import EventType, OrderType, StrategyType
 from ..enums import MatchOutcome
 from ..event_logger import EventLogger
@@ -170,7 +169,7 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
                 user_id=counterparty.user_id,
                 related_id=counterparty.id,
                 instrument_id=ctx.instrument_id,
-                details=dumps({"reason": f"OCO peer {order.id} was filled."}),
+                details={"reason": f"OCO peer {order.id} was filled."},
             )
 
     def cancel(self, order: OTOCOOrder, ctx: ExecutionContext) -> None:
@@ -190,14 +189,14 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
                 user_id=order.child_a.user_id,
                 related_id=order.child_a.id,
                 instrument_id=ctx.instrument_id,
-                details=dumps({"reason": "Parent order cancelled."}),
+                details={"reason": "Parent order cancelled."},
             )
             EventLogger.log_event(
                 EventType.ORDER_CANCELLED,
                 user_id=order.child_b.user_id,
                 related_id=order.child_b.id,
                 instrument_id=ctx.instrument_id,
-                details=dumps({"reason": "Parent order cancelled."}),
+                details={"reason": "Parent order cancelled."},
             )
             return
 
@@ -242,5 +241,5 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
                 user_id=order.user_id,
                 related_id=order.id,
                 instrument_id=ctx.instrument_id,
-                details=dumps({"price": order.price}),
+                details={"price": order.price},
             )

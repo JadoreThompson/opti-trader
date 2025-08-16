@@ -1,5 +1,3 @@
-from json import dumps
-
 from enums import EventType, LiquidityRole, OrderType, Side, StrategyType
 from .balance_manager import BalanceManager
 from .enums import CommandType, MatchOutcome

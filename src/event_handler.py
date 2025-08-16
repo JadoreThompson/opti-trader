@@ -71,7 +71,6 @@ class EventHandler:
             b = BalanceManager.get_available_asset_balance(
                 event.user_id, event.instrument_id
             )
-            print("Balance:", b)
             REDIS_CLIENT.publish(
                 ORDER_UPDATE_CHANNEL,
                 OrderEvent(

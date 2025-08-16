@@ -1,11 +1,10 @@
-import asyncio
 from json import loads
 
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
 
 from config import ORDER_UPDATE_CHANNEL, REDIS_CLIENT_ASYNC
-from models import OrderEvent, PriceEvent
+from models import OrderEvent
 
 
 class OrderManager:

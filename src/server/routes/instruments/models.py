@@ -35,8 +35,10 @@ class InstrumentRead(BaseModel):
     instrument_id: str
     volume: float
     price: float
-    h24_change: float
+    h24_change: float | None
 
     @field_validator("volume", "price", "h24_change")
     def round_values(cls, v):
-        return round(v, 2)
+        if v is not None:
+            return round(v, 2)
+        return v
