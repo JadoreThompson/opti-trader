@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from sqlalchemy import func, select, text
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db_models import Instruments, Trades
@@ -77,7 +77,7 @@ async def calculate_24h_stats(db_sess: AsyncSession, instrument_id: str):
     since = now - timedelta(hours=24)
 
     stmt_stats = select(
-        (func.sum(Trades.quantity) /  2).label("volume"),
+        (func.sum(Trades.quantity) / 2).label("volume"),
         func.max(Trades.price).label("high"),
         func.min(Trades.price).label("low"),
     ).where(
@@ -120,5 +120,60 @@ async def calculate_24h_stats(db_sess: AsyncSession, instrument_id: str):
         h24_change=h24_change,
         h24_high=stats.high or 0.0,
         h24_low=stats.low or 0.0,
-        price=last_trade
+        price=last_trade,
     )
+
+
+async def get_24h_stats_all(
+    db_sess: AsyncSession, instrument_id: str | None = None
+) -> None:
+    now = get_datetime()
+    since = now - timedelta(hours=24)
+
+    first_trade = (
+        select(Trades.instrument_id, Trades.price.label("first_price"))
+        .where(Trades.executed_at >= since)
+        .order_by(Trades.instrument_id, Trades.executed_at.asc())
+        .distinct(Trades.instrument_id)
+        .subquery()
+    )
+
+    last_trade = (
+        select(Trades.instrument_id, Trades.price.label("last_price"))
+        .where(Trades.executed_at >= since)
+        .order_by(Trades.instrument_id, Trades.executed_at.desc())
+        .distinct(Trades.instrument_id)
+        .subquery()
+    )
+
+    # Main aggregation
+    stmt = (
+        select(
+            Trades.instrument_id,
+            (func.sum(Trades.quantity) / 2).label("volume"),
+            last_trade.c.last_price.label("price"),
+            (
+                (
+                    (last_trade.c.last_price - first_trade.c.first_price)
+                    / first_trade.c.first_price
+                )
+                * 100
+            ).label("h24_change"),
+        )
+        .join(first_trade, first_trade.c.instrument_id == Trades.instrument_id)
+        .join(last_trade, last_trade.c.instrument_id == Trades.instrument_id)
+        .group_by(
+            Trades.instrument_id,
+            last_trade.c.last_price,
+            first_trade.c.first_price,
+        )
+        .order_by(desc("volume"))
+        .limit(20)
+    )
+
+    stmt = stmt.where(Trades.executed_at >= since)
+    if instrument_id is not None:
+        stmt = stmt.where(Trades.instrument_id.like(f"%{instrument_id}%"))
+
+    result = await db_sess.execute(stmt)
+    return result.all()

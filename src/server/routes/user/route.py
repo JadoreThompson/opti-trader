@@ -7,7 +7,8 @@ from db_models import AssetBalances, Users
 from server.middleware import verify_jwt
 from server.typing import JWTPayload
 from server.utils.db import depends_db_session
-from .models import UserOverviewResponse
+from .controller import get_portfolio_history
+from .models import HistoryInterval, PortfolioHistory, UserOverviewResponse
 
 
 route = APIRouter(prefix="/user", tags=["user"])
@@ -26,7 +27,7 @@ async def get_user_overview(
     res = await db_sess.execute(
         select(AssetBalances.instrument_id, AssetBalances.balance)
         .where(AssetBalances.user_id == jwt_payload.sub)
-        .offset((page - 1) * 10)
+        .offset((page - 1) * PAGE_SIZE)
         .limit(PAGE_SIZE + 1)
     )
     asset_balances = res.all()
@@ -38,3 +39,13 @@ async def get_user_overview(
         cash_balance=user_balance,
         data={instrument: balance for instrument, balance in asset_balances},
     )
+
+
+@route.get("/history", response_model=list[PortfolioHistory])
+async def get_user_portfolio_history(
+    interval: HistoryInterval,
+    jwt: JWTPayload = Depends(verify_jwt),
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    history = await get_portfolio_history(interval, jwt.sub, 6, db_sess)
+    return history

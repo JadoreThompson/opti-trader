@@ -11,10 +11,10 @@ from server.models import PaginatedResponse
 from server.utils.db import depends_db_session
 from .controller import (
     calculate_24h_stats,
+    get_24h_stats_all,
     get_ohlc_data,
-    create_instrument as create_instrument_controller,
 )
-from .models import InstrumentCreate, OHLC, Stats24h
+from .models import InstrumentCreate, OHLC, InstrumentRead, Stats24h
 
 
 route = APIRouter(prefix="/instruments", tags=["instrument"])
@@ -81,7 +81,27 @@ async def get_recent_trades(
         size=min(PAGE_SIZE, len(trades)),
         has_next=len(trades) > PAGE_SIZE,
         data=[
-            TradeEvent(price=price, quantity=quantity, side=side, executed_at=executed_at)
+            TradeEvent(
+                price=price, quantity=quantity, side=side, executed_at=executed_at
+            )
             for price, quantity, executed_at, side in trades
         ],
     )
+
+
+@route.get("/")
+async def get_instruments(
+    instrument_id: str | None = None,
+    db_sess: AsyncSession = Depends(depends_db_session),
+):
+    res = await get_24h_stats_all(db_sess, instrument_id)
+
+    return [
+        InstrumentRead(
+            instrument_id=r.instrument_id,
+            volume=r.volume,
+            price=r.price,
+            h24_change=r.h24_change,
+        )
+        for r in res
+    ]

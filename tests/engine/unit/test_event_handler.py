@@ -39,6 +39,7 @@ def test_order_status_update_events(
         event_type=event_type.value,
         user_id=str(user.user_id),
         related_id=str(order.order_id),
+        instrument_id=test_instrument.instrument_id,
         details={"quantity": 5, "price": 10},
     )
 
@@ -69,6 +70,7 @@ def test_generic_log_events(
         event_type=event_type.value,
         user_id=str(user.user_id),
         related_id=str(order.order_id),
+        instrument_id=order.instrument_id,
         details={"reason": "A test reason"},
     )
 
@@ -99,6 +101,7 @@ def test_order_modified_event(
         event_type=EventType.ORDER_MODIFIED.value,
         user_id=str(user.user_id),
         related_id=str(order.order_id),
+        instrument_id=order.instrument_id,
         details={"price": new_price},
     )
 
@@ -135,6 +138,7 @@ def test_order_cancelled_bid_event(
         event_type=EventType.ORDER_CANCELLED.value,
         user_id=str(user.user_id),
         related_id=str(order.order_id),
+        instrument_id=order.instrument_id,
     )
 
     event_handler.process_event(db_session, event)
@@ -176,6 +180,7 @@ def test_order_cancelled_ask_event(
         event_type=EventType.ORDER_CANCELLED.value,
         user_id=str(user.user_id),
         related_id=str(order.order_id),
+        instrument_id=order.instrument_id,
     )
 
     event_handler.process_event(db_session, event)
@@ -222,6 +227,7 @@ def test_new_trade_buyer_event(
         event_type=EventType.NEW_TRADE.value,
         user_id=str(buyer.user_id),
         related_id=str(order.order_id),
+        instrument_id=order.instrument_id,
         details=trade_details,
     )
 
@@ -284,6 +290,7 @@ def test_new_trade_seller_event(
         event_type=EventType.NEW_TRADE.value,
         user_id=str(seller.user_id),
         related_id=str(order.order_id),
+        instrument_id=order.instrument_id,
         details=trade_details,
     )
     event_handler.process_event(db_session, event)

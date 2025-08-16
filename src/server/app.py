@@ -3,7 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from server.exc import JWTError
-from .routes import auth_route, instruments_route, orders_route, user_route
+from .routes import (
+    auth_route,
+    instruments_route,
+    orders_route,
+    user_route,
+)
 from .websockets.route import route as ws_route
 
 

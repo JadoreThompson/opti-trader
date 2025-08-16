@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, field_validator
 
 
 class InstrumentCreate(BaseModel):
@@ -14,6 +14,14 @@ class Stats24h(BaseModel):
     h24_high: float
     h24_low: float
 
+    @field_validator(
+        "price", "h24_volume", "h24_change", "h24_high", "h24_low", mode="after"
+    )
+    def round_two_decimals(cls, v):
+        if v is None:
+            return v
+        return round(float(v), 2)
+
 
 class OHLC(BaseModel):
     time: int
@@ -21,3 +29,14 @@ class OHLC(BaseModel):
     high: float
     low: float
     close: float
+
+
+class InstrumentRead(BaseModel):
+    instrument_id: str
+    volume: float
+    price: float
+    h24_change: float
+
+    @field_validator("volume", "price", "h24_change")
+    def round_values(cls, v):
+        return round(v, 2)

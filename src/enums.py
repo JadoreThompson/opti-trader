@@ -30,7 +30,7 @@ class LiquidityRole(Enum):
     TAKER = "TAKER"
 
 
-class EventType(Enum):
+class EventType(str, Enum):
     ORDER_PLACED = "order_placed"
     ORDER_PARTIALLY_FILLED = "order_partially_filled"
     ORDER_FILLED = "order_filled"
