@@ -92,7 +92,6 @@ async def get_orders(
     Retrieves a paginated list of orders for the authenticated user,
     with optional filtering.
     """
-    print(locals())
     query = select(Orders).where(Orders.user_id == jwt.sub)
 
     if instruments:

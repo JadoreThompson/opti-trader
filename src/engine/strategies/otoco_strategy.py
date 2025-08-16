@@ -82,11 +82,25 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
                     EventType.ORDER_PLACED,
                     user_id=child_a.user_id,
                     related_id=child_a.id,
+                    instrument_id=ctx.instrument_id,
+                    details={
+                        "executed_quantity": child_a.executed_quantity,
+                        "quantity": child_a.quantity,
+                        "price": child_a.price,
+                        "side": child_a.side,
+                    },
                 )
                 EventLogger.log_event(
                     EventType.ORDER_PLACED,
                     user_id=child_b.user_id,
                     related_id=child_b.id,
+                    instrument_id=ctx.instrument_id,
+                    details={
+                        "executed_quantity": child_b.executed_quantity,
+                        "quantity": child_b.quantity,
+                        "price": child_b.price,
+                        "side": child_b.side,
+                    },
                 )
                 return
 
@@ -95,6 +109,13 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
             EventType.ORDER_PLACED,
             user_id=parent_order.user_id,
             related_id=parent_order.id,
+            instrument_id=ctx.instrument_id,
+            details={
+                "executed_quantity": parent_order.executed_quantity,
+                "quantity": parent_order.quantity,
+                "price": parent_order.price,
+                "side": parent_order.side,
+            },
         )
 
     def handle_filled(
@@ -107,14 +128,32 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
             child.triggered = True
             ctx.orderbook.append(child, child.price)
             EventLogger.log_event(
-                EventType.ORDER_PLACED, user_id=child.user_id, related_id=child.id
+                EventType.ORDER_PLACED,
+                user_id=child.user_id,
+                related_id=child.id,
+                instrument_id=ctx.instrument_id,
+                details={
+                    "executed_quantity": child.executed_quantity,
+                    "quantity": child.quantity,
+                    "price": child.price,
+                    "side": child.side,
+                },
             )
 
             child = order.child_b
             child.triggered = True
             ctx.orderbook.append(child, child.price)
             EventLogger.log_event(
-                EventType.ORDER_PLACED, user_id=child.user_id, related_id=child.id
+                EventType.ORDER_PLACED,
+                user_id=child.user_id,
+                related_id=child.id,
+                instrument_id=ctx.instrument_id,
+                details={
+                    "executed_quantity": child.executed_quantity,
+                    "quantity": child.quantity,
+                    "price": child.price,
+                    "side": child.side,
+                },
             )
 
             ctx.order_store.remove(order)
@@ -130,6 +169,7 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
                 EventType.ORDER_CANCELLED,
                 user_id=counterparty.user_id,
                 related_id=counterparty.id,
+                instrument_id=ctx.instrument_id,
                 details=dumps({"reason": f"OCO peer {order.id} was filled."}),
             )
 
@@ -140,18 +180,23 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
             ctx.order_store.remove(order.child_a)
             ctx.order_store.remove(order.child_b)
             EventLogger.log_event(
-                EventType.ORDER_CANCELLED, user_id=order.user_id, related_id=order.id
+                EventType.ORDER_CANCELLED,
+                user_id=order.user_id,
+                related_id=order.id,
+                instrument_id=ctx.instrument_id,
             )
             EventLogger.log_event(
                 EventType.ORDER_CANCELLED,
                 user_id=order.child_a.user_id,
                 related_id=order.child_a.id,
+                instrument_id=ctx.instrument_id,
                 details=dumps({"reason": "Parent order cancelled."}),
             )
             EventLogger.log_event(
                 EventType.ORDER_CANCELLED,
                 user_id=order.child_b.user_id,
                 related_id=order.child_b.id,
+                instrument_id=ctx.instrument_id,
                 details=dumps({"reason": "Parent order cancelled."}),
             )
             return
@@ -178,11 +223,13 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
             EventType.ORDER_CANCELLED,
             user_id=order.user_id,
             related_id=order.id,
+            instrument_id=ctx.instrument_id,
         )
         EventLogger.log_event(
             EventType.ORDER_CANCELLED,
             user_id=counterparty.user_id,
             related_id=counterparty.id,
+            instrument_id=ctx.instrument_id,
         )
 
     def modify(self, details, order: OTOCOOrder, ctx: ExecutionContext):
@@ -194,5 +241,6 @@ class OTOCOStrategy(ModifyOrderMixin, StrategyProtocol):
                 EventType.ORDER_MODIFIED,
                 user_id=order.user_id,
                 related_id=order.id,
+                instrument_id=ctx.instrument_id,
                 details=dumps({"price": order.price}),
             )

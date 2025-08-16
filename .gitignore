@@ -7,3 +7,5 @@ uv.lock
 
 .env
 alembic.ini
+
+src/rec.py

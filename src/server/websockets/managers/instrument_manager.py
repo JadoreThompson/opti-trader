@@ -6,7 +6,7 @@ from fastapi import WebSocket
 
 from config import INSTRUMENT_EVENT_CHANNEL, REDIS_CLIENT_ASYNC
 from enums import InstrumentEventType
-from models import InstrumentEvent, OrderBookEvent, PriceEvent, TradeEvent
+from models import InstrumentEvent, OrderBookSnapshot, PriceEvent, TradeEvent
 
 
 class InstrumentManager:
@@ -41,16 +41,18 @@ class InstrumentManager:
                     self._is_running = True
                     continue
 
-                parsed_m = InstrumentEvent(**loads(m))
+                parsed_m = InstrumentEvent(**loads(m["data"]))
                 wsockets = self._channels.get(
                     (parsed_m.event_type, parsed_m.instrument_id)
                 )
-                asyncio.create_task(self._broadcast(parsed_m, wsockets))
+
+                if wsockets:
+                    asyncio.create_task(self._broadcast(parsed_m, wsockets))
 
     async def _broadcast(
         self,
-        event_data: PriceEvent | TradeEvent | OrderBookEvent,
+        event_data: PriceEvent | TradeEvent | OrderBookSnapshot,
         wsockets: Iterable[WebSocket],
     ):
         for ws in wsockets:
-            await ws.send_json(event_data.model_dump_json())
+            await ws.send_text(event_data.model_dump_json())

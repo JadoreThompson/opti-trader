@@ -43,10 +43,28 @@ class OCOStrategy(ModifyOrderMixin, StrategyProtocol):
         ctx.order_store.add(order_b)
 
         EventLogger.log_event(
-            EventType.ORDER_PLACED, user_id=order_a.user_id, related_id=order_a.id
+            EventType.ORDER_PLACED,
+            user_id=order_a.user_id,
+            related_id=order_a.id,
+            instrument_id=ctx.instrument_id,
+            details={
+                "executed_quantity": order_a.executed_quantity,
+                "quantity": order_a.quantity,
+                "price": order_a.price,
+                "side": order_a.side,
+            },
         )
         EventLogger.log_event(
-            EventType.ORDER_PLACED, user_id=order_b.user_id, related_id=order_b.id
+            EventType.ORDER_PLACED,
+            user_id=order_b.user_id,
+            related_id=order_b.id,
+            instrument_id=ctx.instrument_id,
+            details={
+                "executed_quantity": order_b.executed_quantity,
+                "quantity": order_b.quantity,
+                "price": order_b.price,
+                "side": order_b.side,
+            },
         )
 
     def handle_filled(
@@ -60,6 +78,7 @@ class OCOStrategy(ModifyOrderMixin, StrategyProtocol):
             EventType.ORDER_CANCELLED,
             user_id=order.user_id,
             related_id=order.counterparty.id,
+            instrument_id=ctx.instrument_id,
             details=dumps({"reason": f"OCO peer {order.id} was filled."}),
         )
 
@@ -69,12 +88,14 @@ class OCOStrategy(ModifyOrderMixin, StrategyProtocol):
             EventType.ORDER_CANCELLED,
             user_id=order.user_id,
             related_id=order.id,
+            instrument_id=ctx.instrument_id,
             details=dumps({"reason": "Client requested cancel."}),
         )
         EventLogger.log_event(
             EventType.ORDER_CANCELLED,
             user_id=order.user_id,
             related_id=order.counterparty.id,
+            instrument_id=ctx.instrument_id,
             details=dumps({"reason": "Client requested cancel."}),
         )
 

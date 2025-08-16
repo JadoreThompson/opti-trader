@@ -73,7 +73,6 @@ class BalanceManager:
 
         balance = float(balance) if balance is not None else 0.0
         escrow = float(escrow) if escrow is not None else 0.0
-        print(locals())
         return balance - escrow
 
     @classmethod

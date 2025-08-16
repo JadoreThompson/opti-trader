@@ -52,4 +52,5 @@ class Event(CustomBaseModel):
     event_type: EventType
     user_id: str
     related_id: str
+    instrument_id: str
     details: dict | None = None

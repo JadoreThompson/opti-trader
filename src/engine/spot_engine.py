@@ -229,8 +229,8 @@ class SpotEngine(EngineProtocol):
         taker_strategy.handle_filled(quantity, price, taker_order, ctx)
         maker_strategy.handle_filled(quantity, price, maker_order, ctx)
 
-        self._log_fill_event(taker_order, price)
-        self._log_fill_event(maker_order, price)
+        self._log_fill_event(taker_order, price, ctx.instrument_id)
+        self._log_fill_event(maker_order, price, ctx.instrument_id)
 
         if maker_order.executed_quantity == maker_order.quantity:
             ctx.orderbook.remove(maker_order, price)
@@ -239,6 +239,7 @@ class SpotEngine(EngineProtocol):
             EventType.NEW_TRADE,
             user_id=taker_order.user_id,
             related_id=taker_order.id,
+            instrument_id=ctx.instrument_id,
             details={
                 "quantity": quantity,
                 "price": price,
@@ -249,6 +250,7 @@ class SpotEngine(EngineProtocol):
             EventType.NEW_TRADE,
             user_id=maker_order.user_id,
             related_id=maker_order.id,
+            instrument_id=ctx.instrument_id,
             details={
                 "quantity": quantity,
                 "price": price,
@@ -256,7 +258,7 @@ class SpotEngine(EngineProtocol):
             },
         )
 
-    def _log_fill_event(self, order: Order, price: float) -> None:
+    def _log_fill_event(self, order: Order, price: float, instrument_id: str) -> None:
         ev_details = {
             "executed_quantity": order.executed_quantity,
             "quantity": order.quantity,
@@ -268,5 +270,9 @@ class SpotEngine(EngineProtocol):
             else EventType.ORDER_PARTIALLY_FILLED
         )
         EventLogger.log_event(
-            etype, user_id=order.user_id, related_id=order.id, details=ev_details
+            etype,
+            user_id=order.user_id,
+            related_id=order.id,
+            instrument_id=instrument_id,
+            details=ev_details,
         )

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -29,8 +30,8 @@ class EventHandler:
     def __init__(self) -> None:
         self.handlers = {
             EventType.ORDER_PLACED: self._handle_order_status_update,
-            EventType.ORDER_PARTIALLY_FILLED: self._handle_filled_event,
-            EventType.ORDER_FILLED: self._handle_filled_event,
+            EventType.ORDER_PARTIALLY_FILLED: self._handle_order_status_update,
+            EventType.ORDER_FILLED: self._handle_order_status_update,
             EventType.ORDER_CANCELLED: self._handle_order_cancelled,
             EventType.ORDER_MODIFIED: self._handle_order_modified,
             EventType.ORDER_MODIFY_REJECTED: self._handle_generic_log,
@@ -45,8 +46,6 @@ class EventHandler:
         handler = self.handlers.get(event.event_type)
         if not handler:
             return
-
-        print(event)
 
         try:
             db_event = Events(
@@ -65,9 +64,7 @@ class EventHandler:
             )
             session.rollback()
 
-        print("hi, doing my job here, ", event.event_type)
         if event.event_type != EventType.NEW_TRADE:
-            print("Event handler relayign to user")
             order = session.get(Orders, event.related_id)
             REDIS_CLIENT.publish(
                 ORDER_UPDATE_CHANNEL,
@@ -77,7 +74,6 @@ class EventHandler:
                     data=order.dump(),
                 ).model_dump_json(),
             )
-            print("Evnet handler relayed to channel")
 
     def _get_asset_balance(
         self, session: Session, user_id: UUID, instrument_id: str, event: Event
@@ -93,7 +89,7 @@ class EventHandler:
                 user_id=user_id,
                 instrument_id=instrument_id,
                 balance=event.details["quantity"],
-                escrow_balance=0
+                escrow_balance=0,
             )
             session.add(asset_balance)
 
@@ -111,15 +107,6 @@ class EventHandler:
         elif event.event_type == EventType.ORDER_FILLED:
             order.status = OrderStatus.FILLED.value
 
-        session.add(order)
-
-    def _handle_filled_event(self, event: Event, session: Session) -> None:
-        self._handle_order_status_update(event, session)
-        order = session.get(Orders, event.related_id)
-        if not order:
-            return
-
-        order.executed_quantity = event.details["executed_quantity"]
         session.add(order)
 
     def _handle_order_cancelled(self, event: Event, session: Session):
@@ -141,7 +128,7 @@ class EventHandler:
             return
 
         if order.side == Side.BID.value:
-            # Refund escrowed CASH for unfilled portion of a BUY order
+            # Refund escrowed CASH for unfilled portion of a BID order
             entry_price = self._get_entry_price(order)
             refund_amount = Decimal(str(entry_price)) * unfilled_qty
             user.escrow_balance = float(
@@ -160,7 +147,7 @@ class EventHandler:
 
         elif order.side == Side.ASK.value:
             asset_balance = self._get_asset_balance(
-                session, user.user_id, order.instrument_id
+                session, user.user_id, order.instrument_id, event
             )
             asset_balance.escrow_balance = float(
                 Decimal(str(asset_balance.escrow_balance)) - unfilled_qty
@@ -270,7 +257,7 @@ class EventHandler:
         session.add(user)
         session.add(new_transaction)
 
-        self._publish_instrument_events(event, order)
+        self._publish_instrument_events(event, order, new_trade.executed_at)
 
     def _get_entry_price(self, order: Orders) -> float:
         if order.order_type == OrderType.MARKET.value:
@@ -279,7 +266,9 @@ class EventHandler:
             return order.limit_price
         return order.stop_price
 
-    def _publish_instrument_events(self, event: Event, order: Orders) -> None:
+    def _publish_instrument_events(
+        self, event: Event, order: Orders, trade_executed: datetime
+    ) -> None:
         details = event.details
         if "price" not in details:
             return
@@ -291,17 +280,18 @@ class EventHandler:
         )
         REDIS_CLIENT.publish(INSTRUMENT_EVENT_CHANNEL, price_event.model_dump_json())
 
-        if "quantity":
+        if "quantity" in details:
             trade_event = InstrumentEvent(
                 event_type=InstrumentEventType.TRADES,
                 instrument_id=order.instrument_id,
                 data=TradeEvent(
                     price=details["price"],
                     quantity=details["quantity"],
-                    side=order.side.value,
-                    executed_at=details["executed_at"],
+                    side=order.side,
+                    executed_at=trade_executed,
                 ),
             )
+
             REDIS_CLIENT.publish(
                 INSTRUMENT_EVENT_CHANNEL, trade_event.model_dump_json()
             )

@@ -38,11 +38,11 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
             order.executed_quantity = result.quantity
 
             if result.outcome == MatchOutcome.UNAUTHORISED:
-                print("here")
                 EventLogger.log_event(
                     EventType.ORDER_CANCELLED,
                     user_id=order.user_id,
                     related_id=order.id,
+                    instrument_id=ctx.instrument_id,
                     details={"reason": "Insufficient funds"},
                 )
                 return
@@ -54,7 +54,11 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
         ctx.orderbook.append(order, order.price)
 
         EventLogger.log_event(
-            EventType.ORDER_PLACED, user_id=order.user_id, related_id=order.id
+            EventType.ORDER_PLACED,
+            user_id=order.user_id,
+            related_id=order.id,
+            instrument_id=ctx.instrument_id,
+            details={'executed_quantity': order.executed_quantity, "quantity": order.quantity, "price": order.price, "side": order.side}
         )
 
     def handle_filled(
@@ -70,6 +74,7 @@ class SingleOrderStrategy(ModifyOrderMixin, StrategyProtocol):
             EventType.ORDER_CANCELLED,
             user_id=order.user_id,
             related_id=order.id,
+            instrument_id=ctx.instrument_id,
             details={"reason": "Insufficient funds"},
         )
 

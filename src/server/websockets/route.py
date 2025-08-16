@@ -27,6 +27,9 @@ async def websocket_live_prices(instrument: str, ws: WebSocket):
     close_reason = None
 
     try:
+        if not instrument_manager.is_running:
+            asyncio.create_task(instrument_manager.listen())
+
         while True:
             m = await asyncio.wait_for(ws.receive_text(), timeout=HEARTBEAT_SECONDS)
             if m == "ping":
@@ -56,7 +59,7 @@ async def websocket_live_prices(instrument: str, ws: WebSocket):
 @route.websocket("/orders")
 async def websocket_orders(ws: WebSocket):
     global order_manager
-    
+
     await ws.accept()
     close_reason = None
     jwt = None
@@ -64,7 +67,7 @@ async def websocket_orders(ws: WebSocket):
     try:
         if not order_manager.is_running:
             asyncio.create_task(order_manager.listen())
-            
+
         token = await asyncio.wait_for(ws.receive_text(), timeout=HEARTBEAT_SECONDS)
         payload = decode_jwt_token(token)
         jwt = await validate_jwt_payload(payload)

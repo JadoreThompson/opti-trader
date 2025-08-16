@@ -37,8 +37,6 @@ class OrderManager:
                     self._is_running = True
                     continue
 
-                print("Received event, relaying")
-
                 parsed_m = OrderEvent(**loads(m["data"]))
 
                 if parsed_m.data['user_id'] in self._channels:

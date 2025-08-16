@@ -16,7 +16,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
         parent_data = details.parent
         child_data = details.child
 
-        parent_order = OTOOrder(
+        parent = OTOOrder(
             id_=parent_data["order_id"],
             user_id=parent_data["user_id"],
             strategy_type=StrategyType.OTO,
@@ -26,7 +26,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
             price=parent_data[get_price_key(parent_data["order_type"])],
         )
 
-        child_order = OTOOrder(
+        child = OTOOrder(
             id_=child_data["order_id"],
             user_id=child_data["user_id"],
             strategy_type=StrategyType.OTO,
@@ -34,46 +34,60 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
             side=child_data["side"],
             quantity=child_data["quantity"],
             price=child_data[get_price_key(child_data["order_type"])],
-            parent=parent_order,
+            parent=parent,
         )
 
-        parent_order.child = child_order
-        child_order.parent = parent_order
+        parent.child = child
+        child.parent = parent
 
         matchable = True
         if parent_data["order_type"] == OrderType.LIMIT:
             matchable = limit_crossable(
-                parent_data["limit_price"], parent_order.side, ctx.orderbook
+                parent_data["limit_price"], parent.side, ctx.orderbook
             )
         if parent_data["order_type"] == OrderType.STOP:
             matchable = stop_crossable(
-                parent_data["stop_price"], parent_order.side, ctx.orderbook
+                parent_data["stop_price"], parent.side, ctx.orderbook
             )
 
         if matchable:
-            result: MatchResult = ctx.engine.match(parent_order, ctx)
-            parent_order.executed_quantity = result.quantity
+            result: MatchResult = ctx.engine.match(parent, ctx)
+            parent.executed_quantity = result.quantity
 
             if result.outcome == MatchOutcome.UNAUTHORISED:
                 return
 
             if result.outcome == MatchOutcome.SUCCESS:
-                ctx.orderbook.append(child_order, child_order.price)
-                ctx.order_store.add(child_order)
+                ctx.orderbook.append(child, child.price)
+                ctx.order_store.add(child)
                 EventLogger.log_event(
                     EventType.ORDER_PLACED,
-                    user_id=child_order.user_id,
-                    related_id=child_order.id,
+                    user_id=child.user_id,
+                    related_id=child.id,
+                    instrument_id=ctx.instrument_id,
+                    details={
+                        "executed_quantity": child.executed_quantity,
+                        "quantity": child.quantity,
+                        "price": child.price,
+                        "side": child.side,
+                    },
                 )
                 return
 
-        ctx.orderbook.append(parent_order, parent_order.price)
-        ctx.order_store.add(parent_order)
-        ctx.order_store.add(child_order)
+        ctx.orderbook.append(parent, parent.price)
+        ctx.order_store.add(parent)
+        ctx.order_store.add(child)
         EventLogger.log_event(
             EventType.ORDER_PLACED,
-            user_id=parent_order.user_id,
-            related_id=parent_order.id,
+            user_id=parent.user_id,
+            related_id=parent.id,
+            instrument_id=ctx.instrument_id,
+            details={
+                "executed_quantity": parent.executed_quantity,
+                "quantity": parent.quantity,
+                "price": parent.price,
+                "side": parent.side,
+            },
         )
 
     def handle_filled(
@@ -81,14 +95,21 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
     ) -> None:
         # Parent
         if order.child and order.executed_quantity == order.quantity:
-            child_order = order.child
-            child_order.triggered = True
-            ctx.orderbook.append(child_order, child_order.price)
+            child = order.child
+            child.triggered = True
+            ctx.orderbook.append(child, child.price)
             ctx.order_store.remove(order)
             EventLogger.log_event(
                 EventType.ORDER_PLACED,
-                user_id=child_order.user_id,
-                related_id=child_order.id,
+                user_id=child.user_id,
+                related_id=child.id,
+                instrument_id=ctx.instrument_id,
+                details={
+                    "executed_quantity": child.executed_quantity,
+                    "quantity": child.quantity,
+                    "price": child.price,
+                    "side": child.side,
+                },
             )
         elif order.executed_quantity == order.quantity:  # Child
             ctx.orderbook.remove(order, order.price)
@@ -100,12 +121,16 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
             ctx.order_store.remove(order.child)
 
             EventLogger.log_event(
-                EventType.ORDER_CANCELLED, user_id=order.user_id, related_id=order.id
+                EventType.ORDER_CANCELLED,
+                user_id=order.user_id,
+                related_id=order.id,
+                instrument_id=ctx.instrument_id,
             )
             EventLogger.log_event(
                 EventType.ORDER_CANCELLED,
                 user_id=order.child.user_id,
                 related_id=order.child.id,
+                instrument_id=ctx.instrument_id,
                 details=dumps({"reason": "Parent order cancelled."}),
             )
         elif order.parent:
@@ -115,6 +140,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
                     EventType.ORDER_CANCELLED,
                     user_id=order.user_id,
                     related_id=order.id,
+                    instrument_id=ctx.instrument_id,
                 )
             else:
                 parent = order.parent
@@ -124,11 +150,13 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
                     EventType.ORDER_CANCELLED,
                     user_id=parent.user_id,
                     related_id=parent.id,
+                    instrument_id=ctx.instrument_id,
                 )
                 EventLogger.log_event(
                     EventType.ORDER_CANCELLED,
                     user_id=order.user_id,
                     related_id=order.id,
+                    instrument_id=ctx.instrument_id,
                     details=dumps({"reason": "Parent order cancelled."}),
                 )
 
@@ -146,6 +174,7 @@ class OTOStrategy(ModifyOrderMixin, StrategyProtocol):
                     EventType.ORDER_MODIFIED,
                     user_id=order.user_id,
                     related_id=order.id,
+                    instrument_id=ctx.instrument_id,
                     details=dumps({"price": order.price}),
                 )
             return

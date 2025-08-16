@@ -36,7 +36,7 @@ class TradeEvent(BaseModel):
     executed_at: datetime
 
 
-class OrderBookEvent(BaseModel):
+class OrderBookSnapshot(BaseModel):
     # { price: quantity }
     bids: dict[float, float]
     asks: dict[float, float]
@@ -44,17 +44,8 @@ class OrderBookEvent(BaseModel):
 
 class OrderEvent(CustomBaseModel):
     """Event emitted on a fill, place, cancel of an order."""
+
     event_type: EventType
     available_balance: float
     data: dict[str, Any]  # order dictionary
 
-
-# class OrderUpdate(BaseModel):
-#     """
-#     Represents an update to an order, extending the base order dictionary
-#     with an `event_type` field. Additional unexpected fields are allowed
-#     for flexibility in handling varied update payloads.
-#     """
-
-#     event_type: EventType
-#     model_config = {"extra": "allow"}
