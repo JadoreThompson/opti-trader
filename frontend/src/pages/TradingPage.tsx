@@ -1,7 +1,7 @@
-import AssetHoldings from "@/components/asset-holdings";
+import OrderBook from "@/components/orderbook";
 import type { FC } from "react";
 
 const TradingPage: FC = () => {
-    return <AssetHoldings />;
+    return <OrderBook />;
 };
 export default TradingPage;
