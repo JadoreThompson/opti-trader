@@ -1,7 +1,7 @@
-import ActivityLog from "@/components/activity-log";
+import AssetHoldings from "@/components/asset-holdings";
 import type { FC } from "react";
 
 const TradingPage: FC = () => {
-    return <ActivityLog />;
+    return <AssetHoldings />;
 };
 export default TradingPage;
